@@ -98,6 +98,19 @@ Default export names:
 - `@digitalarsenal/sdn-flow/transport`
 - `@digitalarsenal/sdn-flow/deploy`
 
+## Documentation
+
+- [Architecture](./docs/ARCHITECTURE.md)
+- [Plugin Architecture](./docs/PLUGIN_ARCHITECTURE.md)
+- [Plugin Manifest](./docs/PLUGIN_MANIFEST.md)
+- [Compatibility Model](./docs/PLUGIN_COMPATIBILITY.md)
+
+## Examples
+
+- [Basic Propagator Plugin](./examples/plugins/basic-propagator/README.md)
+- [Basic Sensor Plugin](./examples/plugins/basic-sensor/README.md)
+- [Single-Plugin Flow](./examples/flows/single-plugin-flow.json)
+
 ## Status
 
 The current repo contains the portable runtime, designer controller,

@@ -1,0 +1,52 @@
+{
+  "pluginId": "com.digitalarsenal.examples.basic-sensor",
+  "name": "Basic Sensor",
+  "version": "0.1.0",
+  "pluginFamily": "sensor",
+  "methods": [
+    {
+      "methodId": "detect",
+      "displayName": "Detect",
+      "inputPorts": [
+        {
+          "portId": "target",
+          "acceptedTypeSets": [
+            {
+              "setId": "sensor-input",
+              "allowedTypes": [
+                {
+                  "schemaName": "SensorInput.fbs",
+                  "fileIdentifier": "SENS"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 64,
+          "required": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portId": "detection",
+          "acceptedTypeSets": [
+            {
+              "setId": "sensor-result",
+              "allowedTypes": [
+                {
+                  "schemaName": "SensorResult.fbs",
+                  "fileIdentifier": "SRES"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 1,
+          "required": true
+        }
+      ],
+      "maxBatch": 64,
+      "drainPolicy": "drain-until-yield"
+    }
+  ]
+}

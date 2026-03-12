@@ -1,0 +1,52 @@
+{
+  "pluginId": "com.digitalarsenal.examples.basic-propagator",
+  "name": "Basic Propagator",
+  "version": "0.1.0",
+  "pluginFamily": "propagator",
+  "methods": [
+    {
+      "methodId": "propagate",
+      "displayName": "Propagate",
+      "inputPorts": [
+        {
+          "portId": "request",
+          "acceptedTypeSets": [
+            {
+              "setId": "state-request",
+              "allowedTypes": [
+                {
+                  "schemaName": "StateRequest.fbs",
+                  "fileIdentifier": "SREQ"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 8,
+          "required": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portId": "state",
+          "acceptedTypeSets": [
+            {
+              "setId": "state-vector",
+              "allowedTypes": [
+                {
+                  "schemaName": "StateVector.fbs",
+                  "fileIdentifier": "STVC"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 1,
+          "required": true
+        }
+      ],
+      "maxBatch": 32,
+      "drainPolicy": "drain-to-empty"
+    }
+  ]
+}

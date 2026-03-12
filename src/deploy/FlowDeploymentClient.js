@@ -39,6 +39,18 @@ function normalizeManifestExports(exports = {}) {
 }
 
 export async function normalizeCompiledArtifact(artifact = {}) {
+  if (artifact.wasm === undefined || artifact.wasm === null) {
+    throw new Error("Compiled flow artifact must include wasm bytes.");
+  }
+  if (
+    artifact.manifestBuffer === undefined &&
+    artifact.manifest_buffer === undefined
+  ) {
+    throw new Error(
+      "Compiled flow artifact must include an embedded FlatBuffer manifest.",
+    );
+  }
+
   const wasm = toUint8Array(artifact.wasm);
   const manifestBuffer = toUint8Array(
     artifact.manifestBuffer ?? artifact.manifest_buffer,

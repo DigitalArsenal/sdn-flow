@@ -1,0 +1,35 @@
+{
+  "programId": "com.digitalarsenal.examples.single-plugin-flow",
+  "name": "Single Plugin Flow",
+  "version": "0.1.0",
+  "nodes": [
+    {
+      "nodeId": "processor",
+      "pluginId": "com.digitalarsenal.examples.basic-propagator",
+      "methodId": "propagate",
+      "kind": "transform",
+      "drainPolicy": "drain-to-empty"
+    }
+  ],
+  "edges": [],
+  "triggers": [
+    {
+      "triggerId": "manual-request",
+      "kind": "manual",
+      "source": "user"
+    }
+  ],
+  "triggerBindings": [
+    {
+      "triggerId": "manual-request",
+      "targetNodeId": "processor",
+      "targetPortId": "request",
+      "backpressurePolicy": "queue",
+      "queueDepth": 16
+    }
+  ],
+  "requiredPlugins": [
+    "com.digitalarsenal.examples.basic-propagator"
+  ],
+  "description": "A single plugin represented as a one-node flow."
+}
