@@ -1,52 +1,52 @@
 # sdn-flow
 
-`@digitalarsenal/sdn-flow` is the standalone flow package for OrbPro and Space
-Data Network.
+`@digitalarsenal/sdn-flow` is a standalone flow-runtime and deployment toolkit
+for schema-driven WASM systems.
 
-It is deliberately not a monorepo-internal runtime. The intended model is:
+It provides the portable pieces needed to:
 
-- Author flows locally in UI code against this package.
-- Treat a single plugin as the degenerate case of a flow.
-- Compile every deployable flow into one executable WASM runtime artifact.
-- Embed the flow manifest as FlatBuffer bytes and expose callable manifest
-  export symbols in every deployable artifact.
-- Sign deployment authorization with SDN HD wallet keys.
-- Optionally encrypt the deployment package in transit with PKI.
-- Deploy the compiled WASM artifact locally or to a remote SDN/OrbPro host.
+- model work as typed flow graphs
+- treat a single plugin as a valid one-node flow
+- execute flows locally in an isomorphic runtime
+- compile deployable flows into one WASM runtime artifact
+- require embedded FlatBuffer manifests in plugins and compiled flows
+- authorize deployment with HD-wallet signatures
+- encrypt deployment payloads in transit with PKI
 
-## Scope
+## Core Model
 
-This package provides:
-
-- an isomorphic flow runtime for authoring, testing, and host-side execution
-- a UI-facing designer session API
-- deployment authorization helpers for HD-wallet-signature workflows
-- PKI transport helpers for encrypted deployment payloads
-- a deployment client that moves compiled single-WASM flow artifacts
-
-This package does not embed OrbPro schemas or compile WASM itself. A host repo
-provides the compiler adapter, typically backed by `emception`.
-
-## Design Rules
+The project is built around a small set of hard rules:
 
 - Deployment is always a compiled WASM runtime artifact, never a raw graph.
-- A single plugin is a valid one-node flow.
+- A single plugin is just a degenerate flow, not a separate deployment path.
+- Every deployable artifact must embed a FlatBuffer manifest and expose
+  callable manifest export symbols.
 - Local and remote deployment use the same signed artifact envelope.
-- Remote deployment may encrypt transport, but encryption is not the artifact.
-- UI code consumes controllers and contracts here; it should not own protocol
-  rules, signature formats, or deployment envelope logic.
+- Transport encryption protects the deployment package, not the runtime model.
 
-## Package Surface
+## What The Package Provides
 
-- `@digitalarsenal/sdn-flow/runtime`
-- `@digitalarsenal/sdn-flow/designer`
-- `@digitalarsenal/sdn-flow/auth`
-- `@digitalarsenal/sdn-flow/transport`
-- `@digitalarsenal/sdn-flow/deploy`
+- `runtime`: normalized manifests, method registry, queueing, and flow
+  execution
+- `designer`: UI-facing flow session and single-plugin flow creation helpers
+- `auth`: canonical deployment authorization payloads and HD-wallet signature
+  helpers
+- `transport`: PKI-based encrypted transport envelopes
+- `deploy`: compiled artifact normalization and local/remote deployment client
 
-## Compiler Boundary
+## What The Package Does Not Do
 
-The package expects a compiler adapter with this shape:
+- It does not define your host-specific schemas.
+- It does not compile WASM by itself.
+- It does not assume a specific host application or server runtime.
+- It does not ship host adapters for installation, persistence, or execution.
+
+Those pieces are intentionally left to the host that consumes this package.
+
+## Compiler Contract
+
+`sdn-flow` expects a compiler adapter that turns a validated flow program into a
+deployable artifact:
 
 ```js
 const artifact = await compiler.compile({
@@ -56,22 +56,49 @@ const artifact = await compiler.compile({
 });
 ```
 
-The returned artifact must include the compiled WASM bytes and deployment
-metadata, including the embedded FlatBuffer manifest bytes and callable manifest
-symbols. The deploy client will only ship that artifact, not the source graph.
+The artifact must include:
 
-## Local vs Remote Deploy
+- compiled WASM bytes
+- embedded FlatBuffer manifest bytes
+- callable manifest export symbol names
+- graph and manifest identity metadata
 
-Both modes use the same deployment payload:
+The deploy client only ships the compiled artifact. It does not deploy the raw
+source graph.
 
-1. Compile the flow to one WASM runtime artifact.
-2. Create a signed deployment authorization envelope.
-3. Wrap the artifact and authorization in a deployment package.
-4. Optionally encrypt the package for the remote recipient.
-5. Send it to a local adapter or remote HTTP endpoint.
+## Deployment Flow
+
+The package uses one deployment model for both local and remote targets:
+
+1. Build or load the flow program.
+2. Compile it into one WASM runtime artifact.
+3. Create a deployment authorization envelope.
+4. Sign the authorization with an HD-wallet key.
+5. Optionally encrypt the deployment package for the recipient.
+6. Send the compiled artifact package to the target.
+
+## Manifest Rule
+
+Every plugin and every compiled flow artifact must embed a FlatBuffer manifest
+buffer and expose callable exports for it.
+
+Default export names:
+
+- `plugin_get_manifest_flatbuffer`
+- `plugin_get_manifest_flatbuffer_size`
+- `flow_get_manifest_flatbuffer`
+- `flow_get_manifest_flatbuffer_size`
+
+## Package Surface
+
+- `@digitalarsenal/sdn-flow`
+- `@digitalarsenal/sdn-flow/runtime`
+- `@digitalarsenal/sdn-flow/designer`
+- `@digitalarsenal/sdn-flow/auth`
+- `@digitalarsenal/sdn-flow/transport`
+- `@digitalarsenal/sdn-flow/deploy`
 
 ## Status
 
-This repo currently contains the portable runtime, authorization, transport, and
-deployment scaffolding. Host-specific OrbPro and SDN adapters belong in their
-respective repos.
+The current repo contains the portable runtime, designer controller,
+authorization helpers, transport encryption helpers, and deployment client.

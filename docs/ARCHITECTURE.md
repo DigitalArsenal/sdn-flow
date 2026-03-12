@@ -9,8 +9,8 @@
 - deployment authorization
 - deployment transport
 
-It is intentionally separate from OrbPro and SDN host repos so both can consume
-the same contracts.
+It is intentionally host-agnostic so different applications and runtimes can
+consume the same contracts.
 
 ## Core Rule
 
