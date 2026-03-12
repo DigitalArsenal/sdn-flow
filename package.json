@@ -1,0 +1,44 @@
+{
+  "name": "@digitalarsenal/sdn-flow",
+  "version": "0.1.0",
+  "description": "Isomorphic flow authoring, runtime, authorization, and deployment tooling for OrbPro and Space Data Network.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.js",
+    "./runtime": "./src/runtime/index.js",
+    "./designer": "./src/designer/index.js",
+    "./auth": "./src/auth/index.js",
+    "./transport": "./src/transport/index.js",
+    "./deploy": "./src/deploy/index.js"
+  },
+  "files": [
+    "src/",
+    "docs/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test"
+  },
+  "keywords": [
+    "flow",
+    "wasm",
+    "orbpro",
+    "sdn",
+    "space-data-network",
+    "orchestration"
+  ],
+  "author": {
+    "name": "DigitalArsenal.io, Inc.",
+    "url": "https://digitalarsenal.io"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/DigitalArsenal/sdn-flow.git"
+  },
+  "homepage": "https://github.com/DigitalArsenal/sdn-flow",
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

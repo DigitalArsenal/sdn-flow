@@ -1,0 +1,238 @@
+import {
+  assertDeploymentAuthorization,
+  createDeploymentAuthorization,
+  signAuthorization,
+} from "../auth/index.js";
+import { DefaultManifestExports } from "../runtime/constants.js";
+import { encryptJsonForRecipient } from "../transport/index.js";
+import { bytesToBase64, bytesToHex, toUint8Array } from "../utils/encoding.js";
+import { sha256Bytes } from "../utils/crypto.js";
+
+function serializeTarget(target = null) {
+  if (typeof target === "string") {
+    return {
+      kind: "remote",
+      id: null,
+      audience: null,
+      url: target,
+    };
+  }
+  return {
+    kind: target?.kind ?? "remote",
+    id: target?.id ?? target?.targetId ?? null,
+    audience: target?.audience ?? null,
+    url: target?.url ?? null,
+  };
+}
+
+function normalizeManifestExports(exports = {}) {
+  return {
+    bytesSymbol:
+      exports.bytesSymbol ??
+      exports.bytes_symbol ??
+      DefaultManifestExports.flowBytesSymbol,
+    sizeSymbol:
+      exports.sizeSymbol ??
+      exports.size_symbol ??
+      DefaultManifestExports.flowSizeSymbol,
+  };
+}
+
+export async function normalizeCompiledArtifact(artifact = {}) {
+  const wasm = toUint8Array(artifact.wasm);
+  const manifestBuffer = toUint8Array(
+    artifact.manifestBuffer ?? artifact.manifest_buffer,
+  );
+  if (wasm.length === 0) {
+    throw new Error("Compiled flow artifact must include wasm bytes.");
+  }
+  if (manifestBuffer.length === 0) {
+    throw new Error(
+      "Compiled flow artifact must include an embedded FlatBuffer manifest.",
+    );
+  }
+
+  const graphHash =
+    artifact.graphHash ??
+    bytesToHex(await sha256Bytes(wasm));
+  const manifestHash =
+    artifact.manifestHash ??
+    bytesToHex(await sha256Bytes(manifestBuffer));
+
+  return {
+    artifactId:
+      artifact.artifactId ??
+      `${artifact.programId ?? "flow"}:${String(graphHash).slice(0, 16)}`,
+    programId: String(artifact.programId ?? "").trim(),
+    format: artifact.format ?? "application/wasm",
+    wasm,
+    manifestBuffer,
+    manifestExports: normalizeManifestExports(
+      artifact.manifestExports ?? artifact.manifest_exports,
+    ),
+    entrypoint: artifact.entrypoint ?? "_start",
+    graphHash,
+    manifestHash,
+    requiredCapabilities: Array.isArray(artifact.requiredCapabilities)
+      ? artifact.requiredCapabilities.map((value) => String(value))
+      : [],
+    pluginVersions: Array.isArray(artifact.pluginVersions)
+      ? artifact.pluginVersions
+      : [],
+    schemaBindings: Array.isArray(artifact.schemaBindings)
+      ? artifact.schemaBindings
+      : [],
+    abiVersion: Number(artifact.abiVersion ?? artifact.abi_version ?? 1),
+  };
+}
+
+export function serializeCompiledArtifact(artifact) {
+  return {
+    artifactId: artifact.artifactId,
+    programId: artifact.programId,
+    format: artifact.format,
+    wasmBase64: bytesToBase64(artifact.wasm),
+    manifestBase64: bytesToBase64(artifact.manifestBuffer),
+    manifestExports: artifact.manifestExports,
+    entrypoint: artifact.entrypoint,
+    graphHash: artifact.graphHash,
+    manifestHash: artifact.manifestHash,
+    requiredCapabilities: artifact.requiredCapabilities,
+    pluginVersions: artifact.pluginVersions,
+    schemaBindings: artifact.schemaBindings,
+    abiVersion: artifact.abiVersion,
+  };
+}
+
+export class FlowDeploymentClient {
+  #fetch;
+
+  #now;
+
+  constructor(options = {}) {
+    this.#fetch = options.fetchImpl ?? globalThis.fetch ?? null;
+    this.#now = options.now ?? (() => Date.now());
+  }
+
+  async prepareDeployment({
+    artifact,
+    target,
+    signer = null,
+    requiredCapabilities = null,
+    recipientPublicKey = null,
+    authorization = null,
+    encrypt = undefined,
+  } = {}) {
+    const normalizedArtifact = await normalizeCompiledArtifact(artifact);
+    const targetDescriptor = serializeTarget(target);
+    const capabilities =
+      requiredCapabilities ?? normalizedArtifact.requiredCapabilities;
+    const authorizationPayload =
+      authorization ??
+      createDeploymentAuthorization({
+        artifact: normalizedArtifact,
+        target: targetDescriptor,
+        capabilities,
+        issuedAt: this.#now(),
+      });
+    const signedAuthorization = signer
+      ? await signAuthorization({
+          authorization: authorizationPayload,
+          signer,
+        })
+      : null;
+
+    if (signedAuthorization) {
+      assertDeploymentAuthorization({
+        envelope: signedAuthorization,
+        artifact: normalizedArtifact,
+        target: targetDescriptor,
+        requiredCapabilities: capabilities,
+        now: this.#now(),
+      });
+    }
+
+    const payload = {
+      version: 1,
+      kind: "compiled-flow-wasm-deployment",
+      artifact: serializeCompiledArtifact(normalizedArtifact),
+      authorization: signedAuthorization,
+      target: targetDescriptor,
+    };
+
+    const shouldEncrypt =
+      encrypt ?? Boolean(recipientPublicKey ?? target?.recipientPublicKey);
+    if (shouldEncrypt) {
+      return {
+        version: 1,
+        encrypted: true,
+        envelope: await encryptJsonForRecipient({
+          payload,
+          recipientPublicKey:
+            recipientPublicKey ?? target?.recipientPublicKey,
+          context: `sdn-flow/deploy:${normalizedArtifact.programId}`,
+        }),
+      };
+    }
+
+    return {
+      version: 1,
+      encrypted: false,
+      payload,
+    };
+  }
+
+  async deployLocal({ target, deployment }) {
+    if (!target || typeof target.deploy !== "function") {
+      throw new Error("Local deployment target must expose deploy().");
+    }
+    return target.deploy(deployment);
+  }
+
+  async deployRemote({ target, deployment }) {
+    if (!this.#fetch) {
+      throw new Error("Remote deployment requires fetch.");
+    }
+    const url = typeof target === "string" ? target : target?.url;
+    if (!url) {
+      throw new Error("Remote deployment target must define url.");
+    }
+    const response = await this.#fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(target?.headers ?? {}),
+      },
+      body: JSON.stringify(deployment),
+    });
+
+    const contentType = response.headers.get("content-type") ?? "";
+    if (!response.ok) {
+      const errorBody = contentType.includes("application/json")
+        ? await response.json()
+        : await response.text();
+      throw new Error(
+        `Remote deployment failed (${response.status}): ${JSON.stringify(errorBody)}`,
+      );
+    }
+    return contentType.includes("application/json")
+      ? response.json()
+      : response.text();
+  }
+
+  async deploy(options = {}) {
+    const deployment = await this.prepareDeployment(options);
+    if (options.target?.kind === "local" || typeof options.target?.deploy === "function") {
+      return this.deployLocal({
+        target: options.target,
+        deployment,
+      });
+    }
+    return this.deployRemote({
+      target: options.target,
+      deployment,
+    });
+  }
+}
+
+export default FlowDeploymentClient;
