@@ -8,7 +8,10 @@ It provides the portable pieces needed to:
 - model work as typed flow graphs
 - treat a single plugin as a valid one-node flow
 - execute flows locally in an isomorphic runtime
+- summarize external inputs, outputs, and capabilities for visual editors
 - compile deployable flows into one WASM runtime artifact
+- compile from one generated C++ source file through `../emception`
+- consume signed plugin WASM artifacts as build dependencies instead of plugin source
 - require embedded FlatBuffer manifests in plugins and compiled flows
 - authorize deployment with HD-wallet signatures
 - encrypt deployment payloads in transit with PKI
@@ -28,11 +31,14 @@ The project is built around a small set of hard rules:
 
 - `runtime`: normalized manifests, method registry, queueing, and flow
   execution
-- `designer`: UI-facing flow session and single-plugin flow creation helpers
+- `designer`: UI-facing flow session, single-plugin flow creation helpers, and
+  external-requirement summaries
 - `auth`: canonical deployment authorization payloads and HD-wallet signature
   helpers
 - `transport`: PKI-based encrypted transport envelopes
 - `deploy`: compiled artifact normalization and local/remote deployment client
+- `compiler`: signed-artifact catalog, generated C++ source, and `emception`
+  compiler adapter
 
 ## What The Package Does Not Do
 
@@ -46,13 +52,19 @@ Those pieces are intentionally left to the host that consumes this package.
 ## Compiler Contract
 
 `sdn-flow` expects a compiler adapter that turns a validated flow program into a
-deployable artifact:
+deployable artifact. The built-in `EmceptionCompilerAdapter` generates one C++
+translation unit that embeds the flow manifest bytes and the signed plugin
+artifact bytes, then hands that source to an `emception`-compatible compiler:
 
 ```js
+const compiler = new EmceptionCompilerAdapter({
+  emception,
+  artifactCatalog,
+  manifestBuilder,
+});
+
 const artifact = await compiler.compile({
   program,
-  target,
-  metadata,
 });
 ```
 
@@ -65,6 +77,24 @@ The artifact must include:
 
 The deploy client only ships the compiled artifact. It does not deploy the raw
 source graph.
+
+## Visual Editor Contract
+
+The designer session can also summarize everything a flow needs from the host:
+
+```js
+const summary = session.inspectRequirements({
+  manifests,
+  registry,
+});
+```
+
+That summary includes:
+
+- external inputs and outputs
+- required capabilities
+- signed artifact dependencies
+- resolved plugin manifests when available
 
 ## Deployment Flow
 
@@ -97,6 +127,7 @@ Default export names:
 - `@digitalarsenal/sdn-flow/auth`
 - `@digitalarsenal/sdn-flow/transport`
 - `@digitalarsenal/sdn-flow/deploy`
+- `@digitalarsenal/sdn-flow/compiler`
 
 ## Documentation
 
@@ -110,8 +141,10 @@ Default export names:
 - [Basic Propagator Plugin](./examples/plugins/basic-propagator/README.md)
 - [Basic Sensor Plugin](./examples/plugins/basic-sensor/README.md)
 - [Single-Plugin Flow](./examples/flows/single-plugin-flow.json)
+- [ISS Proximity OEM Flow](./examples/flows/iss-proximity-oem/README.md)
 
 ## Status
 
 The current repo contains the portable runtime, designer controller,
-authorization helpers, transport encryption helpers, and deployment client.
+authorization helpers, transport encryption helpers, deployment client, and a
+portable `emception` compiler adapter for single-bundle flow builds.

@@ -1,0 +1,52 @@
+{
+  "pluginId": "com.digitalarsenal.oem.generator",
+  "name": "OEM Generator",
+  "version": "1.0.0",
+  "pluginFamily": "analysis",
+  "methods": [
+    {
+      "methodId": "generate_oem",
+      "displayName": "Generate OEM",
+      "inputPorts": [
+        {
+          "portId": "samples",
+          "acceptedTypeSets": [
+            {
+              "setId": "orbit-samples",
+              "allowedTypes": [
+                {
+                  "schemaName": "SampledOrbit.fbs",
+                  "fileIdentifier": "SAMP"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 8,
+          "required": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portId": "oems",
+          "acceptedTypeSets": [
+            {
+              "setId": "oem",
+              "allowedTypes": [
+                {
+                  "schemaName": "OEM.fbs",
+                  "fileIdentifier": "OEM "
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 8,
+          "required": true
+        }
+      ],
+      "maxBatch": 64,
+      "drainPolicy": "drain-until-yield"
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "pluginId": "com.digitalarsenal.oem.file-writer",
+  "name": "OEM File Writer",
+  "version": "1.0.0",
+  "pluginFamily": "sink",
+  "capabilities": [
+    "storage_write"
+  ],
+  "externalInterfaces": [
+    {
+      "interfaceId": "oem-output-directory",
+      "kind": "filesystem",
+      "direction": "output",
+      "capability": "storage_write",
+      "path": "/var/tmp/sdn-flow/oem",
+      "resource": "file:///var/tmp/sdn-flow/oem",
+      "description": "Writes generated OEMs to the local filesystem."
+    }
+  ],
+  "methods": [
+    {
+      "methodId": "write_oem_files",
+      "displayName": "Write OEM Files",
+      "inputPorts": [
+        {
+          "portId": "oems",
+          "acceptedTypeSets": [
+            {
+              "setId": "oem",
+              "allowedTypes": [
+                {
+                  "schemaName": "OEM.fbs",
+                  "fileIdentifier": "OEM "
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 8,
+          "required": true
+        }
+      ],
+      "outputPorts": [],
+      "maxBatch": 64,
+      "drainPolicy": "drain-until-yield"
+    }
+  ]
+}

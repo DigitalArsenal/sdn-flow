@@ -1,0 +1,48 @@
+{
+  "pluginId": "com.digitalarsenal.oem.publisher",
+  "name": "OEM Publisher",
+  "version": "1.0.0",
+  "pluginFamily": "publisher",
+  "capabilities": [
+    "pubsub"
+  ],
+  "externalInterfaces": [
+    {
+      "interfaceId": "oem-pubsub",
+      "kind": "pubsub",
+      "direction": "output",
+      "capability": "pubsub",
+      "topic": "/sdn/oem/iss-proximity",
+      "resource": "/sdn/oem/iss-proximity",
+      "description": "Publishes generated OEMs back onto the SDN pubsub fabric."
+    }
+  ],
+  "methods": [
+    {
+      "methodId": "publish_oem",
+      "displayName": "Publish OEM",
+      "inputPorts": [
+        {
+          "portId": "oems",
+          "acceptedTypeSets": [
+            {
+              "setId": "oem",
+              "allowedTypes": [
+                {
+                  "schemaName": "OEM.fbs",
+                  "fileIdentifier": "OEM "
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 8,
+          "required": true
+        }
+      ],
+      "outputPorts": [],
+      "maxBatch": 64,
+      "drainPolicy": "drain-until-yield"
+    }
+  ]
+}

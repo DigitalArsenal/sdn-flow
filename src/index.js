@@ -3,3 +3,4 @@ export * from "./designer/index.js";
 export * from "./auth/index.js";
 export * from "./transport/index.js";
 export * from "./deploy/index.js";
+export * from "./compiler/index.js";

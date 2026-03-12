@@ -6,6 +6,8 @@
 
 - UI flow authoring
 - host-side runtime execution
+- signed artifact dependency resolution
+- generated C++ bundle compilation
 - deployment authorization
 - deployment transport
 
@@ -40,9 +42,19 @@ The runtime executes normalized manifest/program objects:
 The designer layer is UI-facing but DOM-free. It owns:
 
 - graph mutation helpers
+- external input/output and capability summaries for visual editors
 - single-plugin flow creation
 - compile orchestration through an injected compiler adapter
 - deployment orchestration through an injected deployment client
+
+### Compiler
+
+The compiler layer owns:
+
+- signed artifact catalog resolution
+- single-source C++ bundle generation
+- `emception`-compatible compile planning
+- artifact assembly back into the deploy contract
 
 ### Authorization
 
@@ -88,11 +100,39 @@ A compiled flow artifact contains:
 - `schemaBindings`
 - `abiVersion`
 
+The compile plan that produces that artifact may also include:
+
+- generated `main.cpp`
+- signed plugin artifact dependency descriptors
+- signed plugin manifest bytes
+- the exact `em++` command issued to `emception`
+
+## Editor And Capability Model
+
+Programs may declare:
+
+- `externalInterfaces`
+- `artifactDependencies`
+- `editor` layout metadata
+
+Plugin manifests may declare:
+
+- `capabilities`
+- `externalInterfaces`
+
+The designer layer can merge those declarations with trigger bindings and
+resolved plugin manifests so the operator can see:
+
+- which network, timer, protocol, filesystem, and database bindings are needed
+- which capabilities must be approved and signed
+- which signed plugin artifacts must exist before compilation
+
 ## Host Integration
 
 Hosts are expected to provide adapters for:
 
 - graph validation against host capabilities
+- manifest building into canonical FlatBuffer bytes
 - compilation via `emception` or equivalent
 - local deployment/install
 - remote deployment endpoint verification and installation
@@ -112,3 +152,16 @@ The default plugin export names are:
 
 - `plugin_get_manifest_flatbuffer`
 - `plugin_get_manifest_flatbuffer_size`
+
+## Example
+
+The repo includes a concrete example in
+[examples/flows/iss-proximity-oem/flow.json](../examples/flows/iss-proximity-oem/flow.json)
+that:
+
+- streams OMMs from SDN pubsub
+- ingests them into an in-memory FlatSQL database
+- queries objects within `50 km` of object `25544`
+- propagates `90` samples for one orbit
+- generates OEMs
+- writes and republishes those OEMs through explicit sink nodes

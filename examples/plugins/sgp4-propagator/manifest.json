@@ -1,0 +1,52 @@
+{
+  "pluginId": "com.digitalarsenal.propagator.sgp4",
+  "name": "SGP4 Proximity Propagator",
+  "version": "1.0.0",
+  "pluginFamily": "propagator",
+  "methods": [
+    {
+      "methodId": "propagate_one_orbit_samples",
+      "displayName": "Propagate 90 Samples for One Orbit",
+      "inputPorts": [
+        {
+          "portId": "selection",
+          "acceptedTypeSets": [
+            {
+              "setId": "proximity-set",
+              "allowedTypes": [
+                {
+                  "schemaName": "ProximitySelection.fbs",
+                  "fileIdentifier": "PRXY"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 1,
+          "required": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portId": "samples",
+          "acceptedTypeSets": [
+            {
+              "setId": "orbit-samples",
+              "allowedTypes": [
+                {
+                  "schemaName": "SampledOrbit.fbs",
+                  "fileIdentifier": "SAMP"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 1,
+          "required": true
+        }
+      ],
+      "maxBatch": 64,
+      "drainPolicy": "drain-until-yield"
+    }
+  ]
+}

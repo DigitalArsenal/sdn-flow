@@ -2,6 +2,7 @@ import {
   BackpressurePolicy,
   DefaultManifestExports,
   DrainPolicy,
+  ExternalInterfaceDirection,
   NodeKind,
   TriggerKind,
 } from "./constants.js";
@@ -38,6 +39,94 @@ function normalizeAcceptedTypeSet(typeSet = {}) {
       typeSet.allowedTypes ?? typeSet.allowed_types,
     ).map(normalizeTypeRef),
     description: normalizeString(typeSet.description, null),
+  };
+}
+
+function normalizeExternalInterface(externalInterface = {}) {
+  return {
+    interfaceId: normalizeString(
+      externalInterface.interfaceId ?? externalInterface.interface_id,
+      "",
+    ),
+    kind: normalizeString(externalInterface.kind, null),
+    direction:
+      normalizeString(externalInterface.direction, null) ??
+      ExternalInterfaceDirection.BIDIRECTIONAL,
+    capability: normalizeString(externalInterface.capability, null),
+    resource: normalizeString(externalInterface.resource, null),
+    protocolId: normalizeString(
+      externalInterface.protocolId ?? externalInterface.protocol_id,
+      null,
+    ),
+    topic: normalizeString(externalInterface.topic, null),
+    path: normalizeString(externalInterface.path, null),
+    description: normalizeString(externalInterface.description, null),
+    required: externalInterface.required !== false,
+    acceptedTypes: normalizeArray(
+      externalInterface.acceptedTypes ?? externalInterface.accepted_types,
+    ).map(normalizeTypeRef),
+    properties:
+      externalInterface.properties &&
+      typeof externalInterface.properties === "object"
+        ? { ...externalInterface.properties }
+        : {},
+  };
+}
+
+function normalizeArtifactDependency(dependency = {}) {
+  return {
+    dependencyId: normalizeString(
+      dependency.dependencyId ?? dependency.dependency_id,
+      "",
+    ),
+    pluginId: normalizeString(dependency.pluginId ?? dependency.plugin_id, null),
+    version: normalizeString(dependency.version, null),
+    artifactId: normalizeString(
+      dependency.artifactId ?? dependency.artifact_id,
+      null,
+    ),
+    artifactUri: normalizeString(
+      dependency.artifactUri ?? dependency.artifact_uri,
+      null,
+    ),
+    mediaType:
+      normalizeString(dependency.mediaType ?? dependency.media_type, null) ??
+      "application/wasm",
+    sha256: normalizeString(dependency.sha256, null),
+    manifestHash: normalizeString(
+      dependency.manifestHash ?? dependency.manifest_hash,
+      null,
+    ),
+    signature: normalizeString(dependency.signature, null),
+    signerPublicKey: normalizeString(
+      dependency.signerPublicKey ?? dependency.signer_public_key,
+      null,
+    ),
+    entrypoint: normalizeString(dependency.entrypoint, null),
+    requiredCapabilities: normalizeArray(
+      dependency.requiredCapabilities ?? dependency.required_capabilities,
+    ).map((value) => normalizeString(value, null)).filter(Boolean),
+    exports: normalizeArray(dependency.exports).map((value) =>
+      normalizeString(value, null),
+    ).filter(Boolean),
+    manifestExports: {
+      bytesSymbol:
+        normalizeString(
+          dependency.manifestExports?.bytesSymbol ??
+            dependency.manifest_exports?.bytes_symbol,
+          null,
+        ) ?? DefaultManifestExports.pluginBytesSymbol,
+      sizeSymbol:
+        normalizeString(
+          dependency.manifestExports?.sizeSymbol ??
+            dependency.manifest_exports?.size_symbol,
+          null,
+        ) ?? DefaultManifestExports.pluginSizeSymbol,
+    },
+    metadata:
+      dependency.metadata && typeof dependency.metadata === "object"
+        ? { ...dependency.metadata }
+        : {},
   };
 }
 
@@ -89,6 +178,9 @@ export function normalizeManifest(manifest = {}) {
     schemasUsed: normalizeArray(
       manifest.schemasUsed ?? manifest.schemas_used,
     ).map(normalizeTypeRef),
+    externalInterfaces: normalizeArray(
+      manifest.externalInterfaces ?? manifest.external_interfaces,
+    ).map(normalizeExternalInterface),
     buildArtifacts: normalizeArray(
       manifest.buildArtifacts ?? manifest.build_artifacts,
     ),
@@ -197,6 +289,16 @@ export function normalizeProgram(program = {}) {
     requiredPlugins: normalizeArray(
       program.requiredPlugins ?? program.required_plugins,
     ).map((pluginId) => normalizeString(pluginId, null)).filter(Boolean),
+    externalInterfaces: normalizeArray(
+      program.externalInterfaces ?? program.external_interfaces,
+    ).map(normalizeExternalInterface),
+    artifactDependencies: normalizeArray(
+      program.artifactDependencies ?? program.artifact_dependencies,
+    ).map(normalizeArtifactDependency),
+    editor:
+      program.editor && typeof program.editor === "object"
+        ? structuredClone(program.editor)
+        : null,
     description: normalizeString(program.description, null),
   };
 }
@@ -216,6 +318,13 @@ export function normalizeFrame(frame = {}, defaultPortId = null) {
     streamId: Number(frame.streamId ?? frame.stream_id ?? 0),
     sequence: frame.sequence ?? 0,
     endOfStream: frame.endOfStream ?? frame.end_of_stream ?? false,
+    payload: frame.payload ?? null,
+    metadata:
+      frame.metadata && typeof frame.metadata === "object"
+        ? structuredClone(frame.metadata)
+        : null,
   };
   return normalized;
 }
+
+export { normalizeExternalInterface, normalizeArtifactDependency };

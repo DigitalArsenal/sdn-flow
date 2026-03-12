@@ -1,0 +1,273 @@
+{
+  "programId": "com.digitalarsenal.examples.iss-proximity-oem",
+  "name": "ISS Proximity OEM Flow",
+  "version": "0.1.0",
+  "description": "Stream OMMs into an in-memory WASM FlatSQL database, query objects within 50 km of NORAD 25544, propagate 90 samples for one orbit, and generate OEMs.",
+  "nodes": [
+    {
+      "nodeId": "db-ingest",
+      "pluginId": "com.digitalarsenal.flatsql.memory",
+      "methodId": "upsert_omm_records",
+      "kind": "transform",
+      "drainPolicy": "drain-until-yield"
+    },
+    {
+      "nodeId": "build-query",
+      "pluginId": "com.digitalarsenal.flow.query-anchor",
+      "methodId": "build_radius_query",
+      "kind": "analyzer",
+      "drainPolicy": "drain-until-yield"
+    },
+    {
+      "nodeId": "db-query",
+      "pluginId": "com.digitalarsenal.flatsql.memory",
+      "methodId": "query_objects_within_radius",
+      "kind": "analyzer",
+      "drainPolicy": "drain-until-yield"
+    },
+    {
+      "nodeId": "propagate",
+      "pluginId": "com.digitalarsenal.propagator.sgp4",
+      "methodId": "propagate_one_orbit_samples",
+      "kind": "transform",
+      "drainPolicy": "drain-until-yield"
+    },
+    {
+      "nodeId": "generate-oem",
+      "pluginId": "com.digitalarsenal.oem.generator",
+      "methodId": "generate_oem",
+      "kind": "transform",
+      "drainPolicy": "drain-until-yield"
+    },
+    {
+      "nodeId": "write-oem",
+      "pluginId": "com.digitalarsenal.oem.file-writer",
+      "methodId": "write_oem_files",
+      "kind": "sink",
+      "drainPolicy": "drain-until-yield"
+    },
+    {
+      "nodeId": "publish-oem",
+      "pluginId": "com.digitalarsenal.oem.publisher",
+      "methodId": "publish_oem",
+      "kind": "publisher",
+      "drainPolicy": "drain-until-yield"
+    }
+  ],
+  "edges": [
+    {
+      "edgeId": "query-builder-to-db",
+      "fromNodeId": "build-query",
+      "fromPortId": "query",
+      "toNodeId": "db-query",
+      "toPortId": "query",
+      "backpressurePolicy": "latest",
+      "queueDepth": 1
+    },
+    {
+      "edgeId": "db-query-to-propagate",
+      "fromNodeId": "db-query",
+      "fromPortId": "matches",
+      "toNodeId": "propagate",
+      "toPortId": "selection",
+      "backpressurePolicy": "queue",
+      "queueDepth": 32
+    },
+    {
+      "edgeId": "propagate-to-oem",
+      "fromNodeId": "propagate",
+      "fromPortId": "samples",
+      "toNodeId": "generate-oem",
+      "toPortId": "samples",
+      "backpressurePolicy": "queue",
+      "queueDepth": 32
+    },
+    {
+      "edgeId": "oem-to-file",
+      "fromNodeId": "generate-oem",
+      "fromPortId": "oems",
+      "toNodeId": "write-oem",
+      "toPortId": "oems",
+      "backpressurePolicy": "queue",
+      "queueDepth": 32
+    },
+    {
+      "edgeId": "oem-to-pubsub",
+      "fromNodeId": "generate-oem",
+      "fromPortId": "oems",
+      "toNodeId": "publish-oem",
+      "toPortId": "oems",
+      "backpressurePolicy": "queue",
+      "queueDepth": 32
+    }
+  ],
+  "triggers": [
+    {
+      "triggerId": "omm-subscription",
+      "kind": "pubsub-subscription",
+      "source": "/sdn/catalog/omm",
+      "acceptedTypes": [
+        {
+          "schemaName": "OMM.fbs",
+          "fileIdentifier": "OMM "
+        }
+      ],
+      "description": "Receives streamed OMM updates from the SDN pubsub fabric."
+    },
+    {
+      "triggerId": "refresh-query",
+      "kind": "timer",
+      "source": "refresh-query",
+      "defaultIntervalMs": 15000,
+      "acceptedTypes": [
+        {
+          "schemaName": "TimerTick.fbs",
+          "fileIdentifier": "TICK"
+        }
+      ],
+      "description": "Re-runs the 50 km proximity query around NORAD 25544 on a fixed interval."
+    }
+  ],
+  "triggerBindings": [
+    {
+      "triggerId": "omm-subscription",
+      "targetNodeId": "db-ingest",
+      "targetPortId": "omms",
+      "backpressurePolicy": "queue",
+      "queueDepth": 4096
+    },
+    {
+      "triggerId": "refresh-query",
+      "targetNodeId": "build-query",
+      "targetPortId": "tick",
+      "backpressurePolicy": "latest",
+      "queueDepth": 1
+    }
+  ],
+  "requiredPlugins": [
+    "com.digitalarsenal.flatsql.memory",
+    "com.digitalarsenal.flow.query-anchor",
+    "com.digitalarsenal.propagator.sgp4",
+    "com.digitalarsenal.oem.generator",
+    "com.digitalarsenal.oem.file-writer",
+    "com.digitalarsenal.oem.publisher"
+  ],
+  "externalInterfaces": [
+    {
+      "interfaceId": "iss-anchor-constraint",
+      "kind": "local-runtime",
+      "direction": "input",
+      "resource": "norad://25544",
+      "description": "The anchor object for the proximity query is NORAD catalog object 25544 with a 50 km radius constraint."
+    }
+  ],
+  "artifactDependencies": [
+    {
+      "dependencyId": "flatsql-memory-signed",
+      "pluginId": "com.digitalarsenal.flatsql.memory",
+      "version": "1.0.0",
+      "artifactUri": "signed://plugins/flatsql-memory/1.0.0",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "signature": "ed25519:demo-flatsql-memory-signature",
+      "signerPublicKey": "ed25519:demo-signer-1",
+      "requiredCapabilities": [
+        "storage_query"
+      ]
+    },
+    {
+      "dependencyId": "query-anchor-signed",
+      "pluginId": "com.digitalarsenal.flow.query-anchor",
+      "version": "1.0.0",
+      "artifactUri": "signed://plugins/query-anchor/1.0.0",
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "signature": "ed25519:demo-query-anchor-signature",
+      "signerPublicKey": "ed25519:demo-signer-1"
+    },
+    {
+      "dependencyId": "sgp4-signed",
+      "pluginId": "com.digitalarsenal.propagator.sgp4",
+      "version": "1.0.0",
+      "artifactUri": "signed://plugins/sgp4/1.0.0",
+      "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "signature": "ed25519:demo-sgp4-signature",
+      "signerPublicKey": "ed25519:demo-signer-1"
+    },
+    {
+      "dependencyId": "oem-generator-signed",
+      "pluginId": "com.digitalarsenal.oem.generator",
+      "version": "1.0.0",
+      "artifactUri": "signed://plugins/oem-generator/1.0.0",
+      "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "signature": "ed25519:demo-oem-generator-signature",
+      "signerPublicKey": "ed25519:demo-signer-1"
+    },
+    {
+      "dependencyId": "oem-file-writer-signed",
+      "pluginId": "com.digitalarsenal.oem.file-writer",
+      "version": "1.0.0",
+      "artifactUri": "signed://plugins/oem-file-writer/1.0.0",
+      "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "signature": "ed25519:demo-oem-file-writer-signature",
+      "signerPublicKey": "ed25519:demo-signer-1",
+      "requiredCapabilities": [
+        "storage_write"
+      ]
+    },
+    {
+      "dependencyId": "oem-publisher-signed",
+      "pluginId": "com.digitalarsenal.oem.publisher",
+      "version": "1.0.0",
+      "artifactUri": "signed://plugins/oem-publisher/1.0.0",
+      "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "signature": "ed25519:demo-oem-publisher-signature",
+      "signerPublicKey": "ed25519:demo-signer-1",
+      "requiredCapabilities": [
+        "pubsub"
+      ]
+    }
+  ],
+  "editor": {
+    "viewport": {
+      "x": 0,
+      "y": 0,
+      "zoom": 0.85
+    },
+    "nodes": {
+      "db-ingest": {
+        "x": 80,
+        "y": 160,
+        "group": "ingest"
+      },
+      "build-query": {
+        "x": 80,
+        "y": 420,
+        "group": "query"
+      },
+      "db-query": {
+        "x": 360,
+        "y": 420,
+        "group": "query"
+      },
+      "propagate": {
+        "x": 660,
+        "y": 420,
+        "group": "analysis"
+      },
+      "generate-oem": {
+        "x": 960,
+        "y": 420,
+        "group": "analysis"
+      },
+      "write-oem": {
+        "x": 1260,
+        "y": 300,
+        "group": "outputs"
+      },
+      "publish-oem": {
+        "x": 1260,
+        "y": 540,
+        "group": "outputs"
+      }
+    }
+  }
+}

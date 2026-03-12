@@ -5,6 +5,7 @@ import {
   TriggerKind,
   normalizeProgram,
 } from "../runtime/index.js";
+import { summarizeProgramRequirements } from "./requirements.js";
 
 export function createSinglePluginFlow(options = {}) {
   const pluginId = String(options.pluginId ?? "").trim();
@@ -84,6 +85,14 @@ export class FlowDesignerSession {
 
   snapshot() {
     return normalizeProgram(this.#program);
+  }
+
+  inspectRequirements({ registry = null, manifests = [] } = {}) {
+    return summarizeProgramRequirements({
+      program: this.#program,
+      registry,
+      manifests,
+    });
   }
 
   addNode(node) {

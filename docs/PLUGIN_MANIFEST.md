@@ -42,6 +42,7 @@ Each port should define:
 Depending on host needs, manifests may also declare:
 
 - `capabilities`
+- `externalInterfaces`
 - `timers`
 - `protocols`
 - `schemasUsed`
@@ -55,6 +56,7 @@ The manifest is used to:
 - validate input port shape and stream counts
 - validate output routing
 - determine capability requirements
+- describe host bindings to visual editors and deployment tooling
 - derive deployment metadata and compatibility views
 
 ## Embedded Manifest Rule

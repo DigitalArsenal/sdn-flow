@@ -9,6 +9,7 @@ It covers:
 
 - plugin identity and manifest rules
 - streaming method contracts
+- external interface declarations
 - callable manifest exports
 - the relationship between plugins and flows
 - local and remote deployment expectations
@@ -40,6 +41,10 @@ A method declares:
 - `drainPolicy`
 
 Methods are invoked over schema-tagged frame streams, not ad hoc JSON payloads.
+
+Plugins may also declare `externalInterfaces` so visual editors and deployment
+tooling can show the real network, protocol, filesystem, database, or host
+service bindings required to make the graph run.
 
 ## Manifest Rule
 
@@ -96,6 +101,7 @@ Hosts are responsible for:
 - manifest decoding
 - plugin loading and registration
 - capability enforcement
+- editor integration for external interface inspection and approval
 - compilation of flow graphs into deployable WASM artifacts
 - installation and execution of those artifacts
 

@@ -9,7 +9,8 @@
     "./designer": "./src/designer/index.js",
     "./auth": "./src/auth/index.js",
     "./transport": "./src/transport/index.js",
-    "./deploy": "./src/deploy/index.js"
+    "./deploy": "./src/deploy/index.js",
+    "./compiler": "./src/compiler/index.js"
   },
   "files": [
     "src/",
