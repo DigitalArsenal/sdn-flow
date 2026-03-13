@@ -95,11 +95,21 @@ export class EmceptionCompilerAdapter {
       metadata,
       dependencies,
     });
-    const source = this.#sourceGenerator({
-      program: normalizedProgram,
-      manifestBuffer,
-      dependencies,
-    });
+    const generatedSource = await maybeCall(
+      this.#sourceGenerator({
+        program: normalizedProgram,
+        manifestBuffer,
+        dependencies,
+      }),
+    );
+    const source =
+      typeof generatedSource === "string"
+        ? generatedSource
+        : generatedSource?.source ?? "";
+    const sourceGeneratorModel =
+      typeof generatedSource === "string"
+        ? "native-cpp-wasm"
+        : generatedSource?.generatorModel ?? "native-cpp-wasm";
     const outputName = String(metadata?.outputName ?? this.#outputName);
     const flags = Array.isArray(metadata?.flags) ? metadata.flags : this.#flags;
     return {
@@ -108,6 +118,7 @@ export class EmceptionCompilerAdapter {
       dependencies,
       runtimeModel: DEFAULT_RUNTIME_MODEL,
       runtimeExports: { ...DEFAULT_RUNTIME_EXPORTS },
+      sourceGeneratorModel,
       outputName,
       flags,
       source,
@@ -129,6 +140,7 @@ export class EmceptionCompilerAdapter {
         manifestBuffer: compilePlan.manifestBuffer,
         runtimeModel: compilePlan.runtimeModel,
         runtimeExports: compilePlan.runtimeExports,
+        sourceGeneratorModel: compilePlan.sourceGeneratorModel,
         compilePlan,
       };
     }
@@ -166,6 +178,7 @@ export class EmceptionCompilerAdapter {
       ).slice(0, 16)}`,
       programId: compilePlan.program.programId,
       runtimeModel: compilePlan.runtimeModel,
+      sourceGeneratorModel: compilePlan.sourceGeneratorModel,
       format: "application/wasm",
       wasm,
       loaderModule,

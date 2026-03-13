@@ -10,6 +10,7 @@ It provides the portable pieces needed to:
 - summarize external inputs, outputs, and capabilities for visual editors
 - describe hosted runtime startup phases and local/remote transport bindings
 - compile deployable flows into one authoritative C++/WASM runtime artifact
+- generate that C++ source with a native C++ tool compiled to WASM
 - compile from one generated C++ source file through `../emception`
 - consume signed plugin WASM artifacts as build dependencies instead of plugin source
 - require embedded FlatBuffer manifests in plugins and compiled flows
@@ -26,6 +27,9 @@ The project is built around a small set of hard rules:
   just runtimes with earlier startup phases and different bindings.
 - The deployed runtime is generated C++ compiled through `../emception`. There
   is no separate interpreted deployment engine.
+- The C++ flow source generator is itself a native C++ tool compiled to WASM.
+- The JS compiler surface is limited to request marshaling and invoking the
+  generator/compile toolchain.
 - Every deployable artifact must embed a FlatBuffer manifest and expose
   callable manifest export symbols.
 - Local and remote deployment use the same signed artifact envelope.
@@ -43,8 +47,8 @@ The project is built around a small set of hard rules:
   helpers
 - `transport`: PKI-based encrypted transport envelopes
 - `deploy`: compiled artifact normalization and local/remote deployment client
-- `compiler`: signed-artifact catalog, generated C++ source, and `emception`
-  compiler adapter
+- `compiler`: signed-artifact catalog, native-WASM source generator, generated
+  C++ source, and `emception` compiler adapter
 
 ## What The Package Does Not Do
 
@@ -85,6 +89,10 @@ The artifact must include:
 
 The deploy client only ships the compiled artifact. It does not deploy the raw
 source graph.
+
+The built-in source generator no longer renders `main.cpp` in JavaScript. It
+packages a normalized request, invokes a native C++ generator compiled to WASM,
+and feeds the resulting C++ translation unit into the compile adapter.
 
 ## Visual Editor Contract
 
@@ -187,5 +195,5 @@ Default export names:
 
 The current repo contains the portable graph/manifest contracts, designer
 controller, authorization helpers, transport encryption helpers, deployment
-client, and a portable `emception` compiler adapter for single-bundle C++
-runtime builds.
+client, a native-WASM C++ source generator, and a portable `emception`
+compiler adapter for single-bundle C++ runtime builds.

@@ -21,6 +21,8 @@ A deployable flow is a compiled single WASM runtime artifact.
 The source graph exists for authoring, validation, tracing, and compilation.
 It is not the deployable unit.
 There is no separate interpreted deployment engine.
+There is no JS source generator on the deploy path; source synthesis happens in
+a native C++ generator compiled to WASM.
 
 ## Single Plugin Rule
 
@@ -68,6 +70,7 @@ The compiler layer owns:
 
 - signed artifact catalog resolution
 - single-source C++ runtime generation
+- native C++ source-generator tool compilation and invocation
 - `emception`-compatible compile planning
 - artifact assembly back into the deploy contract
 
@@ -117,6 +120,7 @@ A compiled flow artifact contains:
 
 The compile plan that produces that artifact may also include:
 
+- generator request bytes consumed by the native generator WASM tool
 - generated `main.cpp`
 - generated runtime topology descriptors and mutable node-state storage
 - signed plugin artifact dependency descriptors
@@ -149,6 +153,7 @@ Hosts are expected to provide adapters for:
 
 - graph validation against host capabilities
 - manifest building into canonical FlatBuffer bytes
+- invoking the native C++ source generator tool
 - compilation via `emception` or equivalent
 - local deployment/install
 - remote deployment endpoint verification and installation

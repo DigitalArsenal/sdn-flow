@@ -15,6 +15,7 @@
   },
   "files": [
     "src/",
+    "native/",
     "docs/",
     "README.md",
     "LICENSE"
