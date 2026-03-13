@@ -1,4 +1,5 @@
 #include <cctype>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -972,14 +973,38 @@ std::string generateSource(const Request& request) {
       << "  bool end_of_stream;\n"
       << "  bool occupied;\n"
       << "};\n\n";
+  out << "static_assert(sizeof(FlowFrameDescriptor) == 48u,\n"
+      << "              \"FlowFrameDescriptor must match schemas/FlowRuntimeAbi.fbs\");\n";
+  out << "static_assert(alignof(FlowFrameDescriptor) == 8u,\n"
+      << "              \"FlowFrameDescriptor alignment must match schemas/FlowRuntimeAbi.fbs\");\n";
+  out << "static_assert(offsetof(FlowFrameDescriptor, ingress_index) == 0u);\n";
+  out << "static_assert(offsetof(FlowFrameDescriptor, type_descriptor_index) == 4u);\n";
+  out << "static_assert(offsetof(FlowFrameDescriptor, alignment) == 8u);\n";
+  out << "static_assert(offsetof(FlowFrameDescriptor, offset) == 12u);\n";
+  out << "static_assert(offsetof(FlowFrameDescriptor, size) == 16u);\n";
+  out << "static_assert(offsetof(FlowFrameDescriptor, stream_id) == 20u);\n";
+  out << "static_assert(offsetof(FlowFrameDescriptor, sequence) == 24u);\n";
+  out << "static_assert(offsetof(FlowFrameDescriptor, trace_token) == 32u);\n";
+  out << "static_assert(offsetof(FlowFrameDescriptor, end_of_stream) == 40u);\n";
+  out << "static_assert(offsetof(FlowFrameDescriptor, occupied) == 41u);\n\n";
   out << "struct FlowInvocationDescriptor {\n"
       << "  std::uint32_t node_index;\n"
       << "  std::uint32_t dispatch_descriptor_index;\n"
       << "  const char * plugin_id;\n"
       << "  const char * method_id;\n"
       << "  const FlowFrameDescriptor * frames;\n"
-      << "  std::size_t frame_count;\n"
+      << "  std::uint32_t frame_count;\n"
       << "};\n\n";
+  out << "static_assert(sizeof(FlowInvocationDescriptor) == 24u,\n"
+      << "              \"FlowInvocationDescriptor must match schemas/FlowRuntimeAbi.fbs\");\n";
+  out << "static_assert(alignof(FlowInvocationDescriptor) == 4u,\n"
+      << "              \"FlowInvocationDescriptor alignment must match schemas/FlowRuntimeAbi.fbs\");\n";
+  out << "static_assert(offsetof(FlowInvocationDescriptor, node_index) == 0u);\n";
+  out << "static_assert(offsetof(FlowInvocationDescriptor, dispatch_descriptor_index) == 4u);\n";
+  out << "static_assert(offsetof(FlowInvocationDescriptor, plugin_id) == 8u);\n";
+  out << "static_assert(offsetof(FlowInvocationDescriptor, method_id) == 12u);\n";
+  out << "static_assert(offsetof(FlowInvocationDescriptor, frames) == 16u);\n";
+  out << "static_assert(offsetof(FlowInvocationDescriptor, frame_count) == 20u);\n\n";
   out << "struct FlowIngressRuntimeState {\n"
       << "  std::uint64_t total_received;\n"
       << "  std::uint64_t total_dropped;\n"

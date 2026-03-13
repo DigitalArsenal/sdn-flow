@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 
 import {
   bindCompiledInvocationAbi,
@@ -15,6 +16,7 @@ import {
   normalizeHostedRuntimePlan,
   summarizeHostedRuntimePlan,
 } from "../src/index.js";
+import { generateRuntimeAbiLayoutsSource } from "../scripts/build-runtime-abi.mjs";
 
 function compiledArtifactStub() {
   return {
@@ -237,6 +239,15 @@ test("host runtime abi binder resolves compiled descriptor exports from a wasm i
     bound.resolvedBySymbol.sdn_flow_get_runtime_descriptor,
     runtimeDescriptor,
   );
+});
+
+test("generated runtime abi layouts stay in sync with the canonical fbs schema", async () => {
+  const expected = await generateRuntimeAbiLayoutsSource();
+  const actual = await readFile(
+    new URL("../src/generated/runtimeAbiLayouts.js", import.meta.url),
+    "utf8",
+  );
+  assert.equal(actual, expected);
 });
 
 test("compiled invocation abi can stage a frame and decode the current invocation", async () => {

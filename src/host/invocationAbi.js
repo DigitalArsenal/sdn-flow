@@ -2,30 +2,12 @@ import {
   bindCompiledRuntimeAbi,
   DefaultRequiredRuntimeExportRoles,
 } from "./runtimeAbi.js";
+import {
+  FlowFrameDescriptorLayout,
+  FlowInvocationDescriptorLayout,
+} from "../generated/runtimeAbiLayouts.js";
 
-export const FlowFrameDescriptorLayout = Object.freeze({
-  size: 48,
-  ingressIndexOffset: 0,
-  typeDescriptorIndexOffset: 4,
-  alignmentOffset: 8,
-  offsetOffset: 12,
-  sizeOffset: 16,
-  streamIdOffset: 20,
-  sequenceOffset: 24,
-  traceTokenOffset: 32,
-  endOfStreamOffset: 40,
-  occupiedOffset: 41,
-});
-
-export const FlowInvocationDescriptorLayout = Object.freeze({
-  size: 24,
-  nodeIndexOffset: 0,
-  dispatchDescriptorIndexOffset: 4,
-  pluginIdPointerOffset: 8,
-  methodIdPointerOffset: 12,
-  framesPointerOffset: 16,
-  frameCountOffset: 20,
-});
+export { FlowFrameDescriptorLayout, FlowInvocationDescriptorLayout };
 
 export const DefaultRequiredInvocationExportRoles = Object.freeze([
   ...DefaultRequiredRuntimeExportRoles,
@@ -75,37 +57,44 @@ function readFrameDescriptor(memory, pointer) {
   const base = pointer >>> 0;
   return {
     ingressIndex: view.getUint32(
-      base + FlowFrameDescriptorLayout.ingressIndexOffset,
+      base + FlowFrameDescriptorLayout.fields.ingressIndex.offset,
       true,
     ),
     typeDescriptorIndex: view.getUint32(
-      base + FlowFrameDescriptorLayout.typeDescriptorIndexOffset,
+      base + FlowFrameDescriptorLayout.fields.typeDescriptorIndex.offset,
       true,
     ),
     alignment: view.getUint32(
-      base + FlowFrameDescriptorLayout.alignmentOffset,
+      base + FlowFrameDescriptorLayout.fields.alignment.offset,
       true,
     ),
-    offset: view.getUint32(base + FlowFrameDescriptorLayout.offsetOffset, true),
-    size: view.getUint32(base + FlowFrameDescriptorLayout.sizeOffset, true),
+    offset: view.getUint32(
+      base + FlowFrameDescriptorLayout.fields.offset.offset,
+      true,
+    ),
+    size: view.getUint32(
+      base + FlowFrameDescriptorLayout.fields.size.offset,
+      true,
+    ),
     streamId: view.getUint32(
-      base + FlowFrameDescriptorLayout.streamIdOffset,
+      base + FlowFrameDescriptorLayout.fields.streamId.offset,
       true,
     ),
     sequence: view.getUint32(
-      base + FlowFrameDescriptorLayout.sequenceOffset,
+      base + FlowFrameDescriptorLayout.fields.sequence.offset,
       true,
     ),
     traceToken: Number(
       view.getBigUint64(
-        base + FlowFrameDescriptorLayout.traceTokenOffset,
+        base + FlowFrameDescriptorLayout.fields.traceToken.offset,
         true,
       ),
     ),
     endOfStream:
-      view.getUint8(base + FlowFrameDescriptorLayout.endOfStreamOffset) !== 0,
+      view.getUint8(base + FlowFrameDescriptorLayout.fields.endOfStream.offset) !==
+      0,
     occupied:
-      view.getUint8(base + FlowFrameDescriptorLayout.occupiedOffset) !== 0,
+      view.getUint8(base + FlowFrameDescriptorLayout.fields.occupied.offset) !== 0,
   };
 }
 
@@ -113,52 +102,52 @@ function writeFrameDescriptor(memory, pointer, frame = {}) {
   const view = new DataView(memory.buffer);
   const base = pointer >>> 0;
   view.setUint32(
-    base + FlowFrameDescriptorLayout.ingressIndexOffset,
+    base + FlowFrameDescriptorLayout.fields.ingressIndex.offset,
     Number(frame.ingressIndex ?? frame.ingress_index ?? INVALID_INDEX) >>> 0,
     true,
   );
   view.setUint32(
-    base + FlowFrameDescriptorLayout.typeDescriptorIndexOffset,
+    base + FlowFrameDescriptorLayout.fields.typeDescriptorIndex.offset,
     Number(
       frame.typeDescriptorIndex ?? frame.type_descriptor_index ?? INVALID_INDEX,
     ) >>> 0,
     true,
   );
   view.setUint32(
-    base + FlowFrameDescriptorLayout.alignmentOffset,
+    base + FlowFrameDescriptorLayout.fields.alignment.offset,
     Number(frame.alignment ?? 8) >>> 0,
     true,
   );
   view.setUint32(
-    base + FlowFrameDescriptorLayout.offsetOffset,
+    base + FlowFrameDescriptorLayout.fields.offset.offset,
     Number(frame.offset ?? 0) >>> 0,
     true,
   );
   view.setUint32(
-    base + FlowFrameDescriptorLayout.sizeOffset,
+    base + FlowFrameDescriptorLayout.fields.size.offset,
     Number(frame.size ?? 0) >>> 0,
     true,
   );
   view.setUint32(
-    base + FlowFrameDescriptorLayout.streamIdOffset,
+    base + FlowFrameDescriptorLayout.fields.streamId.offset,
     Number(frame.streamId ?? frame.stream_id ?? 0) >>> 0,
     true,
   );
   view.setUint32(
-    base + FlowFrameDescriptorLayout.sequenceOffset,
+    base + FlowFrameDescriptorLayout.fields.sequence.offset,
     Number(frame.sequence ?? 0) >>> 0,
     true,
   );
   view.setBigUint64(
-    base + FlowFrameDescriptorLayout.traceTokenOffset,
+    base + FlowFrameDescriptorLayout.fields.traceToken.offset,
     BigInt(Number(frame.traceToken ?? frame.trace_token ?? 0)),
     true,
   );
   view.setUint8(
-    base + FlowFrameDescriptorLayout.endOfStreamOffset,
+    base + FlowFrameDescriptorLayout.fields.endOfStream.offset,
     (frame.endOfStream ?? frame.end_of_stream) ? 1 : 0,
   );
-  view.setUint8(base + FlowFrameDescriptorLayout.occupiedOffset, 1);
+  view.setUint8(base + FlowFrameDescriptorLayout.fields.occupied.offset, 1);
 }
 
 function readInvocationDescriptor(memory, pointer) {
@@ -168,11 +157,11 @@ function readInvocationDescriptor(memory, pointer) {
   const view = new DataView(memory.buffer);
   const base = pointer >>> 0;
   const frameCount = view.getUint32(
-    base + FlowInvocationDescriptorLayout.frameCountOffset,
+    base + FlowInvocationDescriptorLayout.fields.frameCount.offset,
     true,
   );
   const framesPointer = view.getUint32(
-    base + FlowInvocationDescriptorLayout.framesPointerOffset,
+    base + FlowInvocationDescriptorLayout.fields.framesPointer.offset,
     true,
   );
   const frames = [];
@@ -186,19 +175,19 @@ function readInvocationDescriptor(memory, pointer) {
   }
   return {
     nodeIndex: view.getUint32(
-      base + FlowInvocationDescriptorLayout.nodeIndexOffset,
+      base + FlowInvocationDescriptorLayout.fields.nodeIndex.offset,
       true,
     ),
     dispatchDescriptorIndex: view.getUint32(
-      base + FlowInvocationDescriptorLayout.dispatchDescriptorIndexOffset,
+      base + FlowInvocationDescriptorLayout.fields.dispatchDescriptorIndex.offset,
       true,
     ),
     pluginIdPointer: view.getUint32(
-      base + FlowInvocationDescriptorLayout.pluginIdPointerOffset,
+      base + FlowInvocationDescriptorLayout.fields.pluginIdPointer.offset,
       true,
     ),
     methodIdPointer: view.getUint32(
-      base + FlowInvocationDescriptorLayout.methodIdPointerOffset,
+      base + FlowInvocationDescriptorLayout.fields.methodIdPointer.offset,
       true,
     ),
     framesPointer,
@@ -206,14 +195,14 @@ function readInvocationDescriptor(memory, pointer) {
     pluginId: readCString(
       memory,
       view.getUint32(
-        base + FlowInvocationDescriptorLayout.pluginIdPointerOffset,
+        base + FlowInvocationDescriptorLayout.fields.pluginIdPointer.offset,
         true,
       ),
     ),
     methodId: readCString(
       memory,
       view.getUint32(
-        base + FlowInvocationDescriptorLayout.methodIdPointerOffset,
+        base + FlowInvocationDescriptorLayout.fields.methodIdPointer.offset,
         true,
       ),
     ),

@@ -1,0 +1,49 @@
+// SDN Flow - Canonical Runtime Invocation ABI
+//
+// Fixed-layout aligned structs exchanged between the compiled flow runtime and
+// a host launcher. These are host-binding records only; flow execution remains
+// inside the compiled WASM runtime.
+
+namespace sdn.flow.abi;
+
+/// One aligned input frame staged for a node ingress queue.
+struct FlowFrameDescriptor {
+  ingress_index:uint32;
+  type_descriptor_index:uint32;
+  alignment:uint32;
+  offset:uint32;
+  size:uint32;
+  stream_id:uint32;
+  sequence:uint32;
+  trace_token:uint64;
+  end_of_stream:bool;
+  occupied:bool;
+}
+
+/// One prepared node invocation exported by the compiled runtime.
+struct FlowInvocationDescriptor {
+  node_index:uint32;
+  dispatch_descriptor_index:uint32;
+  plugin_id_pointer:uint32;
+  method_id_pointer:uint32;
+  frames_pointer:uint32;
+  frame_count:uint32;
+}
+
+/// Mutable runtime counters for one ingress queue.
+struct FlowIngressRuntimeState {
+  total_received:uint64;
+  total_dropped:uint64;
+  queued_frames:uint32;
+}
+
+/// Mutable runtime counters for one node.
+struct FlowNodeRuntimeState {
+  invocation_count:uint64;
+  consumed_frames:uint64;
+  queued_frames:uint32;
+  backlog_remaining:uint32;
+  last_status:uint32;
+  ready:bool;
+  yielded:bool;
+}
