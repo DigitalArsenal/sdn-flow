@@ -9,6 +9,7 @@ It provides the portable pieces needed to:
 - treat a single plugin as a valid one-node flow
 - execute flows locally in an isomorphic runtime
 - summarize external inputs, outputs, and capabilities for visual editors
+- describe hosted runtime startup phases and local/remote transport bindings
 - compile deployable flows into one WASM runtime artifact
 - compile from one generated C++ source file through `../emception`
 - consume signed plugin WASM artifacts as build dependencies instead of plugin source
@@ -22,6 +23,8 @@ The project is built around a small set of hard rules:
 
 - Deployment is always a compiled WASM runtime artifact, never a raw graph.
 - A single plugin is just a degenerate flow, not a separate deployment path.
+- Hosts may run multiple runtimes. Startup-only services such as licensing are
+  just runtimes with earlier startup phases and different bindings.
 - Every deployable artifact must embed a FlatBuffer manifest and expose
   callable manifest export symbols.
 - Local and remote deployment use the same signed artifact envelope.
@@ -33,6 +36,8 @@ The project is built around a small set of hard rules:
   execution
 - `designer`: UI-facing flow session, single-plugin flow creation helpers, and
   external-requirement summaries
+- `host`: portable hosted-runtime planning for startup order, local services,
+  and same-app/WebRTC/SDN transport bindings
 - `auth`: canonical deployment authorization payloads and HD-wallet signature
   helpers
 - `transport`: PKI-based encrypted transport envelopes
@@ -48,6 +53,8 @@ The project is built around a small set of hard rules:
 - It does not ship host adapters for installation, persistence, or execution.
 
 Those pieces are intentionally left to the host that consumes this package.
+What `sdn-flow` does provide is a portable way to describe those runtime
+relationships so browser, desktop, and server hosts can stay isomorphic.
 
 ## Compiler Contract
 
@@ -96,6 +103,37 @@ That summary includes:
 - signed artifact dependencies
 - resolved plugin manifests when available
 
+## Hosted Runtime Planning
+
+Hosts can describe how runtimes start and connect without changing the core
+flow/plugin contract:
+
+```js
+import { summarizeHostedRuntimePlan } from "@digitalarsenal/sdn-flow";
+
+const summary = summarizeHostedRuntimePlan({
+  hostId: "orbpro-browser",
+  hostKind: "orbpro",
+  adapter: "sdn-js",
+  runtimes: [
+    {
+      runtimeId: "license-service",
+      kind: "service",
+      programId: "com.orbpro.license.local",
+      startupPhase: "early",
+      autoStart: true,
+      bindings: [
+        {
+          direction: "listen",
+          transport: "same-app",
+          protocolId: "/orbpro/licensing/1.0.0",
+        },
+      ],
+    },
+  ],
+});
+```
+
 ## Deployment Flow
 
 The package uses one deployment model for both local and remote targets:
@@ -124,6 +162,7 @@ Default export names:
 - `@digitalarsenal/sdn-flow`
 - `@digitalarsenal/sdn-flow/runtime`
 - `@digitalarsenal/sdn-flow/designer`
+- `@digitalarsenal/sdn-flow/host`
 - `@digitalarsenal/sdn-flow/auth`
 - `@digitalarsenal/sdn-flow/transport`
 - `@digitalarsenal/sdn-flow/deploy`

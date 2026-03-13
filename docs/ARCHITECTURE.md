@@ -47,6 +47,19 @@ The designer layer is UI-facing but DOM-free. It owns:
 - compile orchestration through an injected compiler adapter
 - deployment orchestration through an injected deployment client
 
+### Host Planning
+
+The host-planning layer owns portable hosted-runtime description:
+
+- runtime kind (`flow`, `plugin`, `service`)
+- startup phase (`bootstrap`, `early`, `session`, `on-demand`)
+- local vs remote authority
+- runtime dependencies
+- transport bindings (`same-app`, `direct`, `webrtc`, `sdn-protocol`, `http`)
+
+This keeps startup-only services such as local licensing in the same runtime
+model as any other flow/plugin deployment.
+
 ### Compiler
 
 The compiler layer owns:
@@ -136,6 +149,11 @@ Hosts are expected to provide adapters for:
 - compilation via `emception` or equivalent
 - local deployment/install
 - remote deployment endpoint verification and installation
+- protocol/pubsub registration and network transport
+
+Hosts may also use the portable host-planning surface to describe early-start
+services, same-app loopback bindings, or WebRTC-connected local runtimes
+without changing the flow/plugin ABI.
 
 This package deliberately leaves those host integrations outside the portable
 core.

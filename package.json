@@ -8,6 +8,7 @@
     "./runtime": "./src/runtime/index.js",
     "./designer": "./src/designer/index.js",
     "./auth": "./src/auth/index.js",
+    "./host": "./src/host/index.js",
     "./transport": "./src/transport/index.js",
     "./deploy": "./src/deploy/index.js",
     "./compiler": "./src/compiler/index.js"

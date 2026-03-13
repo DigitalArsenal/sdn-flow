@@ -15,13 +15,27 @@ function serializeTarget(target = null) {
       id: null,
       audience: null,
       url: target,
+      runtimeId: null,
+      transport: null,
+      protocolId: null,
+      peerId: null,
+      startupPhase: null,
+      adapter: null,
+      disconnected: false,
     };
   }
   return {
     kind: target?.kind ?? "remote",
-    id: target?.id ?? target?.targetId ?? null,
+    id: target?.id ?? target?.targetId ?? target?.runtimeId ?? null,
     audience: target?.audience ?? null,
     url: target?.url ?? null,
+    runtimeId: target?.runtimeId ?? target?.runtime_id ?? null,
+    transport: target?.transport ?? null,
+    protocolId: target?.protocolId ?? target?.protocol_id ?? null,
+    peerId: target?.peerId ?? target?.peer_id ?? null,
+    startupPhase: target?.startupPhase ?? target?.startup_phase ?? null,
+    adapter: target?.adapter ?? target?.hostAdapter ?? null,
+    disconnected: Boolean(target?.disconnected ?? false),
   };
 }
 
