@@ -180,6 +180,19 @@ export class MethodRegistry {
     return record;
   }
 
+  unregisterPlugin(pluginId) {
+    const record = this.#plugins.get(pluginId);
+    if (!record) {
+      return false;
+    }
+
+    this.#plugins.delete(pluginId);
+    for (const methodId of record.methods.keys()) {
+      this.#methods.delete(`${pluginId}:${methodId}`);
+    }
+    return true;
+  }
+
   getPlugin(pluginId) {
     return this.#plugins.get(pluginId) ?? null;
   }
@@ -271,6 +284,11 @@ export class MethodRegistry {
     });
 
     return hydrateOutputPorts(result ?? {}, descriptor.method, outputStreamCap);
+  }
+
+  clear() {
+    this.#plugins.clear();
+    this.#methods.clear();
   }
 }
 

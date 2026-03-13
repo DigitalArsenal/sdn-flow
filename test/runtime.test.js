@@ -229,3 +229,46 @@ test("outputs route across edges into downstream nodes", async () => {
   assert.equal(result.idle, true);
   assert.deepEqual(sinkSeen, [9]);
 });
+
+test("registered plugins can be removed and cleared from the runtime registry", async () => {
+  const registry = new MethodRegistry();
+
+  registry.registerPlugin({
+    manifest: createManifest(),
+    handlers: {
+      process: ({ inputs }) => ({
+        outputs: inputs.map((frame) => ({ ...frame, portId: "out" })),
+        backlogRemaining: 0,
+        yielded: false,
+      }),
+    },
+  });
+
+  assert.equal(
+    registry.getMethod("com.digitalarsenal.runtime.test", "process") !== null,
+    true,
+  );
+
+  assert.equal(
+    registry.unregisterPlugin("com.digitalarsenal.runtime.test"),
+    true,
+  );
+  assert.equal(
+    registry.getMethod("com.digitalarsenal.runtime.test", "process"),
+    null,
+  );
+  assert.deepEqual(registry.listPlugins(), []);
+
+  registry.registerPlugin({
+    manifest: createManifest(),
+    handlers: {
+      process: ({ inputs }) => ({
+        outputs: inputs.map((frame) => ({ ...frame, portId: "out" })),
+        backlogRemaining: 0,
+        yielded: false,
+      }),
+    },
+  });
+  registry.clear();
+  assert.deepEqual(registry.listPlugins(), []);
+});
