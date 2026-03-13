@@ -52,6 +52,45 @@ function normalizeManifestExports(exports = {}) {
   };
 }
 
+function normalizeRuntimeExports(exports = {}) {
+  return {
+    descriptorSymbol:
+      exports.descriptorSymbol ?? exports.descriptor_symbol ?? null,
+    resetStateSymbol:
+      exports.resetStateSymbol ?? exports.reset_state_symbol ?? null,
+    ingressDescriptorsSymbol:
+      exports.ingressDescriptorsSymbol ??
+      exports.ingress_descriptors_symbol ??
+      null,
+    ingressDescriptorCountSymbol:
+      exports.ingressDescriptorCountSymbol ??
+      exports.ingress_descriptor_count_symbol ??
+      null,
+    ingressStatesSymbol:
+      exports.ingressStatesSymbol ?? exports.ingress_states_symbol ?? null,
+    ingressStateCountSymbol:
+      exports.ingressStateCountSymbol ??
+      exports.ingress_state_count_symbol ??
+      null,
+    nodeStatesSymbol:
+      exports.nodeStatesSymbol ?? exports.node_states_symbol ?? null,
+    nodeStateCountSymbol:
+      exports.nodeStateCountSymbol ?? exports.node_state_count_symbol ?? null,
+    enqueueTriggerSymbol:
+      exports.enqueueTriggerSymbol ?? exports.enqueue_trigger_symbol ?? null,
+    enqueueEdgeSymbol:
+      exports.enqueueEdgeSymbol ?? exports.enqueue_edge_symbol ?? null,
+    readyNodeSymbol:
+      exports.readyNodeSymbol ?? exports.ready_node_symbol ?? null,
+    beginInvocationSymbol:
+      exports.beginInvocationSymbol ?? exports.begin_invocation_symbol ?? null,
+    completeInvocationSymbol:
+      exports.completeInvocationSymbol ??
+      exports.complete_invocation_symbol ??
+      null,
+  };
+}
+
 export async function normalizeCompiledArtifact(artifact = {}) {
   if (artifact.wasm === undefined || artifact.wasm === null) {
     throw new Error("Compiled flow artifact must include wasm bytes.");
@@ -78,12 +117,9 @@ export async function normalizeCompiledArtifact(artifact = {}) {
     );
   }
 
-  const graphHash =
-    artifact.graphHash ??
-    bytesToHex(await sha256Bytes(wasm));
+  const graphHash = artifact.graphHash ?? bytesToHex(await sha256Bytes(wasm));
   const manifestHash =
-    artifact.manifestHash ??
-    bytesToHex(await sha256Bytes(manifestBuffer));
+    artifact.manifestHash ?? bytesToHex(await sha256Bytes(manifestBuffer));
 
   return {
     artifactId:
@@ -91,10 +127,15 @@ export async function normalizeCompiledArtifact(artifact = {}) {
       `${artifact.programId ?? "flow"}:${String(graphHash).slice(0, 16)}`,
     programId: String(artifact.programId ?? "").trim(),
     format: artifact.format ?? "application/wasm",
+    runtimeModel:
+      artifact.runtimeModel ?? artifact.runtime_model ?? "compiled-cpp-wasm",
     wasm,
     manifestBuffer,
     manifestExports: normalizeManifestExports(
       artifact.manifestExports ?? artifact.manifest_exports,
+    ),
+    runtimeExports: normalizeRuntimeExports(
+      artifact.runtimeExports ?? artifact.runtime_exports,
     ),
     entrypoint: artifact.entrypoint ?? "_start",
     graphHash,
@@ -117,9 +158,11 @@ export function serializeCompiledArtifact(artifact) {
     artifactId: artifact.artifactId,
     programId: artifact.programId,
     format: artifact.format,
+    runtimeModel: artifact.runtimeModel,
     wasmBase64: bytesToBase64(artifact.wasm),
     manifestBase64: bytesToBase64(artifact.manifestBuffer),
     manifestExports: artifact.manifestExports,
+    runtimeExports: artifact.runtimeExports,
     entrypoint: artifact.entrypoint,
     graphHash: artifact.graphHash,
     manifestHash: artifact.manifestHash,
@@ -194,8 +237,7 @@ export class FlowDeploymentClient {
         encrypted: true,
         envelope: await encryptJsonForRecipient({
           payload,
-          recipientPublicKey:
-            recipientPublicKey ?? target?.recipientPublicKey,
+          recipientPublicKey: recipientPublicKey ?? target?.recipientPublicKey,
           context: `sdn-flow/deploy:${normalizedArtifact.programId}`,
         }),
       };
@@ -248,7 +290,10 @@ export class FlowDeploymentClient {
 
   async deploy(options = {}) {
     const deployment = await this.prepareDeployment(options);
-    if (options.target?.kind === "local" || typeof options.target?.deploy === "function") {
+    if (
+      options.target?.kind === "local" ||
+      typeof options.target?.deploy === "function"
+    ) {
       return this.deployLocal({
         target: options.target,
         deployment,

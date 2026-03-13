@@ -53,6 +53,7 @@ test("single-plugin flows compile and deploy as compiled wasm artifacts", async 
   assert.equal(deployment.encrypted, false);
   assert.equal(deployment.payload.kind, "compiled-flow-wasm-deployment");
   assert.equal(deployment.payload.artifact.programId, "flow.single.plugin");
+  assert.equal(deployment.payload.artifact.runtimeModel, "compiled-cpp-wasm");
   assert.equal(typeof deployment.payload.artifact.wasmBase64, "string");
   assert.equal(typeof deployment.payload.artifact.manifestBase64, "string");
   assert.equal(

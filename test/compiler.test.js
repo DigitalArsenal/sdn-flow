@@ -73,16 +73,36 @@ test("emception compiler adapter prepares a single-source C++ compile plan with 
     prepared.runtimeExports.descriptorSymbol,
     "sdn_flow_get_runtime_descriptor",
   );
+  assert.equal(
+    prepared.runtimeExports.enqueueTriggerSymbol,
+    "sdn_flow_enqueue_trigger_frames",
+  );
+  assert.equal(
+    prepared.runtimeExports.beginInvocationSymbol,
+    "sdn_flow_begin_node_invocation",
+  );
   assert.match(prepared.command, /\/working\/flow-runtime\.mjs$/);
   assert.match(prepared.source, /flow_get_manifest_flatbuffer/);
   assert.match(prepared.source, /struct FlowRuntimeDescriptor/);
+  assert.match(prepared.source, /struct FlowIngressDescriptor/);
+  assert.match(prepared.source, /struct FlowIngressRuntimeState/);
   assert.match(prepared.source, /sdn_flow_get_runtime_descriptor/);
   assert.match(prepared.source, /sdn_flow_reset_runtime_state/);
+  assert.match(prepared.source, /sdn_flow_enqueue_trigger_frames/);
+  assert.match(prepared.source, /sdn_flow_enqueue_edge_frames/);
+  assert.match(prepared.source, /sdn_flow_get_ready_node_index/);
+  assert.match(prepared.source, /sdn_flow_begin_node_invocation/);
+  assert.match(prepared.source, /sdn_flow_complete_node_invocation/);
+  assert.match(prepared.source, /kIngressDescriptors/);
+  assert.match(prepared.source, /kIngressRuntimeStates/);
+  assert.match(prepared.source, /kNodeIngressIndices/);
   assert.match(prepared.source, /kNodeRuntimeStates/);
   assert.match(prepared.source, /sdn_flow_get_dependency_descriptors/);
   assert.match(prepared.source, /com\.digitalarsenal\.flatsql\.memory/);
   assert.match(prepared.command, /_sdn_flow_get_runtime_descriptor/);
   assert.match(prepared.command, /_sdn_flow_reset_runtime_state/);
+  assert.match(prepared.command, /_sdn_flow_enqueue_trigger_frames/);
+  assert.match(prepared.command, /_sdn_flow_begin_node_invocation/);
 
   const artifact = await compiler.compile({ program: flow });
   assert.equal(artifact.programId, flow.programId);
@@ -90,6 +110,10 @@ test("emception compiler adapter prepares a single-source C++ compile plan with 
   assert.equal(
     artifact.runtimeExports.descriptorSymbol,
     "sdn_flow_get_runtime_descriptor",
+  );
+  assert.equal(
+    artifact.runtimeExports.readyNodeSymbol,
+    "sdn_flow_get_ready_node_index",
   );
   assert.equal(artifact.pluginVersions.length, 6);
   assert.equal(artifact.requiredCapabilities.includes("storage_query"), true);

@@ -11,8 +11,16 @@ test("compiled artifacts require an embedded manifest and default manifest expor
   });
 
   assert.equal(artifact.programId, "flow.artifact.test");
-  assert.equal(artifact.manifestExports.bytesSymbol, "flow_get_manifest_flatbuffer");
-  assert.equal(artifact.manifestExports.sizeSymbol, "flow_get_manifest_flatbuffer_size");
+  assert.equal(artifact.runtimeModel, "compiled-cpp-wasm");
+  assert.equal(
+    artifact.manifestExports.bytesSymbol,
+    "flow_get_manifest_flatbuffer",
+  );
+  assert.equal(
+    artifact.manifestExports.sizeSymbol,
+    "flow_get_manifest_flatbuffer_size",
+  );
+  assert.equal(artifact.runtimeExports.descriptorSymbol, null);
 });
 
 test("compiled artifacts reject missing embedded manifest bytes", async () => {

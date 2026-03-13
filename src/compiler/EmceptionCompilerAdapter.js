@@ -14,15 +14,24 @@ const DEFAULT_FLAGS = Object.freeze([
   "-sMODULARIZE=1",
   "-sEXPORT_ES6=1",
   "-sENVIRONMENT=web,worker,node",
-  "-sEXPORTED_FUNCTIONS=['_main','_flow_get_manifest_flatbuffer','_flow_get_manifest_flatbuffer_size','_sdn_flow_get_program_id','_sdn_flow_get_program_name','_sdn_flow_get_program_version','_sdn_flow_get_dependency_descriptors','_sdn_flow_get_dependency_count','_sdn_flow_get_node_runtime_states','_sdn_flow_get_node_runtime_state_count','_sdn_flow_reset_runtime_state','_sdn_flow_get_runtime_descriptor']",
+  "-sEXPORTED_FUNCTIONS=['_main','_flow_get_manifest_flatbuffer','_flow_get_manifest_flatbuffer_size','_sdn_flow_get_program_id','_sdn_flow_get_program_name','_sdn_flow_get_program_version','_sdn_flow_get_dependency_descriptors','_sdn_flow_get_dependency_count','_sdn_flow_get_ingress_descriptors','_sdn_flow_get_ingress_descriptor_count','_sdn_flow_get_ingress_runtime_states','_sdn_flow_get_ingress_runtime_state_count','_sdn_flow_get_node_runtime_states','_sdn_flow_get_node_runtime_state_count','_sdn_flow_reset_runtime_state','_sdn_flow_enqueue_trigger_frames','_sdn_flow_enqueue_edge_frames','_sdn_flow_get_ready_node_index','_sdn_flow_begin_node_invocation','_sdn_flow_complete_node_invocation','_sdn_flow_get_runtime_descriptor']",
 ]);
 
 const DEFAULT_RUNTIME_MODEL = "compiled-cpp-wasm";
 const DEFAULT_RUNTIME_EXPORTS = Object.freeze({
   descriptorSymbol: "sdn_flow_get_runtime_descriptor",
   resetStateSymbol: "sdn_flow_reset_runtime_state",
+  ingressDescriptorsSymbol: "sdn_flow_get_ingress_descriptors",
+  ingressDescriptorCountSymbol: "sdn_flow_get_ingress_descriptor_count",
+  ingressStatesSymbol: "sdn_flow_get_ingress_runtime_states",
+  ingressStateCountSymbol: "sdn_flow_get_ingress_runtime_state_count",
   nodeStatesSymbol: "sdn_flow_get_node_runtime_states",
   nodeStateCountSymbol: "sdn_flow_get_node_runtime_state_count",
+  enqueueTriggerSymbol: "sdn_flow_enqueue_trigger_frames",
+  enqueueEdgeSymbol: "sdn_flow_enqueue_edge_frames",
+  readyNodeSymbol: "sdn_flow_get_ready_node_index",
+  beginInvocationSymbol: "sdn_flow_begin_node_invocation",
+  completeInvocationSymbol: "sdn_flow_complete_node_invocation",
 });
 
 async function maybeCall(value) {
