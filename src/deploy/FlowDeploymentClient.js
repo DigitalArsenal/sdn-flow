@@ -54,8 +54,66 @@ function normalizeManifestExports(exports = {}) {
 
 function normalizeRuntimeExports(exports = {}) {
   return {
+    mallocSymbol: exports.mallocSymbol ?? exports.malloc_symbol ?? null,
+    freeSymbol: exports.freeSymbol ?? exports.free_symbol ?? null,
     descriptorSymbol:
       exports.descriptorSymbol ?? exports.descriptor_symbol ?? null,
+    typeDescriptorsSymbol:
+      exports.typeDescriptorsSymbol ?? exports.type_descriptors_symbol ?? null,
+    typeDescriptorCountSymbol:
+      exports.typeDescriptorCountSymbol ??
+      exports.type_descriptor_count_symbol ??
+      null,
+    acceptedTypeIndicesSymbol:
+      exports.acceptedTypeIndicesSymbol ??
+      exports.accepted_type_indices_symbol ??
+      null,
+    acceptedTypeIndexCountSymbol:
+      exports.acceptedTypeIndexCountSymbol ??
+      exports.accepted_type_index_count_symbol ??
+      null,
+    triggerDescriptorsSymbol:
+      exports.triggerDescriptorsSymbol ??
+      exports.trigger_descriptors_symbol ??
+      null,
+    triggerDescriptorCountSymbol:
+      exports.triggerDescriptorCountSymbol ??
+      exports.trigger_descriptor_count_symbol ??
+      null,
+    nodeDescriptorsSymbol:
+      exports.nodeDescriptorsSymbol ?? exports.node_descriptors_symbol ?? null,
+    nodeDescriptorCountSymbol:
+      exports.nodeDescriptorCountSymbol ??
+      exports.node_descriptor_count_symbol ??
+      null,
+    nodeDispatchDescriptorsSymbol:
+      exports.nodeDispatchDescriptorsSymbol ??
+      exports.node_dispatch_descriptors_symbol ??
+      null,
+    nodeDispatchDescriptorCountSymbol:
+      exports.nodeDispatchDescriptorCountSymbol ??
+      exports.node_dispatch_descriptor_count_symbol ??
+      null,
+    edgeDescriptorsSymbol:
+      exports.edgeDescriptorsSymbol ?? exports.edge_descriptors_symbol ?? null,
+    edgeDescriptorCountSymbol:
+      exports.edgeDescriptorCountSymbol ??
+      exports.edge_descriptor_count_symbol ??
+      null,
+    triggerBindingDescriptorsSymbol:
+      exports.triggerBindingDescriptorsSymbol ??
+      exports.trigger_binding_descriptors_symbol ??
+      null,
+    triggerBindingDescriptorCountSymbol:
+      exports.triggerBindingDescriptorCountSymbol ??
+      exports.trigger_binding_descriptor_count_symbol ??
+      null,
+    dependencyDescriptorsSymbol:
+      exports.dependencyDescriptorsSymbol ??
+      exports.dependency_descriptors_symbol ??
+      null,
+    dependencyCountSymbol:
+      exports.dependencyCountSymbol ?? exports.dependency_count_symbol ?? null,
     resetStateSymbol:
       exports.resetStateSymbol ?? exports.reset_state_symbol ?? null,
     ingressDescriptorsSymbol:
@@ -65,6 +123,30 @@ function normalizeRuntimeExports(exports = {}) {
     ingressDescriptorCountSymbol:
       exports.ingressDescriptorCountSymbol ??
       exports.ingress_descriptor_count_symbol ??
+      null,
+    ingressFrameDescriptorsSymbol:
+      exports.ingressFrameDescriptorsSymbol ??
+      exports.ingress_frame_descriptors_symbol ??
+      null,
+    ingressFrameDescriptorCountSymbol:
+      exports.ingressFrameDescriptorCountSymbol ??
+      exports.ingress_frame_descriptor_count_symbol ??
+      null,
+    nodeIngressIndicesSymbol:
+      exports.nodeIngressIndicesSymbol ??
+      exports.node_ingress_indices_symbol ??
+      null,
+    nodeIngressIndexCountSymbol:
+      exports.nodeIngressIndexCountSymbol ??
+      exports.node_ingress_index_count_symbol ??
+      null,
+    externalInterfaceDescriptorsSymbol:
+      exports.externalInterfaceDescriptorsSymbol ??
+      exports.external_interface_descriptors_symbol ??
+      null,
+    externalInterfaceDescriptorCountSymbol:
+      exports.externalInterfaceDescriptorCountSymbol ??
+      exports.external_interface_descriptor_count_symbol ??
       null,
     ingressStatesSymbol:
       exports.ingressStatesSymbol ?? exports.ingress_states_symbol ?? null,
@@ -76,10 +158,26 @@ function normalizeRuntimeExports(exports = {}) {
       exports.nodeStatesSymbol ?? exports.node_states_symbol ?? null,
     nodeStateCountSymbol:
       exports.nodeStateCountSymbol ?? exports.node_state_count_symbol ?? null,
+    currentInvocationDescriptorSymbol:
+      exports.currentInvocationDescriptorSymbol ??
+      exports.current_invocation_descriptor_symbol ??
+      null,
+    prepareInvocationDescriptorSymbol:
+      exports.prepareInvocationDescriptorSymbol ??
+      exports.prepare_invocation_descriptor_symbol ??
+      null,
     enqueueTriggerSymbol:
       exports.enqueueTriggerSymbol ?? exports.enqueue_trigger_symbol ?? null,
+    enqueueTriggerFrameSymbol:
+      exports.enqueueTriggerFrameSymbol ??
+      exports.enqueue_trigger_frame_symbol ??
+      null,
     enqueueEdgeSymbol:
       exports.enqueueEdgeSymbol ?? exports.enqueue_edge_symbol ?? null,
+    enqueueEdgeFrameSymbol:
+      exports.enqueueEdgeFrameSymbol ??
+      exports.enqueue_edge_frame_symbol ??
+      null,
     readyNodeSymbol:
       exports.readyNodeSymbol ?? exports.ready_node_symbol ?? null,
     beginInvocationSymbol:

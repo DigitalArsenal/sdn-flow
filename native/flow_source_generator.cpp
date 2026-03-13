@@ -105,6 +105,14 @@ struct SignedArtifactDependency {
   std::string sha256;
   std::string signature;
   std::string signer_public_key;
+  std::string entrypoint;
+  std::string manifest_bytes_symbol;
+  std::string manifest_size_symbol;
+  std::string init_symbol;
+  std::string destroy_symbol;
+  std::string malloc_symbol;
+  std::string free_symbol;
+  std::string stream_invoke_symbol;
   std::vector<std::uint8_t> wasm_bytes;
   std::vector<std::uint8_t> manifest_bytes;
 };
@@ -536,6 +544,14 @@ Request readRequest(BinaryReader& reader) {
     dependency.sha256 = reader.readString();
     dependency.signature = reader.readString();
     dependency.signer_public_key = reader.readString();
+    dependency.entrypoint = reader.readString();
+    dependency.manifest_bytes_symbol = reader.readString();
+    dependency.manifest_size_symbol = reader.readString();
+    dependency.init_symbol = reader.readString();
+    dependency.destroy_symbol = reader.readString();
+    dependency.malloc_symbol = reader.readString();
+    dependency.free_symbol = reader.readString();
+    dependency.stream_invoke_symbol = reader.readString();
     dependency.wasm_bytes = reader.readBytes();
     dependency.manifest_bytes = reader.readBytes();
     request.dependencies.push_back(std::move(dependency));
@@ -607,6 +623,78 @@ std::string generateSource(const Request& request) {
            << "    " << formatUnsigned(node.ingress_index_count) << "\n"
            << "  }";
     node_records.push_back(record.str());
+  }
+
+  std::vector<std::string> node_dispatch_records;
+  node_dispatch_records.reserve(request.nodes.size());
+  for (std::size_t node_index = 0; node_index < request.nodes.size(); ++node_index) {
+    const auto& node = request.nodes[node_index];
+    std::uint32_t dependency_index = kInvalidIndex;
+    const SignedArtifactDependency* dependency = nullptr;
+    for (std::size_t candidate_index = 0; candidate_index < request.dependencies.size();
+         ++candidate_index) {
+      if (request.dependencies[candidate_index].plugin_id == node.plugin_id) {
+        dependency_index = static_cast<std::uint32_t>(candidate_index);
+        dependency = &request.dependencies[candidate_index];
+        break;
+      }
+    }
+
+    const std::string dependency_id =
+        dependency != nullptr ? dependency->dependency_id : "";
+    const std::string dispatch_model =
+        dependency == nullptr
+            ? "unresolved"
+            : (!dependency->stream_invoke_symbol.empty() ? "stream-invoke"
+                                                        : "unresolved");
+
+    std::ostringstream record;
+    record << "  {\n"
+           << "    " << cppStringLiteral(node.node_id) << ",\n"
+           << "    " << formatUnsigned(static_cast<std::uint32_t>(node_index))
+           << ",\n"
+           << "    " << cppStringLiteral(dependency_id) << ",\n"
+           << "    " << formatIndex(dependency_index) << ",\n"
+           << "    " << cppStringLiteral(node.plugin_id) << ",\n"
+           << "    " << cppStringLiteral(node.method_id) << ",\n"
+           << "    " << cppStringLiteral(dispatch_model) << ",\n"
+           << "    "
+           << cppStringLiteral(dependency != nullptr ? dependency->entrypoint : "")
+           << ",\n"
+           << "    "
+           << cppStringLiteral(dependency != nullptr
+                                   ? dependency->manifest_bytes_symbol
+                                   : "")
+           << ",\n"
+           << "    "
+           << cppStringLiteral(dependency != nullptr
+                                   ? dependency->manifest_size_symbol
+                                   : "")
+           << ",\n"
+           << "    "
+           << cppStringLiteral(dependency != nullptr ? dependency->init_symbol
+                                                     : "")
+           << ",\n"
+           << "    "
+           << cppStringLiteral(dependency != nullptr
+                                   ? dependency->destroy_symbol
+                                   : "")
+           << ",\n"
+           << "    "
+           << cppStringLiteral(dependency != nullptr ? dependency->malloc_symbol
+                                                     : "")
+           << ",\n"
+           << "    "
+           << cppStringLiteral(dependency != nullptr ? dependency->free_symbol
+                                                     : "")
+           << ",\n"
+           << "    "
+           << cppStringLiteral(dependency != nullptr
+                                   ? dependency->stream_invoke_symbol
+                                   : "")
+           << "\n"
+           << "  }";
+    node_dispatch_records.push_back(record.str());
   }
 
   std::vector<std::string> edge_records;
@@ -724,6 +812,17 @@ std::string generateSource(const Request& request) {
            << "    " << cppStringLiteral(dependency.sha256) << ",\n"
            << "    " << cppStringLiteral(dependency.signature) << ",\n"
            << "    " << cppStringLiteral(dependency.signer_public_key) << ",\n"
+           << "    " << cppStringLiteral(dependency.entrypoint) << ",\n"
+           << "    " << cppStringLiteral(dependency.manifest_bytes_symbol)
+           << ",\n"
+           << "    " << cppStringLiteral(dependency.manifest_size_symbol)
+           << ",\n"
+           << "    " << cppStringLiteral(dependency.init_symbol) << ",\n"
+           << "    " << cppStringLiteral(dependency.destroy_symbol) << ",\n"
+           << "    " << cppStringLiteral(dependency.malloc_symbol) << ",\n"
+           << "    " << cppStringLiteral(dependency.free_symbol) << ",\n"
+           << "    "
+           << cppStringLiteral(dependency.stream_invoke_symbol) << ",\n"
            << "    " << wasm_symbol << ",\n"
            << "    sizeof(" << wasm_symbol << "),\n"
            << "    "
@@ -755,6 +854,14 @@ std::string generateSource(const Request& request) {
       << "  const char * sha256;\n"
       << "  const char * signature;\n"
       << "  const char * signer_public_key;\n"
+      << "  const char * entrypoint;\n"
+      << "  const char * manifest_bytes_symbol;\n"
+      << "  const char * manifest_size_symbol;\n"
+      << "  const char * init_symbol;\n"
+      << "  const char * destroy_symbol;\n"
+      << "  const char * malloc_symbol;\n"
+      << "  const char * free_symbol;\n"
+      << "  const char * stream_invoke_symbol;\n"
       << "  const std::uint8_t * wasm_bytes;\n"
       << "  std::size_t wasm_size;\n"
       << "  const std::uint8_t * manifest_bytes;\n"
@@ -785,6 +892,23 @@ std::string generateSource(const Request& request) {
       << "  std::uint32_t time_slice_micros;\n"
       << "  std::uint32_t ingress_index_offset;\n"
       << "  std::uint32_t ingress_index_count;\n"
+      << "};\n\n";
+  out << "struct FlowNodeDispatchDescriptor {\n"
+      << "  const char * node_id;\n"
+      << "  std::uint32_t node_index;\n"
+      << "  const char * dependency_id;\n"
+      << "  std::uint32_t dependency_index;\n"
+      << "  const char * plugin_id;\n"
+      << "  const char * method_id;\n"
+      << "  const char * dispatch_model;\n"
+      << "  const char * entrypoint;\n"
+      << "  const char * manifest_bytes_symbol;\n"
+      << "  const char * manifest_size_symbol;\n"
+      << "  const char * init_symbol;\n"
+      << "  const char * destroy_symbol;\n"
+      << "  const char * malloc_symbol;\n"
+      << "  const char * free_symbol;\n"
+      << "  const char * stream_invoke_symbol;\n"
       << "};\n\n";
   out << "struct FlowEdgeDescriptor {\n"
       << "  const char * edge_id;\n"
@@ -836,6 +960,26 @@ std::string generateSource(const Request& request) {
       << "  std::uint32_t accepted_type_index_count;\n"
       << "  const char * description;\n"
       << "};\n\n";
+  out << "struct FlowFrameDescriptor {\n"
+      << "  std::uint32_t ingress_index;\n"
+      << "  std::uint32_t type_descriptor_index;\n"
+      << "  std::uint32_t alignment;\n"
+      << "  std::uint32_t offset;\n"
+      << "  std::uint32_t size;\n"
+      << "  std::uint32_t stream_id;\n"
+      << "  std::uint32_t sequence;\n"
+      << "  std::uint64_t trace_token;\n"
+      << "  bool end_of_stream;\n"
+      << "  bool occupied;\n"
+      << "};\n\n";
+  out << "struct FlowInvocationDescriptor {\n"
+      << "  std::uint32_t node_index;\n"
+      << "  std::uint32_t dispatch_descriptor_index;\n"
+      << "  const char * plugin_id;\n"
+      << "  const char * method_id;\n"
+      << "  const FlowFrameDescriptor * frames;\n"
+      << "  std::size_t frame_count;\n"
+      << "};\n\n";
   out << "struct FlowIngressRuntimeState {\n"
       << "  std::uint64_t total_received;\n"
       << "  std::uint64_t total_dropped;\n"
@@ -869,6 +1013,8 @@ std::string generateSource(const Request& request) {
       << "  std::size_t trigger_count;\n"
       << "  const FlowNodeDescriptor * nodes;\n"
       << "  std::size_t node_count;\n"
+      << "  const FlowNodeDispatchDescriptor * node_dispatch_descriptors;\n"
+      << "  std::size_t node_dispatch_descriptor_count;\n"
       << "  const FlowEdgeDescriptor * edges;\n"
       << "  std::size_t edge_count;\n"
       << "  const FlowTriggerBindingDescriptor * trigger_bindings;\n"
@@ -881,6 +1027,9 @@ std::string generateSource(const Request& request) {
       << "  std::size_t external_interface_count;\n"
       << "  const SignedArtifactDependency * dependencies;\n"
       << "  std::size_t dependency_count;\n"
+      << "  FlowFrameDescriptor * ingress_frame_descriptors;\n"
+      << "  std::size_t ingress_frame_descriptor_count;\n"
+      << "  FlowInvocationDescriptor * current_invocation_descriptor;\n"
       << "  FlowIngressRuntimeState * ingress_runtime_states;\n"
       << "  std::size_t ingress_runtime_state_count;\n"
       << "  FlowNodeRuntimeState * node_runtime_states;\n"
@@ -905,6 +1054,31 @@ std::string generateSource(const Request& request) {
       << "  }\n"
       << "  return *left == *right;\n"
       << "}\n\n";
+  out << "static void clear_frame_descriptor(FlowFrameDescriptor & descriptor) {\n"
+      << "  descriptor.ingress_index = kInvalidIndex;\n"
+      << "  descriptor.type_descriptor_index = kInvalidIndex;\n"
+      << "  descriptor.alignment = 0;\n"
+      << "  descriptor.offset = 0;\n"
+      << "  descriptor.size = 0;\n"
+      << "  descriptor.stream_id = 0;\n"
+      << "  descriptor.sequence = 0;\n"
+      << "  descriptor.trace_token = 0;\n"
+      << "  descriptor.end_of_stream = false;\n"
+      << "  descriptor.occupied = false;\n"
+      << "}\n\n";
+  out << "static void clear_invocation_descriptor() {\n"
+      << "  kCurrentInvocationDescriptor.node_index = kInvalidIndex;\n"
+      << "  kCurrentInvocationDescriptor.dispatch_descriptor_index = kInvalidIndex;\n"
+      << "  kCurrentInvocationDescriptor.plugin_id = nullptr;\n"
+      << "  kCurrentInvocationDescriptor.method_id = nullptr;\n"
+      << "  kCurrentInvocationDescriptor.frames = kInvocationFrameBuffer;\n"
+      << "  kCurrentInvocationDescriptor.frame_count = 0;\n"
+      << "  for (std::size_t index = 0; index < "
+      << (request.ingress_descriptors.empty() ? 1 : request.ingress_descriptors.size())
+      << "; ++index) {\n"
+      << "    clear_frame_descriptor(kInvocationFrameBuffer[index]);\n"
+      << "  }\n"
+      << "}\n\n";
 
   out << renderByteArray("kFlowManifest", request.manifest_buffer) << "\n\n";
   out << renderStringPointerArray("kRequiredPlugins", request.required_plugins)
@@ -919,6 +1093,10 @@ std::string generateSource(const Request& request) {
                            trigger_records)
       << "\n\n";
   out << renderRecordArray("FlowNodeDescriptor", "kNodeDescriptors", node_records)
+      << "\n\n";
+  out << renderRecordArray("FlowNodeDispatchDescriptor",
+                           "kNodeDispatchDescriptors",
+                           node_dispatch_records)
       << "\n\n";
   out << renderRecordArray("FlowEdgeDescriptor", "kEdgeDescriptors", edge_records)
       << "\n\n";
@@ -936,6 +1114,15 @@ std::string generateSource(const Request& request) {
                            "kExternalInterfaceDescriptors",
                            external_interface_records)
       << "\n\n";
+  out << renderMutableRecordArray("FlowFrameDescriptor",
+                                  "kIngressFrameDescriptors",
+                                  request.ingress_descriptors.size())
+      << "\n\n";
+  out << renderMutableRecordArray("FlowFrameDescriptor",
+                                  "kInvocationFrameBuffer",
+                                  request.ingress_descriptors.size())
+      << "\n\n";
+  out << "static FlowInvocationDescriptor kCurrentInvocationDescriptor = {};\n\n";
   out << renderMutableRecordArray("FlowIngressRuntimeState",
                                   "kIngressRuntimeStates",
                                   request.ingress_descriptors.size())
@@ -1074,6 +1261,53 @@ std::string generateSource(const Request& request) {
       << "  }\n\n"
       << "  ingress_state.queued_frames += frame_count;\n"
       << "}\n\n";
+  out << "static void stage_ingress_frame(\n"
+      << "  std::uint32_t ingress_index,\n"
+      << "  const FlowFrameDescriptor * frame\n"
+      << ") {\n"
+      << "  if (frame == nullptr || ingress_index >= "
+      << request.ingress_descriptors.size() << ") {\n"
+      << "    return;\n"
+      << "  }\n"
+      << "  kIngressFrameDescriptors[ingress_index] = *frame;\n"
+      << "  kIngressFrameDescriptors[ingress_index].ingress_index = ingress_index;\n"
+      << "  kIngressFrameDescriptors[ingress_index].occupied = true;\n"
+      << "}\n\n";
+  out << "static void populate_invocation_descriptor(\n"
+      << "  std::uint32_t node_index,\n"
+      << "  std::uint32_t frame_budget\n"
+      << ") {\n"
+      << "  clear_invocation_descriptor();\n"
+      << "  if (node_index >= " << request.nodes.size() << ") {\n"
+      << "    return;\n"
+      << "  }\n"
+      << "  const FlowNodeDescriptor & node_descriptor = "
+         "kNodeDescriptors[node_index];\n"
+      << "  kCurrentInvocationDescriptor.node_index = node_index;\n"
+      << "  kCurrentInvocationDescriptor.dispatch_descriptor_index = node_index;\n"
+      << "  kCurrentInvocationDescriptor.plugin_id = node_descriptor.plugin_id;\n"
+      << "  kCurrentInvocationDescriptor.method_id = node_descriptor.method_id;\n"
+      << "  const std::uint32_t budget = frame_budget == 0 ? 1u : frame_budget;\n"
+      << "  for (\n"
+      << "    std::uint32_t offset = 0;\n"
+      << "    offset < node_descriptor.ingress_index_count &&\n"
+      << "    kCurrentInvocationDescriptor.frame_count < budget;\n"
+      << "    ++offset\n"
+      << "  ) {\n"
+      << "    const std::uint32_t ingress_index =\n"
+      << "      kNodeIngressIndices[node_descriptor.ingress_index_offset + offset];\n"
+      << "    const FlowIngressRuntimeState & ingress_state =\n"
+      << "      kIngressRuntimeStates[ingress_index];\n"
+      << "    const FlowFrameDescriptor & ingress_frame =\n"
+      << "      kIngressFrameDescriptors[ingress_index];\n"
+      << "    if (ingress_state.queued_frames == 0 || !ingress_frame.occupied) {\n"
+      << "      continue;\n"
+      << "    }\n"
+      << "    kInvocationFrameBuffer[kCurrentInvocationDescriptor.frame_count] =\n"
+      << "      ingress_frame;\n"
+      << "    kCurrentInvocationDescriptor.frame_count += 1;\n"
+      << "  }\n"
+      << "}\n\n";
 
   out << "static FlowRuntimeDescriptor kRuntimeDescriptor = {\n"
       << "  kProgramId,\n"
@@ -1094,6 +1328,8 @@ std::string generateSource(const Request& request) {
       << "  " << request.triggers.size() << ",\n"
       << "  kNodeDescriptors,\n"
       << "  " << request.nodes.size() << ",\n"
+      << "  kNodeDispatchDescriptors,\n"
+      << "  " << request.nodes.size() << ",\n"
       << "  kEdgeDescriptors,\n"
       << "  " << request.edges.size() << ",\n"
       << "  kTriggerBindingDescriptors,\n"
@@ -1106,6 +1342,9 @@ std::string generateSource(const Request& request) {
       << "  " << request.external_interfaces.size() << ",\n"
       << "  kDependencies,\n"
       << "  " << request.dependencies.size() << ",\n"
+      << "  kIngressFrameDescriptors,\n"
+      << "  " << request.ingress_descriptors.size() << ",\n"
+      << "  &kCurrentInvocationDescriptor,\n"
       << "  kIngressRuntimeStates,\n"
       << "  " << request.ingress_descriptors.size() << ",\n"
       << "  kNodeRuntimeStates,\n"
@@ -1128,6 +1367,61 @@ std::string generateSource(const Request& request) {
       << "  return " << namespace_name << "::kProgramVersion;\n"
       << "}\n\n";
   out << "extern \"C\" const " << namespace_name
+      << "::FlowTypeDescriptor * sdn_flow_get_type_descriptors() {\n"
+      << "  return " << namespace_name << "::kTypeDescriptors;\n"
+      << "}\n\n";
+  out << "extern \"C\" std::size_t sdn_flow_get_type_descriptor_count() {\n"
+      << "  return " << namespace_name
+      << "::kRuntimeDescriptor.type_descriptor_count;\n"
+      << "}\n\n";
+  out << "extern \"C\" const std::uint32_t * sdn_flow_get_accepted_type_indices() {\n"
+      << "  return " << namespace_name << "::kAcceptedTypeIndices;\n"
+      << "}\n\n";
+  out << "extern \"C\" std::size_t sdn_flow_get_accepted_type_index_count() {\n"
+      << "  return " << namespace_name
+      << "::kRuntimeDescriptor.accepted_type_index_count;\n"
+      << "}\n\n";
+  out << "extern \"C\" const " << namespace_name
+      << "::FlowTriggerDescriptor * sdn_flow_get_trigger_descriptors() {\n"
+      << "  return " << namespace_name << "::kTriggerDescriptors;\n"
+      << "}\n\n";
+  out << "extern \"C\" std::size_t sdn_flow_get_trigger_descriptor_count() {\n"
+      << "  return " << namespace_name
+      << "::kRuntimeDescriptor.trigger_count;\n"
+      << "}\n\n";
+  out << "extern \"C\" const " << namespace_name
+      << "::FlowNodeDescriptor * sdn_flow_get_node_descriptors() {\n"
+      << "  return " << namespace_name << "::kNodeDescriptors;\n"
+      << "}\n\n";
+  out << "extern \"C\" std::size_t sdn_flow_get_node_descriptor_count() {\n"
+      << "  return " << namespace_name
+      << "::kRuntimeDescriptor.node_count;\n"
+      << "}\n\n";
+  out << "extern \"C\" const " << namespace_name
+      << "::FlowNodeDispatchDescriptor * sdn_flow_get_node_dispatch_descriptors() {\n"
+      << "  return " << namespace_name << "::kNodeDispatchDescriptors;\n"
+      << "}\n\n";
+  out << "extern \"C\" std::size_t sdn_flow_get_node_dispatch_descriptor_count() {\n"
+      << "  return " << namespace_name
+      << "::kRuntimeDescriptor.node_dispatch_descriptor_count;\n"
+      << "}\n\n";
+  out << "extern \"C\" const " << namespace_name
+      << "::FlowEdgeDescriptor * sdn_flow_get_edge_descriptors() {\n"
+      << "  return " << namespace_name << "::kEdgeDescriptors;\n"
+      << "}\n\n";
+  out << "extern \"C\" std::size_t sdn_flow_get_edge_descriptor_count() {\n"
+      << "  return " << namespace_name
+      << "::kRuntimeDescriptor.edge_count;\n"
+      << "}\n\n";
+  out << "extern \"C\" const " << namespace_name
+      << "::FlowTriggerBindingDescriptor * sdn_flow_get_trigger_binding_descriptors() {\n"
+      << "  return " << namespace_name << "::kTriggerBindingDescriptors;\n"
+      << "}\n\n";
+  out << "extern \"C\" std::size_t sdn_flow_get_trigger_binding_descriptor_count() {\n"
+      << "  return " << namespace_name
+      << "::kRuntimeDescriptor.trigger_binding_count;\n"
+      << "}\n\n";
+  out << "extern \"C\" const " << namespace_name
       << "::SignedArtifactDependency * sdn_flow_get_dependency_descriptors() {\n"
       << "  return " << namespace_name << "::kDependencies;\n"
       << "}\n\n";
@@ -1140,6 +1434,30 @@ std::string generateSource(const Request& request) {
       << "}\n\n";
   out << "extern \"C\" std::size_t sdn_flow_get_ingress_descriptor_count() {\n"
       << "  return " << namespace_name << "::kRuntimeDescriptor.ingress_count;\n"
+      << "}\n\n";
+  out << "extern \"C\" " << namespace_name
+      << "::FlowFrameDescriptor * sdn_flow_get_ingress_frame_descriptors() {\n"
+      << "  return " << namespace_name << "::kIngressFrameDescriptors;\n"
+      << "}\n\n";
+  out << "extern \"C\" std::size_t sdn_flow_get_ingress_frame_descriptor_count() {\n"
+      << "  return " << namespace_name
+      << "::kRuntimeDescriptor.ingress_frame_descriptor_count;\n"
+      << "}\n\n";
+  out << "extern \"C\" const std::uint32_t * sdn_flow_get_node_ingress_indices() {\n"
+      << "  return " << namespace_name << "::kNodeIngressIndices;\n"
+      << "}\n\n";
+  out << "extern \"C\" std::size_t sdn_flow_get_node_ingress_index_count() {\n"
+      << "  return " << namespace_name
+      << "::kRuntimeDescriptor.node_ingress_index_count;\n"
+      << "}\n\n";
+  out << "extern \"C\" const " << namespace_name
+      << "::FlowExternalInterfaceDescriptor * sdn_flow_get_external_interface_descriptors() {\n"
+      << "  return " << namespace_name
+      << "::kExternalInterfaceDescriptors;\n"
+      << "}\n\n";
+  out << "extern \"C\" std::size_t sdn_flow_get_external_interface_descriptor_count() {\n"
+      << "  return " << namespace_name
+      << "::kRuntimeDescriptor.external_interface_count;\n"
       << "}\n\n";
   out << "extern \"C\" " << namespace_name
       << "::FlowIngressRuntimeState * sdn_flow_get_ingress_runtime_states() {\n"
@@ -1157,7 +1475,23 @@ std::string generateSource(const Request& request) {
       << "  return " << namespace_name
       << "::kRuntimeDescriptor.node_runtime_state_count;\n"
       << "}\n\n";
+  out << "extern \"C\" " << namespace_name
+      << "::FlowInvocationDescriptor * sdn_flow_get_current_invocation_descriptor() {\n"
+      << "  return " << namespace_name << "::kRuntimeDescriptor.current_invocation_descriptor;\n"
+      << "}\n\n";
+  out << "extern \"C\" std::uint32_t sdn_flow_prepare_node_invocation_descriptor(\n"
+      << "  std::uint32_t node_index,\n"
+      << "  std::uint32_t frame_budget\n"
+      << ") {\n"
+      << "  " << namespace_name
+      << "::populate_invocation_descriptor(node_index, frame_budget);\n"
+      << "  return static_cast<std::uint32_t>(\n"
+      << "    " << namespace_name
+      << "::kCurrentInvocationDescriptor.frame_count\n"
+      << "  );\n"
+      << "}\n\n";
   out << "extern \"C\" void sdn_flow_reset_runtime_state() {\n"
+      << "  " << namespace_name << "::clear_invocation_descriptor();\n"
       << "  for (std::size_t index = 0; index < " << namespace_name
       << "::kRuntimeDescriptor.ingress_runtime_state_count; ++index) {\n"
       << "    " << namespace_name
@@ -1166,6 +1500,9 @@ std::string generateSource(const Request& request) {
       << "::kIngressRuntimeStates[index].total_dropped = 0;\n"
       << "    " << namespace_name
       << "::kIngressRuntimeStates[index].queued_frames = 0;\n"
+      << "    " << namespace_name
+      << "::clear_frame_descriptor(" << namespace_name
+      << "::kIngressFrameDescriptors[index]);\n"
       << "  }\n"
       << "  for (std::size_t index = 0; index < " << namespace_name
       << "::kRuntimeDescriptor.node_runtime_state_count; ++index) {\n"
@@ -1213,6 +1550,41 @@ std::string generateSource(const Request& request) {
       << "  }\n"
       << "  return routed_binding_count;\n"
       << "}\n\n";
+  out << "extern \"C\" std::uint32_t sdn_flow_enqueue_trigger_frame(\n"
+      << "  std::uint32_t trigger_index,\n"
+      << "  const " << namespace_name << "::FlowFrameDescriptor * frame\n"
+      << ") {\n"
+      << "  if (frame == nullptr) {\n"
+      << "    return 0;\n"
+      << "  }\n"
+      << "  std::uint32_t routed_binding_count = 0;\n"
+      << "  for (std::size_t binding_index = 0; binding_index < "
+      << namespace_name << "::kRuntimeDescriptor.trigger_binding_count; "
+         "++binding_index) {\n"
+      << "    const " << namespace_name
+      << "::FlowTriggerBindingDescriptor & binding =\n"
+      << "      " << namespace_name
+      << "::kTriggerBindingDescriptors[binding_index];\n"
+      << "    if (binding.trigger_index != trigger_index) {\n"
+      << "      continue;\n"
+      << "    }\n"
+      << "    if (binding.target_ingress_index == " << namespace_name
+      << "::kInvalidIndex) {\n"
+      << "      continue;\n"
+      << "    }\n"
+      << "    " << namespace_name
+      << "::stage_ingress_frame(binding.target_ingress_index, frame);\n"
+      << "    " << namespace_name
+      << "::apply_backpressure(binding.target_ingress_index, 1u);\n"
+      << "    if (binding.target_node_index != " << namespace_name
+      << "::kInvalidIndex) {\n"
+      << "      " << namespace_name
+      << "::recompute_node_runtime_state(binding.target_node_index);\n"
+      << "    }\n"
+      << "    routed_binding_count += 1;\n"
+      << "  }\n"
+      << "  return routed_binding_count;\n"
+      << "}\n\n";
   out << "extern \"C\" std::uint32_t sdn_flow_enqueue_edge_frames("
          "std::uint32_t edge_index, std::uint32_t frame_count) {\n"
       << "  if (edge_index >= " << namespace_name
@@ -1228,6 +1600,32 @@ std::string generateSource(const Request& request) {
       << "  }\n"
       << "  " << namespace_name
       << "::apply_backpressure(edge.target_ingress_index, frame_count);\n"
+      << "  if (edge.to_node_index != " << namespace_name
+      << "::kInvalidIndex) {\n"
+      << "    " << namespace_name
+      << "::recompute_node_runtime_state(edge.to_node_index);\n"
+      << "  }\n"
+      << "  return 1;\n"
+      << "}\n\n";
+  out << "extern \"C\" std::uint32_t sdn_flow_enqueue_edge_frame(\n"
+      << "  std::uint32_t edge_index,\n"
+      << "  const " << namespace_name << "::FlowFrameDescriptor * frame\n"
+      << ") {\n"
+      << "  if (frame == nullptr || edge_index >= " << namespace_name
+      << "::kRuntimeDescriptor.edge_count) {\n"
+      << "    return 0;\n"
+      << "  }\n"
+      << "  const " << namespace_name
+      << "::FlowEdgeDescriptor & edge = " << namespace_name
+      << "::kEdgeDescriptors[edge_index];\n"
+      << "  if (edge.target_ingress_index == " << namespace_name
+      << "::kInvalidIndex) {\n"
+      << "    return 0;\n"
+      << "  }\n"
+      << "  " << namespace_name
+      << "::stage_ingress_frame(edge.target_ingress_index, frame);\n"
+      << "  " << namespace_name
+      << "::apply_backpressure(edge.target_ingress_index, 1u);\n"
       << "  if (edge.to_node_index != " << namespace_name
       << "::kInvalidIndex) {\n"
       << "    " << namespace_name
@@ -1252,6 +1650,8 @@ std::string generateSource(const Request& request) {
       << "::kRuntimeDescriptor.node_count) {\n"
       << "    return 0;\n"
       << "  }\n\n"
+      << "  " << namespace_name
+      << "::populate_invocation_descriptor(node_index, frame_budget);\n"
       << "  " << namespace_name
       << "::FlowNodeRuntimeState & node_state =\n"
       << "    " << namespace_name << "::kNodeRuntimeStates[node_index];\n"
@@ -1307,6 +1707,7 @@ std::string generateSource(const Request& request) {
       << "  node_state.last_status = status_code;\n"
       << "  node_state.backlog_remaining = backlog_remaining;\n"
       << "  node_state.yielded = yielded;\n"
+      << "  " << namespace_name << "::clear_invocation_descriptor();\n"
       << "  " << namespace_name
       << "::recompute_node_runtime_state(node_index);\n"
       << "}\n\n";

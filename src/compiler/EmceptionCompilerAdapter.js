@@ -14,21 +14,56 @@ const DEFAULT_FLAGS = Object.freeze([
   "-sMODULARIZE=1",
   "-sEXPORT_ES6=1",
   "-sENVIRONMENT=web,worker,node",
-  "-sEXPORTED_FUNCTIONS=['_main','_flow_get_manifest_flatbuffer','_flow_get_manifest_flatbuffer_size','_sdn_flow_get_program_id','_sdn_flow_get_program_name','_sdn_flow_get_program_version','_sdn_flow_get_dependency_descriptors','_sdn_flow_get_dependency_count','_sdn_flow_get_ingress_descriptors','_sdn_flow_get_ingress_descriptor_count','_sdn_flow_get_ingress_runtime_states','_sdn_flow_get_ingress_runtime_state_count','_sdn_flow_get_node_runtime_states','_sdn_flow_get_node_runtime_state_count','_sdn_flow_reset_runtime_state','_sdn_flow_enqueue_trigger_frames','_sdn_flow_enqueue_edge_frames','_sdn_flow_get_ready_node_index','_sdn_flow_begin_node_invocation','_sdn_flow_complete_node_invocation','_sdn_flow_get_runtime_descriptor']",
+  "-sEXPORTED_FUNCTIONS=['_main','_malloc','_free','_flow_get_manifest_flatbuffer','_flow_get_manifest_flatbuffer_size','_sdn_flow_get_program_id','_sdn_flow_get_program_name','_sdn_flow_get_program_version','_sdn_flow_get_type_descriptors','_sdn_flow_get_type_descriptor_count','_sdn_flow_get_accepted_type_indices','_sdn_flow_get_accepted_type_index_count','_sdn_flow_get_trigger_descriptors','_sdn_flow_get_trigger_descriptor_count','_sdn_flow_get_node_descriptors','_sdn_flow_get_node_descriptor_count','_sdn_flow_get_node_dispatch_descriptors','_sdn_flow_get_node_dispatch_descriptor_count','_sdn_flow_get_edge_descriptors','_sdn_flow_get_edge_descriptor_count','_sdn_flow_get_trigger_binding_descriptors','_sdn_flow_get_trigger_binding_descriptor_count','_sdn_flow_get_dependency_descriptors','_sdn_flow_get_dependency_count','_sdn_flow_get_ingress_descriptors','_sdn_flow_get_ingress_descriptor_count','_sdn_flow_get_ingress_frame_descriptors','_sdn_flow_get_ingress_frame_descriptor_count','_sdn_flow_get_node_ingress_indices','_sdn_flow_get_node_ingress_index_count','_sdn_flow_get_external_interface_descriptors','_sdn_flow_get_external_interface_descriptor_count','_sdn_flow_get_ingress_runtime_states','_sdn_flow_get_ingress_runtime_state_count','_sdn_flow_get_node_runtime_states','_sdn_flow_get_node_runtime_state_count','_sdn_flow_get_current_invocation_descriptor','_sdn_flow_prepare_node_invocation_descriptor','_sdn_flow_reset_runtime_state','_sdn_flow_enqueue_trigger_frames','_sdn_flow_enqueue_trigger_frame','_sdn_flow_enqueue_edge_frames','_sdn_flow_enqueue_edge_frame','_sdn_flow_get_ready_node_index','_sdn_flow_begin_node_invocation','_sdn_flow_complete_node_invocation','_sdn_flow_get_runtime_descriptor']",
 ]);
 
 const DEFAULT_RUNTIME_MODEL = "compiled-cpp-wasm";
 const DEFAULT_RUNTIME_EXPORTS = Object.freeze({
+  mallocSymbol: "malloc",
+  freeSymbol: "free",
   descriptorSymbol: "sdn_flow_get_runtime_descriptor",
+  typeDescriptorsSymbol: "sdn_flow_get_type_descriptors",
+  typeDescriptorCountSymbol: "sdn_flow_get_type_descriptor_count",
+  acceptedTypeIndicesSymbol: "sdn_flow_get_accepted_type_indices",
+  acceptedTypeIndexCountSymbol: "sdn_flow_get_accepted_type_index_count",
+  triggerDescriptorsSymbol: "sdn_flow_get_trigger_descriptors",
+  triggerDescriptorCountSymbol: "sdn_flow_get_trigger_descriptor_count",
+  nodeDescriptorsSymbol: "sdn_flow_get_node_descriptors",
+  nodeDescriptorCountSymbol: "sdn_flow_get_node_descriptor_count",
+  nodeDispatchDescriptorsSymbol: "sdn_flow_get_node_dispatch_descriptors",
+  nodeDispatchDescriptorCountSymbol:
+    "sdn_flow_get_node_dispatch_descriptor_count",
+  edgeDescriptorsSymbol: "sdn_flow_get_edge_descriptors",
+  edgeDescriptorCountSymbol: "sdn_flow_get_edge_descriptor_count",
+  triggerBindingDescriptorsSymbol: "sdn_flow_get_trigger_binding_descriptors",
+  triggerBindingDescriptorCountSymbol:
+    "sdn_flow_get_trigger_binding_descriptor_count",
+  dependencyDescriptorsSymbol: "sdn_flow_get_dependency_descriptors",
+  dependencyCountSymbol: "sdn_flow_get_dependency_count",
   resetStateSymbol: "sdn_flow_reset_runtime_state",
   ingressDescriptorsSymbol: "sdn_flow_get_ingress_descriptors",
   ingressDescriptorCountSymbol: "sdn_flow_get_ingress_descriptor_count",
+  ingressFrameDescriptorsSymbol: "sdn_flow_get_ingress_frame_descriptors",
+  ingressFrameDescriptorCountSymbol:
+    "sdn_flow_get_ingress_frame_descriptor_count",
+  nodeIngressIndicesSymbol: "sdn_flow_get_node_ingress_indices",
+  nodeIngressIndexCountSymbol: "sdn_flow_get_node_ingress_index_count",
+  externalInterfaceDescriptorsSymbol:
+    "sdn_flow_get_external_interface_descriptors",
+  externalInterfaceDescriptorCountSymbol:
+    "sdn_flow_get_external_interface_descriptor_count",
   ingressStatesSymbol: "sdn_flow_get_ingress_runtime_states",
   ingressStateCountSymbol: "sdn_flow_get_ingress_runtime_state_count",
   nodeStatesSymbol: "sdn_flow_get_node_runtime_states",
   nodeStateCountSymbol: "sdn_flow_get_node_runtime_state_count",
+  currentInvocationDescriptorSymbol:
+    "sdn_flow_get_current_invocation_descriptor",
+  prepareInvocationDescriptorSymbol:
+    "sdn_flow_prepare_node_invocation_descriptor",
   enqueueTriggerSymbol: "sdn_flow_enqueue_trigger_frames",
+  enqueueTriggerFrameSymbol: "sdn_flow_enqueue_trigger_frame",
   enqueueEdgeSymbol: "sdn_flow_enqueue_edge_frames",
+  enqueueEdgeFrameSymbol: "sdn_flow_enqueue_edge_frame",
   readyNodeSymbol: "sdn_flow_get_ready_node_index",
   beginInvocationSymbol: "sdn_flow_begin_node_invocation",
   completeInvocationSymbol: "sdn_flow_complete_node_invocation",
@@ -105,11 +140,11 @@ export class EmceptionCompilerAdapter {
     const source =
       typeof generatedSource === "string"
         ? generatedSource
-        : generatedSource?.source ?? "";
+        : (generatedSource?.source ?? "");
     const sourceGeneratorModel =
       typeof generatedSource === "string"
         ? "native-cpp-wasm"
-        : generatedSource?.generatorModel ?? "native-cpp-wasm";
+        : (generatedSource?.generatorModel ?? "native-cpp-wasm");
     const outputName = String(metadata?.outputName ?? this.#outputName);
     const flags = Array.isArray(metadata?.flags) ? metadata.flags : this.#flags;
     return {

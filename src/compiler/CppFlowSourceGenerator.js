@@ -61,7 +61,11 @@ function getMapIndex(indexMap, key) {
   return indexMap.get(key);
 }
 
-function createIngressTopology(normalizedProgram, nodeIndexById, triggerIndexById) {
+function createIngressTopology(
+  normalizedProgram,
+  nodeIndexById,
+  triggerIndexById,
+) {
   const ingressDescriptors = [];
   const edgeIngressIndexByEdgeIndex = new Map();
   const triggerBindingIngressIndexByBindingIndex = new Map();
@@ -196,7 +200,10 @@ function createGeneratorRequest({
     normalizedProgram.nodes.map((node, index) => [node.nodeId, index]),
   );
   const triggerIndexById = new Map(
-    normalizedProgram.triggers.map((trigger, index) => [trigger.triggerId, index]),
+    normalizedProgram.triggers.map((trigger, index) => [
+      trigger.triggerId,
+      index,
+    ]),
   );
   const ingressTopology = createIngressTopology(
     normalizedProgram,
@@ -261,19 +268,21 @@ function createGeneratorRequest({
           INVALID_INDEX,
       };
     }),
-    triggerBindings: normalizedProgram.triggerBindings.map((binding, bindingIndex) => ({
-      triggerId: binding.triggerId,
-      triggerIndex: getMapIndex(triggerIndexById, binding.triggerId),
-      targetNodeId: binding.targetNodeId,
-      targetNodeIndex: getMapIndex(nodeIndexById, binding.targetNodeId),
-      targetPortId: binding.targetPortId,
-      backpressurePolicy: binding.backpressurePolicy ?? "",
-      queueDepth: binding.queueDepth,
-      targetIngressIndex:
-        ingressTopology.triggerBindingIngressIndexByBindingIndex.get(
-          bindingIndex,
-        ) ?? INVALID_INDEX,
-    })),
+    triggerBindings: normalizedProgram.triggerBindings.map(
+      (binding, bindingIndex) => ({
+        triggerId: binding.triggerId,
+        triggerIndex: getMapIndex(triggerIndexById, binding.triggerId),
+        targetNodeId: binding.targetNodeId,
+        targetNodeIndex: getMapIndex(nodeIndexById, binding.targetNodeId),
+        targetPortId: binding.targetPortId,
+        backpressurePolicy: binding.backpressurePolicy ?? "",
+        queueDepth: binding.queueDepth,
+        targetIngressIndex:
+          ingressTopology.triggerBindingIngressIndexByBindingIndex.get(
+            bindingIndex,
+          ) ?? INVALID_INDEX,
+      }),
+    ),
     ingressDescriptors: ingressTopology.ingressDescriptors,
     externalInterfaces: normalizedProgram.externalInterfaces.map(
       (externalInterface) => {
@@ -303,6 +312,18 @@ function createGeneratorRequest({
       sha256: dependency.sha256 ?? "",
       signature: dependency.signature ?? "",
       signerPublicKey: dependency.signerPublicKey ?? "",
+      entrypoint: dependency.entrypoint ?? "",
+      manifestExports: {
+        bytesSymbol: dependency.manifestExports?.bytesSymbol ?? "",
+        sizeSymbol: dependency.manifestExports?.sizeSymbol ?? "",
+      },
+      runtimeExports: {
+        initSymbol: dependency.runtimeExports?.initSymbol ?? "",
+        destroySymbol: dependency.runtimeExports?.destroySymbol ?? "",
+        mallocSymbol: dependency.runtimeExports?.mallocSymbol ?? "",
+        freeSymbol: dependency.runtimeExports?.freeSymbol ?? "",
+        streamInvokeSymbol: dependency.runtimeExports?.streamInvokeSymbol ?? "",
+      },
       wasm: toUint8Array(dependency.wasm),
       manifestBuffer: dependency.manifestBuffer
         ? toUint8Array(dependency.manifestBuffer)
@@ -426,6 +447,14 @@ function encodeGeneratorRequest(request) {
     writer.pushString(dependency.sha256);
     writer.pushString(dependency.signature);
     writer.pushString(dependency.signerPublicKey);
+    writer.pushString(dependency.entrypoint);
+    writer.pushString(dependency.manifestExports.bytesSymbol);
+    writer.pushString(dependency.manifestExports.sizeSymbol);
+    writer.pushString(dependency.runtimeExports.initSymbol);
+    writer.pushString(dependency.runtimeExports.destroySymbol);
+    writer.pushString(dependency.runtimeExports.mallocSymbol);
+    writer.pushString(dependency.runtimeExports.freeSymbol);
+    writer.pushString(dependency.runtimeExports.streamInvokeSymbol);
     writer.pushBytes(dependency.wasm);
     writer.pushBytes(dependency.manifestBuffer);
   });

@@ -1,4 +1,7 @@
-import { normalizeArtifactDependency, normalizeProgram } from "../runtime/index.js";
+import {
+  normalizeArtifactDependency,
+  normalizeProgram,
+} from "../runtime/index.js";
 import { sha256Bytes } from "../utils/crypto.js";
 import { bytesToHex, toUint8Array } from "../utils/encoding.js";
 
@@ -17,6 +20,13 @@ function normalizeSignedArtifact(artifact = {}) {
   };
 }
 
+function preferNonEmptyString(primary, fallback = null) {
+  if (typeof primary === "string" && primary.trim().length > 0) {
+    return primary;
+  }
+  return fallback;
+}
+
 function dependencyKey(dependency) {
   if (dependency.dependencyId) {
     return `dependency:${dependency.dependencyId}`;
@@ -30,7 +40,9 @@ function dependencyKey(dependency) {
   if (dependency.pluginId) {
     return `plugin:${dependency.pluginId}`;
   }
-  throw new Error("Signed artifact is missing dependencyId/artifactId/pluginId.");
+  throw new Error(
+    "Signed artifact is missing dependencyId/artifactId/pluginId.",
+  );
 }
 
 export class SignedArtifactCatalog {
@@ -99,6 +111,38 @@ export class SignedArtifactCatalog {
         wasm: artifact.wasm,
         manifestBuffer: artifact.manifestBuffer,
         sha256: artifact.sha256 ?? computedSha256,
+        manifestExports: {
+          bytesSymbol: preferNonEmptyString(
+            dependency.manifestExports?.bytesSymbol,
+            artifact.manifestExports?.bytesSymbol,
+          ),
+          sizeSymbol: preferNonEmptyString(
+            dependency.manifestExports?.sizeSymbol,
+            artifact.manifestExports?.sizeSymbol,
+          ),
+        },
+        runtimeExports: {
+          initSymbol: preferNonEmptyString(
+            dependency.runtimeExports?.initSymbol,
+            artifact.runtimeExports?.initSymbol,
+          ),
+          destroySymbol: preferNonEmptyString(
+            dependency.runtimeExports?.destroySymbol,
+            artifact.runtimeExports?.destroySymbol,
+          ),
+          mallocSymbol: preferNonEmptyString(
+            dependency.runtimeExports?.mallocSymbol,
+            artifact.runtimeExports?.mallocSymbol,
+          ),
+          freeSymbol: preferNonEmptyString(
+            dependency.runtimeExports?.freeSymbol,
+            artifact.runtimeExports?.freeSymbol,
+          ),
+          streamInvokeSymbol: preferNonEmptyString(
+            dependency.runtimeExports?.streamInvokeSymbol,
+            artifact.runtimeExports?.streamInvokeSymbol,
+          ),
+        },
       });
     }
     return resolved;

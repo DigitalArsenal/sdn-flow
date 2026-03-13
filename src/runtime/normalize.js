@@ -21,7 +21,10 @@ function normalizeArray(values) {
 
 function normalizeTypeRef(typeRef = {}) {
   return {
-    schemaName: normalizeString(typeRef.schemaName ?? typeRef.schema_name, null),
+    schemaName: normalizeString(
+      typeRef.schemaName ?? typeRef.schema_name,
+      null,
+    ),
     fileIdentifier: normalizeString(
       typeRef.fileIdentifier ?? typeRef.file_identifier,
       null,
@@ -79,7 +82,10 @@ function normalizeArtifactDependency(dependency = {}) {
       dependency.dependencyId ?? dependency.dependency_id,
       "",
     ),
-    pluginId: normalizeString(dependency.pluginId ?? dependency.plugin_id, null),
+    pluginId: normalizeString(
+      dependency.pluginId ?? dependency.plugin_id,
+      null,
+    ),
     version: normalizeString(dependency.version, null),
     artifactId: normalizeString(
       dependency.artifactId ?? dependency.artifact_id,
@@ -105,10 +111,12 @@ function normalizeArtifactDependency(dependency = {}) {
     entrypoint: normalizeString(dependency.entrypoint, null),
     requiredCapabilities: normalizeArray(
       dependency.requiredCapabilities ?? dependency.required_capabilities,
-    ).map((value) => normalizeString(value, null)).filter(Boolean),
-    exports: normalizeArray(dependency.exports).map((value) =>
-      normalizeString(value, null),
-    ).filter(Boolean),
+    )
+      .map((value) => normalizeString(value, null))
+      .filter(Boolean),
+    exports: normalizeArray(dependency.exports)
+      .map((value) => normalizeString(value, null))
+      .filter(Boolean),
     manifestExports: {
       bytesSymbol:
         normalizeString(
@@ -122,6 +130,37 @@ function normalizeArtifactDependency(dependency = {}) {
             dependency.manifest_exports?.size_symbol,
           null,
         ) ?? DefaultManifestExports.pluginSizeSymbol,
+    },
+    runtimeExports: {
+      initSymbol:
+        normalizeString(
+          dependency.runtimeExports?.initSymbol ??
+            dependency.runtime_exports?.init_symbol,
+          null,
+        ) ?? "plugin_init",
+      destroySymbol:
+        normalizeString(
+          dependency.runtimeExports?.destroySymbol ??
+            dependency.runtime_exports?.destroy_symbol,
+          null,
+        ) ?? "plugin_destroy",
+      mallocSymbol:
+        normalizeString(
+          dependency.runtimeExports?.mallocSymbol ??
+            dependency.runtime_exports?.malloc_symbol,
+          null,
+        ) ?? "malloc",
+      freeSymbol:
+        normalizeString(
+          dependency.runtimeExports?.freeSymbol ??
+            dependency.runtime_exports?.free_symbol,
+          null,
+        ) ?? "free",
+      streamInvokeSymbol: normalizeString(
+        dependency.runtimeExports?.streamInvokeSymbol ??
+          dependency.runtime_exports?.stream_invoke_symbol,
+        null,
+      ),
     },
     metadata:
       dependency.metadata && typeof dependency.metadata === "object"
@@ -147,7 +186,10 @@ function normalizePort(port = {}) {
 function normalizeMethod(method = {}) {
   return {
     methodId: normalizeString(method.methodId ?? method.method_id, ""),
-    displayName: normalizeString(method.displayName ?? method.display_name, null),
+    displayName: normalizeString(
+      method.displayName ?? method.display_name,
+      null,
+    ),
     inputPorts: normalizeArray(method.inputPorts ?? method.input_ports).map(
       normalizePort,
     ),
@@ -205,10 +247,12 @@ export function normalizeManifest(manifest = {}) {
 function normalizeTrigger(trigger = {}) {
   return {
     triggerId: normalizeString(trigger.triggerId ?? trigger.trigger_id, ""),
-    kind:
-      normalizeString(trigger.kind, null) ?? TriggerKind.MANUAL,
+    kind: normalizeString(trigger.kind, null) ?? TriggerKind.MANUAL,
     source: normalizeString(trigger.source, null),
-    protocolId: normalizeString(trigger.protocolId ?? trigger.protocol_id, null),
+    protocolId: normalizeString(
+      trigger.protocolId ?? trigger.protocol_id,
+      null,
+    ),
     defaultIntervalMs: Number(
       trigger.defaultIntervalMs ?? trigger.default_interval_ms ?? 0,
     ),
@@ -224,12 +268,13 @@ function normalizeNode(node = {}) {
     nodeId: normalizeString(node.nodeId ?? node.node_id, ""),
     pluginId: normalizeString(node.pluginId ?? node.plugin_id, ""),
     methodId: normalizeString(node.methodId ?? node.method_id, ""),
-    kind:
-      normalizeString(node.kind, null) ?? NodeKind.TRANSFORM,
+    kind: normalizeString(node.kind, null) ?? NodeKind.TRANSFORM,
     drainPolicy:
       normalizeString(node.drainPolicy ?? node.drain_policy, null) ??
       DrainPolicy.DRAIN_UNTIL_YIELD,
-    timeSliceMicros: Number(node.timeSliceMicros ?? node.time_slice_micros ?? 0),
+    timeSliceMicros: Number(
+      node.timeSliceMicros ?? node.time_slice_micros ?? 0,
+    ),
   };
 }
 
@@ -288,7 +333,9 @@ export function normalizeProgram(program = {}) {
     ).map(normalizeTriggerBinding),
     requiredPlugins: normalizeArray(
       program.requiredPlugins ?? program.required_plugins,
-    ).map((pluginId) => normalizeString(pluginId, null)).filter(Boolean),
+    )
+      .map((pluginId) => normalizeString(pluginId, null))
+      .filter(Boolean),
     externalInterfaces: normalizeArray(
       program.externalInterfaces ?? program.external_interfaces,
     ).map(normalizeExternalInterface),
