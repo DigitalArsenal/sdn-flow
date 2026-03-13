@@ -31,7 +31,9 @@ function frame(portId, schemaName, fileIdentifier, payload, overrides = {}) {
     ownership: "shared",
     generation: 0,
     mutability: "immutable",
-    traceId: overrides.traceId ?? `${schemaName}:${payload?.norad ?? payload?.anchorNorad ?? payload?.objectNorad ?? "x"}`,
+    traceId:
+      overrides.traceId ??
+      `${schemaName}:${payload?.norad ?? payload?.anchorNorad ?? payload?.objectNorad ?? "x"}`,
     streamId: overrides.streamId ?? 1,
     sequence: overrides.sequence ?? 1,
     payload,
@@ -52,11 +54,18 @@ test("ISS proximity OEM example summarizes external requirements for the visual 
   const session = new FlowDesignerSession({ program: flow });
   const summary = session.inspectRequirements({ manifests });
 
-  assert.deepEqual(summary.capabilities, ["pubsub", "storage_query", "storage_write"]);
+  assert.deepEqual(summary.capabilities, [
+    "pubsub",
+    "storage_query",
+    "storage_write",
+  ]);
   assert.equal(summary.artifactDependencies.length, 6);
   assert.equal(
     summary.externalInterfaces.some(
-      (item) => item.kind === "pubsub" && item.direction === "input" && item.resource === "/sdn/catalog/omm",
+      (item) =>
+        item.kind === "pubsub" &&
+        item.direction === "input" &&
+        item.resource === "/sdn/catalog/omm",
     ),
     true,
   );
@@ -68,21 +77,30 @@ test("ISS proximity OEM example summarizes external requirements for the visual 
   );
   assert.equal(
     summary.externalInterfaces.some(
-      (item) => item.kind === "database" && item.resource === "memory://iss-proximity",
+      (item) =>
+        item.kind === "database" && item.resource === "memory://iss-proximity",
     ),
     true,
   );
 });
 
-test("ISS proximity OEM example runs in interpreted mode end-to-end", async () => {
+test("ISS proximity OEM example runs through the temporary reference harness end-to-end", async () => {
   const flow = await readJson("../examples/flows/iss-proximity-oem/flow.json");
   const manifests = {
     flatsql: await readJson("../examples/plugins/flatsql-memory/manifest.json"),
-    queryAnchor: await readJson("../examples/plugins/query-anchor/manifest.json"),
+    queryAnchor: await readJson(
+      "../examples/plugins/query-anchor/manifest.json",
+    ),
     sgp4: await readJson("../examples/plugins/sgp4-propagator/manifest.json"),
-    oemGenerator: await readJson("../examples/plugins/oem-generator/manifest.json"),
-    oemFileWriter: await readJson("../examples/plugins/oem-file-writer/manifest.json"),
-    oemPublisher: await readJson("../examples/plugins/oem-publisher/manifest.json"),
+    oemGenerator: await readJson(
+      "../examples/plugins/oem-generator/manifest.json",
+    ),
+    oemFileWriter: await readJson(
+      "../examples/plugins/oem-file-writer/manifest.json",
+    ),
+    oemPublisher: await readJson(
+      "../examples/plugins/oem-publisher/manifest.json",
+    ),
   };
 
   const registry = new MethodRegistry();
@@ -217,9 +235,27 @@ test("ISS proximity OEM example runs in interpreted mode end-to-end", async () =
   runtime.loadProgram(flow);
 
   runtime.enqueueTriggerFrames("omm-subscription", [
-    frame("omms", "OMM.fbs", "OMM ", { norad: 25544, distanceKm: 0 }, { sequence: 1 }),
-    frame("omms", "OMM.fbs", "OMM ", { norad: 40967, distanceKm: 24 }, { sequence: 2 }),
-    frame("omms", "OMM.fbs", "OMM ", { norad: 12345, distanceKm: 72 }, { sequence: 3 }),
+    frame(
+      "omms",
+      "OMM.fbs",
+      "OMM ",
+      { norad: 25544, distanceKm: 0 },
+      { sequence: 1 },
+    ),
+    frame(
+      "omms",
+      "OMM.fbs",
+      "OMM ",
+      { norad: 40967, distanceKm: 24 },
+      { sequence: 2 },
+    ),
+    frame(
+      "omms",
+      "OMM.fbs",
+      "OMM ",
+      { norad: 12345, distanceKm: 72 },
+      { sequence: 3 },
+    ),
   ]);
   runtime.enqueueTriggerFrames("refresh-query", [
     frame("tick", "TimerTick.fbs", "TICK", { at: "2026-03-12T12:00:00Z" }),
@@ -228,6 +264,12 @@ test("ISS proximity OEM example runs in interpreted mode end-to-end", async () =
   const result = await runtime.drain();
 
   assert.equal(result.idle, true);
-  assert.deepEqual(writtenOems.sort((left, right) => left - right), [25544, 40967]);
-  assert.deepEqual(publishedOems.sort((left, right) => left - right), [25544, 40967]);
+  assert.deepEqual(
+    writtenOems.sort((left, right) => left - right),
+    [25544, 40967],
+  );
+  assert.deepEqual(
+    publishedOems.sort((left, right) => left - right),
+    [25544, 40967],
+  );
 });

@@ -14,8 +14,16 @@ const DEFAULT_FLAGS = Object.freeze([
   "-sMODULARIZE=1",
   "-sEXPORT_ES6=1",
   "-sENVIRONMENT=web,worker,node",
-  "-sEXPORTED_FUNCTIONS=['_main','_flow_get_manifest_flatbuffer','_flow_get_manifest_flatbuffer_size','_sdn_flow_get_program_id','_sdn_flow_get_program_name','_sdn_flow_get_program_version','_sdn_flow_get_dependency_descriptors','_sdn_flow_get_dependency_count']",
+  "-sEXPORTED_FUNCTIONS=['_main','_flow_get_manifest_flatbuffer','_flow_get_manifest_flatbuffer_size','_sdn_flow_get_program_id','_sdn_flow_get_program_name','_sdn_flow_get_program_version','_sdn_flow_get_dependency_descriptors','_sdn_flow_get_dependency_count','_sdn_flow_get_node_runtime_states','_sdn_flow_get_node_runtime_state_count','_sdn_flow_reset_runtime_state','_sdn_flow_get_runtime_descriptor']",
 ]);
+
+const DEFAULT_RUNTIME_MODEL = "compiled-cpp-wasm";
+const DEFAULT_RUNTIME_EXPORTS = Object.freeze({
+  descriptorSymbol: "sdn_flow_get_runtime_descriptor",
+  resetStateSymbol: "sdn_flow_reset_runtime_state",
+  nodeStatesSymbol: "sdn_flow_get_node_runtime_states",
+  nodeStateCountSymbol: "sdn_flow_get_node_runtime_state_count",
+});
 
 async function maybeCall(value) {
   return value instanceof Promise ? value : Promise.resolve(value);
@@ -71,9 +79,8 @@ export class EmceptionCompilerAdapter {
 
   async prepareCompile({ program, metadata = null } = {}) {
     const normalizedProgram = normalizeProgram(program);
-    const dependencies = await this.#artifactCatalog.resolveProgramDependencies(
-      normalizedProgram,
-    );
+    const dependencies =
+      await this.#artifactCatalog.resolveProgramDependencies(normalizedProgram);
     const manifestBuffer = await this.#buildManifestBuffer({
       program: normalizedProgram,
       metadata,
@@ -90,6 +97,8 @@ export class EmceptionCompilerAdapter {
       program: normalizedProgram,
       manifestBuffer,
       dependencies,
+      runtimeModel: DEFAULT_RUNTIME_MODEL,
+      runtimeExports: { ...DEFAULT_RUNTIME_EXPORTS },
       outputName,
       flags,
       source,
@@ -109,6 +118,8 @@ export class EmceptionCompilerAdapter {
       return {
         programId: compilePlan.program.programId,
         manifestBuffer: compilePlan.manifestBuffer,
+        runtimeModel: compilePlan.runtimeModel,
+        runtimeExports: compilePlan.runtimeExports,
         compilePlan,
       };
     }
@@ -145,13 +156,17 @@ export class EmceptionCompilerAdapter {
         await sha256Bytes(wasm),
       ).slice(0, 16)}`,
       programId: compilePlan.program.programId,
+      runtimeModel: compilePlan.runtimeModel,
       format: "application/wasm",
       wasm,
       loaderModule,
       manifestBuffer: compilePlan.manifestBuffer,
+      runtimeExports: compilePlan.runtimeExports,
       entrypoint: "main",
       graphHash: bytesToHex(
-        await sha256Bytes(new TextEncoder().encode(JSON.stringify(compilePlan.program))),
+        await sha256Bytes(
+          new TextEncoder().encode(JSON.stringify(compilePlan.program)),
+        ),
       ),
       requiredCapabilities: requirements.capabilities,
       pluginVersions: compilePlan.dependencies.map((dependency) => ({

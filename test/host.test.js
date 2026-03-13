@@ -91,8 +91,26 @@ test("host plan models an early-start local licensing runtime for disconnected O
     summary.transports.includes(HostedRuntimeTransport.SAME_APP),
     true,
   );
-  assert.equal(summary.transports.includes(HostedRuntimeTransport.WEBRTC), true);
+  assert.equal(
+    summary.transports.includes(HostedRuntimeTransport.WEBRTC),
+    true,
+  );
   assert.equal(summary.disconnectedCapable, true);
+});
+
+test("plugin hosted runtimes default to compiled-wasm execution", () => {
+  const plan = normalizeHostedRuntimePlan({
+    hostId: "orbpro-browser",
+    runtimes: [
+      {
+        runtimeId: "single-plugin-runtime",
+        kind: HostedRuntimeKind.PLUGIN,
+        pluginId: "com.orbpro.sgp4",
+      },
+    ],
+  });
+
+  assert.equal(plan.runtimes[0].execution, "compiled-wasm");
 });
 
 test("deployment client preserves hosted runtime target details", async () => {
@@ -117,10 +135,7 @@ test("deployment client preserves hosted runtime target details", async () => {
     deployment.payload.target.transport,
     HostedRuntimeTransport.SAME_APP,
   );
-  assert.equal(
-    deployment.payload.target.protocolId,
-    "/orbpro/licensing/1.0.0",
-  );
+  assert.equal(deployment.payload.target.protocolId, "/orbpro/licensing/1.0.0");
   assert.equal(
     deployment.payload.target.startupPhase,
     HostedRuntimeStartupPhase.EARLY,

@@ -50,7 +50,7 @@ function normalizeBoolean(value, fallback = false) {
 }
 
 function defaultRuntimeExecution(kind) {
-  return kind === HostedRuntimeKind.PLUGIN ? "interpreted" : "compiled-wasm";
+  return "compiled-wasm";
 }
 
 export function normalizeHostedBinding(binding = {}) {
@@ -120,7 +120,9 @@ export function normalizeHostedRuntime(runtime = {}) {
   );
 
   if (!runtimeId) {
-    throw new Error("Hosted runtime requires runtimeId, programId, or pluginId.");
+    throw new Error(
+      "Hosted runtime requires runtimeId, programId, or pluginId.",
+    );
   }
 
   const startupPhase = normalizeEnum(
@@ -155,9 +157,7 @@ export function normalizeHostedRuntime(runtime = {}) {
     ),
     startupPhase,
     autoStart,
-    dependsOn: normalizeStringArray(
-      runtime.dependsOn ?? runtime.depends_on,
-    ),
+    dependsOn: normalizeStringArray(runtime.dependsOn ?? runtime.depends_on),
     requiredCapabilities: normalizeStringArray(
       runtime.requiredCapabilities ?? runtime.required_capabilities,
     ),
@@ -205,7 +205,9 @@ function sortReadyRuntimes(runtimes) {
 }
 
 function buildStartupOrder(runtimes) {
-  const runtimeMap = new Map(runtimes.map((runtime) => [runtime.runtimeId, runtime]));
+  const runtimeMap = new Map(
+    runtimes.map((runtime) => [runtime.runtimeId, runtime]),
+  );
   const dependents = new Map();
   const inDegree = new Map();
 
@@ -251,8 +253,7 @@ function buildStartupOrder(runtimes) {
 
 function bindingSupportsDisconnectedOperation(binding) {
   return (
-    binding.transport !== HostedRuntimeTransport.HTTP &&
-    binding.url === null
+    binding.transport !== HostedRuntimeTransport.HTTP && binding.url === null
   );
 }
 

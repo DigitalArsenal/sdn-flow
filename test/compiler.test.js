@@ -50,9 +50,13 @@ test("emception compiler adapter prepares a single-source C++ compile plan with 
     async readFile(path, options = {}) {
       const value = files.get(path);
       if (options.encoding === "utf8") {
-        return typeof value === "string" ? value : new TextDecoder().decode(value);
+        return typeof value === "string"
+          ? value
+          : new TextDecoder().decode(value);
       }
-      return typeof value === "string" ? new TextEncoder().encode(value) : value;
+      return typeof value === "string"
+        ? new TextEncoder().encode(value)
+        : value;
     },
   };
 
@@ -64,13 +68,29 @@ test("emception compiler adapter prepares a single-source C++ compile plan with 
 
   const prepared = await compiler.prepareCompile({ program: flow });
   assert.equal(prepared.dependencies.length, 6);
+  assert.equal(prepared.runtimeModel, "compiled-cpp-wasm");
+  assert.equal(
+    prepared.runtimeExports.descriptorSymbol,
+    "sdn_flow_get_runtime_descriptor",
+  );
   assert.match(prepared.command, /\/working\/flow-runtime\.mjs$/);
   assert.match(prepared.source, /flow_get_manifest_flatbuffer/);
+  assert.match(prepared.source, /struct FlowRuntimeDescriptor/);
+  assert.match(prepared.source, /sdn_flow_get_runtime_descriptor/);
+  assert.match(prepared.source, /sdn_flow_reset_runtime_state/);
+  assert.match(prepared.source, /kNodeRuntimeStates/);
   assert.match(prepared.source, /sdn_flow_get_dependency_descriptors/);
   assert.match(prepared.source, /com\.digitalarsenal\.flatsql\.memory/);
+  assert.match(prepared.command, /_sdn_flow_get_runtime_descriptor/);
+  assert.match(prepared.command, /_sdn_flow_reset_runtime_state/);
 
   const artifact = await compiler.compile({ program: flow });
   assert.equal(artifact.programId, flow.programId);
+  assert.equal(artifact.runtimeModel, "compiled-cpp-wasm");
+  assert.equal(
+    artifact.runtimeExports.descriptorSymbol,
+    "sdn_flow_get_runtime_descriptor",
+  );
   assert.equal(artifact.pluginVersions.length, 6);
   assert.equal(artifact.requiredCapabilities.includes("storage_query"), true);
   assert.equal(artifact.requiredCapabilities.includes("pubsub"), true);

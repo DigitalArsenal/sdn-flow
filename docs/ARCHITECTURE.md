@@ -20,6 +20,7 @@ A deployable flow is a compiled single WASM runtime artifact.
 
 The source graph exists for authoring, validation, tracing, and compilation.
 It is not the deployable unit.
+There is no separate interpreted deployment engine.
 
 ## Single Plugin Rule
 
@@ -29,13 +30,14 @@ plugin."
 
 ## Package Layers
 
-### Runtime
+### Runtime Contracts
 
-The runtime executes normalized manifest/program objects:
+The runtime layer defines normalized manifest/program objects used by authoring,
+validation, and host integration:
 
 - plugin manifests declare methods, ports, stream limits, and drain policies
 - flow programs declare nodes, edges, triggers, and trigger bindings
-- execution is deterministic and single-threaded first
+- deployed execution lives in the generated C++ runtime, not in package JS
 
 ### Designer
 
@@ -65,7 +67,7 @@ model as any other flow/plugin deployment.
 The compiler layer owns:
 
 - signed artifact catalog resolution
-- single-source C++ bundle generation
+- single-source C++ runtime generation
 - `emception`-compatible compile planning
 - artifact assembly back into the deploy contract
 
@@ -116,6 +118,7 @@ A compiled flow artifact contains:
 The compile plan that produces that artifact may also include:
 
 - generated `main.cpp`
+- generated runtime topology descriptors and mutable node-state storage
 - signed plugin artifact dependency descriptors
 - signed plugin manifest bytes
 - the exact `em++` command issued to `emception`

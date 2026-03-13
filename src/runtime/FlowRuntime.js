@@ -1,6 +1,9 @@
 import { BackpressurePolicy, DrainPolicy } from "./constants.js";
 import { normalizeFrame, normalizeProgram } from "./normalize.js";
 
+// Temporary migration harness used for authoring/tests until the generated C++
+// runtime is the only execution path.
+
 function groupBy(items, keySelector) {
   const grouped = new Map();
   for (const item of Array.isArray(items) ? items : []) {

@@ -7,10 +7,9 @@ It provides the portable pieces needed to:
 
 - model work as typed flow graphs
 - treat a single plugin as a valid one-node flow
-- execute flows locally in an isomorphic runtime
 - summarize external inputs, outputs, and capabilities for visual editors
 - describe hosted runtime startup phases and local/remote transport bindings
-- compile deployable flows into one WASM runtime artifact
+- compile deployable flows into one authoritative C++/WASM runtime artifact
 - compile from one generated C++ source file through `../emception`
 - consume signed plugin WASM artifacts as build dependencies instead of plugin source
 - require embedded FlatBuffer manifests in plugins and compiled flows
@@ -25,6 +24,8 @@ The project is built around a small set of hard rules:
 - A single plugin is just a degenerate flow, not a separate deployment path.
 - Hosts may run multiple runtimes. Startup-only services such as licensing are
   just runtimes with earlier startup phases and different bindings.
+- The deployed runtime is generated C++ compiled through `../emception`. There
+  is no separate interpreted deployment engine.
 - Every deployable artifact must embed a FlatBuffer manifest and expose
   callable manifest export symbols.
 - Local and remote deployment use the same signed artifact envelope.
@@ -32,8 +33,8 @@ The project is built around a small set of hard rules:
 
 ## What The Package Provides
 
-- `runtime`: normalized manifests, method registry, queueing, and flow
-  execution
+- `runtime`: normalized manifests, method registries, and topology contracts
+  used by authoring, validation, and host integration
 - `designer`: UI-facing flow session, single-plugin flow creation helpers, and
   external-requirement summaries
 - `host`: portable hosted-runtime planning for startup order, local services,
@@ -184,6 +185,7 @@ Default export names:
 
 ## Status
 
-The current repo contains the portable runtime, designer controller,
-authorization helpers, transport encryption helpers, deployment client, and a
-portable `emception` compiler adapter for single-bundle flow builds.
+The current repo contains the portable graph/manifest contracts, designer
+controller, authorization helpers, transport encryption helpers, deployment
+client, and a portable `emception` compiler adapter for single-bundle C++
+runtime builds.
