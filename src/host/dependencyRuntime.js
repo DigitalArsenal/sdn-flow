@@ -30,6 +30,33 @@ function resolveNamedExport(exports, symbol) {
   return exports?.[symbol] ?? exports?.[`_${symbol}`] ?? null;
 }
 
+function toUint8Array(data) {
+  if (data instanceof Uint8Array) {
+    return data;
+  }
+  if (ArrayBuffer.isView(data)) {
+    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  }
+  if (data instanceof ArrayBuffer) {
+    return new Uint8Array(data);
+  }
+  throw new TypeError("Expected Uint8Array, ArrayBufferView, or ArrayBuffer.");
+}
+
+function cloneBytes(memory, offset, size) {
+  const base = Number(offset) >>> 0;
+  const length = Number(size) >>> 0;
+  if (length === 0) {
+    return new Uint8Array();
+  }
+  return new Uint8Array(new Uint8Array(memory.buffer, base, length));
+}
+
+function writeBytes(memory, pointer, data) {
+  const bytes = new Uint8Array(memory.buffer);
+  bytes.set(toUint8Array(data), Number(pointer) >>> 0);
+}
+
 function getWasmExports(instanceResult) {
   if (instanceResult?.instance?.exports) {
     return instanceResult.instance.exports;
@@ -38,6 +65,50 @@ function getWasmExports(instanceResult) {
     return instanceResult.exports;
   }
   return {};
+}
+
+function createRawStreamInvoker(dependency) {
+  const { resolvedExports, memory } = dependency;
+  if (
+    typeof resolvedExports?.streamInvoke !== "function" ||
+    typeof resolvedExports?.malloc !== "function" ||
+    typeof resolvedExports?.free !== "function" ||
+    !memory
+  ) {
+    return null;
+  }
+  return function invokeRawStream(requestBytes) {
+    const request = toUint8Array(requestBytes);
+    const requestSize = request.length;
+    const requestPointer =
+      requestSize > 0 ? Number(resolvedExports.malloc(requestSize)) >>> 0 : 0;
+    const sizePointer = Number(resolvedExports.malloc(4)) >>> 0;
+    const view = new DataView(memory.buffer);
+    try {
+      if (requestSize > 0) {
+        writeBytes(memory, requestPointer, request);
+      }
+      view.setUint32(sizePointer, 0, true);
+      const responsePointer =
+        Number(
+          resolvedExports.streamInvoke(requestPointer, requestSize, sizePointer),
+        ) >>> 0;
+      const responseSize = view.getUint32(sizePointer, true);
+      const responseBytes =
+        responsePointer !== 0 && responseSize > 0
+          ? cloneBytes(memory, responsePointer, responseSize)
+          : new Uint8Array();
+      if (responsePointer !== 0) {
+        resolvedExports.free(responsePointer);
+      }
+      return responseBytes;
+    } finally {
+      if (requestPointer !== 0) {
+        resolvedExports.free(requestPointer);
+      }
+      resolvedExports.free(sizePointer);
+    }
+  };
 }
 
 export async function instantiateEmbeddedDependencies({
@@ -89,6 +160,15 @@ export async function instantiateEmbeddedDependencies({
       },
       memory: exports?.memory ?? null,
     });
+    instantiated[index].invokeRawStream = createRawStreamInvoker(instantiated[index]);
+    instantiated[index].cloneBytes = (offset, size) =>
+      cloneBytes(instantiated[index].memory, offset, size);
+    instantiated[index].release = (pointer) => {
+      if (!pointer || typeof instantiated[index].resolvedExports.free !== "function") {
+        return null;
+      }
+      return instantiated[index].resolvedExports.free(Number(pointer) >>> 0);
+    };
   }
   return {
     ...bound,

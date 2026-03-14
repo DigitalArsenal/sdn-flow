@@ -52,6 +52,7 @@ export async function bindCompiledFlowRuntimeHost({
   memory = null,
   handlers = {},
   dependencyInvoker = null,
+  dependencyStreamBridge = null,
   dependencyImports = {},
   instantiateDependency = WebAssembly.instantiate,
 } = {}) {
@@ -91,6 +92,7 @@ export async function bindCompiledFlowRuntimeHost({
     descriptors,
     handlers: normalizedHandlers,
     dependencyInvoker,
+    dependencyStreamBridge,
     dependencyImports,
     readNodeDispatchDescriptorAt(index) {
       return descriptors.readNodeDispatchDescriptorAt(index);
@@ -141,7 +143,9 @@ export async function bindCompiledFlowRuntimeHost({
         nodeId: dispatchDescriptor?.nodeId ?? null,
       });
       const instantiatedDependency =
-        typeof dependencyInvoker === "function" && dependencyDescriptor
+        (typeof dependencyInvoker === "function" ||
+          typeof dependencyStreamBridge === "function") &&
+        dependencyDescriptor
           ? await this.getInstantiatedDependency({
               dependencyId:
                 dispatchDescriptor?.dependencyId ??
@@ -154,7 +158,8 @@ export async function bindCompiledFlowRuntimeHost({
           : null;
       if (
         typeof handler !== "function" &&
-        typeof dependencyInvoker !== "function"
+        typeof dependencyInvoker !== "function" &&
+        typeof dependencyStreamBridge !== "function"
       ) {
         throw new Error(
           `No compiled flow host handler is registered for ${invocation?.pluginId}:${invocation?.methodId}.`,
@@ -164,30 +169,23 @@ export async function bindCompiledFlowRuntimeHost({
         ...frame,
         bytes: this.readFrameBytes(frame),
       }));
+      const invocationArgs = {
+        nodeIndex,
+        pluginId: invocation.pluginId,
+        methodId: invocation.methodId,
+        dispatchDescriptor,
+        dependencyDescriptor,
+        instantiatedDependency,
+        inputs,
+        outputStreamCap,
+        invocation,
+      };
       const result =
         typeof handler === "function"
-          ? await handler({
-              nodeIndex,
-              pluginId: invocation.pluginId,
-              methodId: invocation.methodId,
-              dispatchDescriptor,
-              dependencyDescriptor,
-              instantiatedDependency,
-              inputs,
-              outputStreamCap,
-              invocation,
-            })
-          : await dependencyInvoker({
-              nodeIndex,
-              pluginId: invocation.pluginId,
-              methodId: invocation.methodId,
-              dispatchDescriptor,
-              dependencyDescriptor,
-              instantiatedDependency,
-              inputs,
-              outputStreamCap,
-              invocation,
-            });
+          ? await handler(invocationArgs)
+          : typeof dependencyInvoker === "function"
+            ? await dependencyInvoker(invocationArgs)
+            : await dependencyStreamBridge(invocationArgs);
       const routedOutputs = Number(
         this.applyNodeInvocationResult(nodeIndex, {
           statusCode:

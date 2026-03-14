@@ -1004,7 +1004,7 @@ test("compiled flow runtime host executes a ready node through bound handlers", 
   assert.equal(freedPointers.length > 0, true);
 });
 
-test("embedded dependencies can be instantiated from the compiled bundle and used by a dependency invoker", async () => {
+test("embedded dependencies can be instantiated from the compiled bundle and used by a dependency stream bridge", async () => {
   const memory = new WebAssembly.Memory({ initial: 1 });
   const bytes = new Uint8Array(memory.buffer);
   const view = new DataView(memory.buffer);
@@ -1023,7 +1023,7 @@ test("embedded dependencies can be instantiated from the compiled bundle and use
   let allocPointer = 2048;
   let ready = true;
   let instantiateCalls = 0;
-  let invokerCalls = 0;
+  let bridgeCalls = 0;
   let destroyCalls = 0;
   const inputPayload = new Uint8Array([5, 6, 7]);
   const fakeDependencyStreamInvoke = () => 99;
@@ -1266,8 +1266,8 @@ test("embedded dependencies can be instantiated from the compiled bundle and use
         },
       };
     },
-    dependencyInvoker: ({ instantiatedDependency, inputs }) => {
-      invokerCalls += 1;
+    dependencyStreamBridge: ({ instantiatedDependency, inputs }) => {
+      bridgeCalls += 1;
       assert.equal(
         instantiatedDependency.resolvedExports.streamInvoke,
         fakeDependencyStreamInvoke,
@@ -1286,7 +1286,7 @@ test("embedded dependencies can be instantiated from the compiled bundle and use
   const execution = await host.executeNextReadyNode();
   assert.equal(execution.executed, true);
   assert.equal(execution.instantiatedDependency?.dependencyId, "dep-sgp4");
-  assert.equal(invokerCalls, 1);
+  assert.equal(bridgeCalls, 1);
   assert.equal(instantiateCalls, 2);
   await host.destroyDependencies();
   assert.equal(destroyCalls, 2);
