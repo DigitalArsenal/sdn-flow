@@ -964,6 +964,7 @@ std::string generateSource(const Request& request) {
   out << "struct FlowFrameDescriptor {\n"
       << "  std::uint32_t ingress_index;\n"
       << "  std::uint32_t type_descriptor_index;\n"
+      << "  const char * port_id;\n"
       << "  std::uint32_t alignment;\n"
       << "  std::uint32_t offset;\n"
       << "  std::uint32_t size;\n"
@@ -979,11 +980,12 @@ std::string generateSource(const Request& request) {
       << "              \"FlowFrameDescriptor alignment must match schemas/FlowRuntimeAbi.fbs\");\n";
   out << "static_assert(offsetof(FlowFrameDescriptor, ingress_index) == 0u);\n";
   out << "static_assert(offsetof(FlowFrameDescriptor, type_descriptor_index) == 4u);\n";
-  out << "static_assert(offsetof(FlowFrameDescriptor, alignment) == 8u);\n";
-  out << "static_assert(offsetof(FlowFrameDescriptor, offset) == 12u);\n";
-  out << "static_assert(offsetof(FlowFrameDescriptor, size) == 16u);\n";
-  out << "static_assert(offsetof(FlowFrameDescriptor, stream_id) == 20u);\n";
-  out << "static_assert(offsetof(FlowFrameDescriptor, sequence) == 24u);\n";
+  out << "static_assert(offsetof(FlowFrameDescriptor, port_id) == 8u);\n";
+  out << "static_assert(offsetof(FlowFrameDescriptor, alignment) == 12u);\n";
+  out << "static_assert(offsetof(FlowFrameDescriptor, offset) == 16u);\n";
+  out << "static_assert(offsetof(FlowFrameDescriptor, size) == 20u);\n";
+  out << "static_assert(offsetof(FlowFrameDescriptor, stream_id) == 24u);\n";
+  out << "static_assert(offsetof(FlowFrameDescriptor, sequence) == 28u);\n";
   out << "static_assert(offsetof(FlowFrameDescriptor, trace_token) == 32u);\n";
   out << "static_assert(offsetof(FlowFrameDescriptor, end_of_stream) == 40u);\n";
   out << "static_assert(offsetof(FlowFrameDescriptor, occupied) == 41u);\n\n";
@@ -1005,6 +1007,47 @@ std::string generateSource(const Request& request) {
   out << "static_assert(offsetof(FlowInvocationDescriptor, method_id) == 12u);\n";
   out << "static_assert(offsetof(FlowInvocationDescriptor, frames) == 16u);\n";
   out << "static_assert(offsetof(FlowInvocationDescriptor, frame_count) == 20u);\n\n";
+  out << "static_assert(sizeof(FlowNodeDispatchDescriptor) == 60u,\n"
+      << "              \"FlowNodeDispatchDescriptor must match schemas/FlowRuntimeAbi.fbs\");\n";
+  out << "static_assert(alignof(FlowNodeDispatchDescriptor) == 4u,\n"
+      << "              \"FlowNodeDispatchDescriptor alignment must match schemas/FlowRuntimeAbi.fbs\");\n";
+  out << "static_assert(offsetof(FlowNodeDispatchDescriptor, node_id) == 0u);\n";
+  out << "static_assert(offsetof(FlowNodeDispatchDescriptor, node_index) == 4u);\n";
+  out << "static_assert(offsetof(FlowNodeDispatchDescriptor, dependency_id) == 8u);\n";
+  out << "static_assert(offsetof(FlowNodeDispatchDescriptor, dependency_index) == 12u);\n";
+  out << "static_assert(offsetof(FlowNodeDispatchDescriptor, plugin_id) == 16u);\n";
+  out << "static_assert(offsetof(FlowNodeDispatchDescriptor, method_id) == 20u);\n";
+  out << "static_assert(offsetof(FlowNodeDispatchDescriptor, dispatch_model) == 24u);\n";
+  out << "static_assert(offsetof(FlowNodeDispatchDescriptor, entrypoint) == 28u);\n";
+  out << "static_assert(offsetof(FlowNodeDispatchDescriptor, manifest_bytes_symbol) == 32u);\n";
+  out << "static_assert(offsetof(FlowNodeDispatchDescriptor, manifest_size_symbol) == 36u);\n";
+  out << "static_assert(offsetof(FlowNodeDispatchDescriptor, init_symbol) == 40u);\n";
+  out << "static_assert(offsetof(FlowNodeDispatchDescriptor, destroy_symbol) == 44u);\n";
+  out << "static_assert(offsetof(FlowNodeDispatchDescriptor, malloc_symbol) == 48u);\n";
+  out << "static_assert(offsetof(FlowNodeDispatchDescriptor, free_symbol) == 52u);\n";
+  out << "static_assert(offsetof(FlowNodeDispatchDescriptor, stream_invoke_symbol) == 56u);\n\n";
+  out << "static_assert(sizeof(SignedArtifactDependency) == 72u,\n"
+      << "              \"SignedArtifactDependency must match schemas/FlowRuntimeAbi.fbs\");\n";
+  out << "static_assert(alignof(SignedArtifactDependency) == 4u,\n"
+      << "              \"SignedArtifactDependency alignment must match schemas/FlowRuntimeAbi.fbs\");\n";
+  out << "static_assert(offsetof(SignedArtifactDependency, dependency_id) == 0u);\n";
+  out << "static_assert(offsetof(SignedArtifactDependency, plugin_id) == 4u);\n";
+  out << "static_assert(offsetof(SignedArtifactDependency, version) == 8u);\n";
+  out << "static_assert(offsetof(SignedArtifactDependency, sha256) == 12u);\n";
+  out << "static_assert(offsetof(SignedArtifactDependency, signature) == 16u);\n";
+  out << "static_assert(offsetof(SignedArtifactDependency, signer_public_key) == 20u);\n";
+  out << "static_assert(offsetof(SignedArtifactDependency, entrypoint) == 24u);\n";
+  out << "static_assert(offsetof(SignedArtifactDependency, manifest_bytes_symbol) == 28u);\n";
+  out << "static_assert(offsetof(SignedArtifactDependency, manifest_size_symbol) == 32u);\n";
+  out << "static_assert(offsetof(SignedArtifactDependency, init_symbol) == 36u);\n";
+  out << "static_assert(offsetof(SignedArtifactDependency, destroy_symbol) == 40u);\n";
+  out << "static_assert(offsetof(SignedArtifactDependency, malloc_symbol) == 44u);\n";
+  out << "static_assert(offsetof(SignedArtifactDependency, free_symbol) == 48u);\n";
+  out << "static_assert(offsetof(SignedArtifactDependency, stream_invoke_symbol) == 52u);\n";
+  out << "static_assert(offsetof(SignedArtifactDependency, wasm_bytes) == 56u);\n";
+  out << "static_assert(offsetof(SignedArtifactDependency, wasm_size) == 60u);\n";
+  out << "static_assert(offsetof(SignedArtifactDependency, manifest_bytes) == 64u);\n";
+  out << "static_assert(offsetof(SignedArtifactDependency, manifest_size) == 68u);\n\n";
   out << "struct FlowIngressRuntimeState {\n"
       << "  std::uint64_t total_received;\n"
       << "  std::uint64_t total_dropped;\n"
@@ -1082,6 +1125,7 @@ std::string generateSource(const Request& request) {
   out << "static void clear_frame_descriptor(FlowFrameDescriptor & descriptor) {\n"
       << "  descriptor.ingress_index = kInvalidIndex;\n"
       << "  descriptor.type_descriptor_index = kInvalidIndex;\n"
+      << "  descriptor.port_id = nullptr;\n"
       << "  descriptor.alignment = 0;\n"
       << "  descriptor.offset = 0;\n"
       << "  descriptor.size = 0;\n"
@@ -1296,7 +1340,37 @@ std::string generateSource(const Request& request) {
       << "  }\n"
       << "  kIngressFrameDescriptors[ingress_index] = *frame;\n"
       << "  kIngressFrameDescriptors[ingress_index].ingress_index = ingress_index;\n"
+      << "  kIngressFrameDescriptors[ingress_index].port_id =\n"
+      << "    kIngressDescriptors[ingress_index].target_port_id;\n"
       << "  kIngressFrameDescriptors[ingress_index].occupied = true;\n"
+      << "}\n\n";
+  out << "static std::uint32_t route_output_frame(\n"
+      << "  std::uint32_t node_index,\n"
+      << "  const FlowFrameDescriptor * frame\n"
+      << ") {\n"
+      << "  if (frame == nullptr || frame->port_id == nullptr) {\n"
+      << "    return 0;\n"
+      << "  }\n"
+      << "  std::uint32_t routed = 0;\n"
+      << "  for (std::size_t edge_index = 0; edge_index < kRuntimeDescriptor.edge_count; ++edge_index) {\n"
+      << "    const FlowEdgeDescriptor & edge = kEdgeDescriptors[edge_index];\n"
+      << "    if (edge.from_node_index != node_index) {\n"
+      << "      continue;\n"
+      << "    }\n"
+      << "    if (!string_equals(edge.from_port_id, frame->port_id)) {\n"
+      << "      continue;\n"
+      << "    }\n"
+      << "    if (edge.target_ingress_index == kInvalidIndex) {\n"
+      << "      continue;\n"
+      << "    }\n"
+      << "    stage_ingress_frame(edge.target_ingress_index, frame);\n"
+      << "    apply_backpressure(edge.target_ingress_index, 1u);\n"
+      << "    if (edge.to_node_index != kInvalidIndex) {\n"
+      << "      recompute_node_runtime_state(edge.to_node_index);\n"
+      << "    }\n"
+      << "    routed += 1u;\n"
+      << "  }\n"
+      << "  return routed;\n"
       << "}\n\n";
   out << "static void populate_invocation_descriptor(\n"
       << "  std::uint32_t node_index,\n"
@@ -1735,6 +1809,33 @@ std::string generateSource(const Request& request) {
       << "  " << namespace_name << "::clear_invocation_descriptor();\n"
       << "  " << namespace_name
       << "::recompute_node_runtime_state(node_index);\n"
+      << "}\n\n";
+  out << "extern \"C\" std::uint32_t sdn_flow_apply_node_invocation_result(\n"
+      << "  std::uint32_t node_index,\n"
+      << "  std::uint32_t status_code,\n"
+      << "  std::uint32_t backlog_remaining,\n"
+      << "  bool yielded,\n"
+      << "  const " << namespace_name << "::FlowFrameDescriptor * output_frames,\n"
+      << "  std::uint32_t output_frame_count\n"
+      << ") {\n"
+      << "  if (node_index >= " << namespace_name
+      << "::kRuntimeDescriptor.node_count) {\n"
+      << "    return 0;\n"
+      << "  }\n"
+      << "  std::uint32_t routed = 0;\n"
+      << "  if (output_frames != nullptr) {\n"
+      << "    for (std::uint32_t index = 0; index < output_frame_count; ++index) {\n"
+      << "      routed += " << namespace_name
+      << "::route_output_frame(node_index, &output_frames[index]);\n"
+      << "    }\n"
+      << "  }\n"
+      << "  sdn_flow_complete_node_invocation(\n"
+      << "    node_index,\n"
+      << "    status_code,\n"
+      << "    backlog_remaining,\n"
+      << "    yielded\n"
+      << "  );\n"
+      << "  return routed;\n"
       << "}\n\n";
   out << "extern \"C\" const " << namespace_name
       << "::FlowRuntimeDescriptor * sdn_flow_get_runtime_descriptor() {\n"

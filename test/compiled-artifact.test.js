@@ -53,6 +53,8 @@ test("compiled artifacts normalize extended runtime descriptor exports", async (
         "sdn_flow_get_current_invocation_descriptor",
       prepare_invocation_descriptor_symbol:
         "sdn_flow_prepare_node_invocation_descriptor",
+      apply_invocation_result_symbol:
+        "sdn_flow_apply_node_invocation_result",
       enqueue_trigger_frame_symbol: "sdn_flow_enqueue_trigger_frame",
       enqueue_edge_frame_symbol: "sdn_flow_enqueue_edge_frame",
       external_interface_descriptors_symbol:
@@ -95,6 +97,10 @@ test("compiled artifacts normalize extended runtime descriptor exports", async (
   assert.equal(
     artifact.runtimeExports.prepareInvocationDescriptorSymbol,
     "sdn_flow_prepare_node_invocation_descriptor",
+  );
+  assert.equal(
+    artifact.runtimeExports.applyInvocationResultSymbol,
+    "sdn_flow_apply_node_invocation_result",
   );
   assert.equal(
     artifact.runtimeExports.enqueueTriggerFrameSymbol,

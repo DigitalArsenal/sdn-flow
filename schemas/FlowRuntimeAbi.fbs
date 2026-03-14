@@ -10,6 +10,7 @@ namespace sdn.flow.abi;
 struct FlowFrameDescriptor {
   ingress_index:uint32;
   type_descriptor_index:uint32;
+  port_id_pointer:uint32;
   alignment:uint32;
   offset:uint32;
   size:uint32;
@@ -28,6 +29,47 @@ struct FlowInvocationDescriptor {
   method_id_pointer:uint32;
   frames_pointer:uint32;
   frame_count:uint32;
+}
+
+/// One node-to-dependency dispatch entry exported by the compiled runtime.
+struct FlowNodeDispatchDescriptor {
+  node_id_pointer:uint32;
+  node_index:uint32;
+  dependency_id_pointer:uint32;
+  dependency_index:uint32;
+  plugin_id_pointer:uint32;
+  method_id_pointer:uint32;
+  dispatch_model_pointer:uint32;
+  entrypoint_pointer:uint32;
+  manifest_bytes_symbol_pointer:uint32;
+  manifest_size_symbol_pointer:uint32;
+  init_symbol_pointer:uint32;
+  destroy_symbol_pointer:uint32;
+  malloc_symbol_pointer:uint32;
+  free_symbol_pointer:uint32;
+  stream_invoke_symbol_pointer:uint32;
+}
+
+/// One embedded signed dependency exported by the compiled runtime.
+struct SignedArtifactDependencyDescriptor {
+  dependency_id_pointer:uint32;
+  plugin_id_pointer:uint32;
+  version_pointer:uint32;
+  sha256_pointer:uint32;
+  signature_pointer:uint32;
+  signer_public_key_pointer:uint32;
+  entrypoint_pointer:uint32;
+  manifest_bytes_symbol_pointer:uint32;
+  manifest_size_symbol_pointer:uint32;
+  init_symbol_pointer:uint32;
+  destroy_symbol_pointer:uint32;
+  malloc_symbol_pointer:uint32;
+  free_symbol_pointer:uint32;
+  stream_invoke_symbol_pointer:uint32;
+  wasm_bytes_pointer:uint32;
+  wasm_size:uint32;
+  manifest_bytes_pointer:uint32;
+  manifest_size:uint32;
 }
 
 /// Mutable runtime counters for one ingress queue.

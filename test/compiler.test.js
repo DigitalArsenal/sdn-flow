@@ -111,6 +111,10 @@ test("emception compiler adapter prepares a single-source C++ compile plan with 
     prepared.runtimeExports.beginInvocationSymbol,
     "sdn_flow_begin_node_invocation",
   );
+  assert.equal(
+    prepared.runtimeExports.applyInvocationResultSymbol,
+    "sdn_flow_apply_node_invocation_result",
+  );
   assert.match(prepared.command, /\/working\/flow-runtime\.mjs$/);
   assert.match(
     prepared.source,
@@ -127,6 +131,7 @@ test("emception compiler adapter prepares a single-source C++ compile plan with 
   assert.match(prepared.source, /struct FlowNodeDispatchDescriptor/);
   assert.match(prepared.source, /struct FlowFrameDescriptor/);
   assert.match(prepared.source, /struct FlowInvocationDescriptor/);
+  assert.match(prepared.source, /const char \* port_id/);
   assert.match(prepared.source, /kNodeDispatchDescriptors/);
   assert.match(prepared.source, /kIngressFrameDescriptors/);
   assert.match(prepared.source, /kCurrentInvocationDescriptor/);
@@ -148,6 +153,7 @@ test("emception compiler adapter prepares a single-source C++ compile plan with 
   assert.match(prepared.source, /sdn_flow_get_ready_node_index/);
   assert.match(prepared.source, /sdn_flow_begin_node_invocation/);
   assert.match(prepared.source, /sdn_flow_complete_node_invocation/);
+  assert.match(prepared.source, /sdn_flow_apply_node_invocation_result/);
   assert.match(prepared.source, /kIngressDescriptors/);
   assert.match(prepared.source, /kIngressRuntimeStates/);
   assert.match(prepared.source, /kNodeIngressIndices/);
@@ -171,6 +177,7 @@ test("emception compiler adapter prepares a single-source C++ compile plan with 
   assert.match(prepared.command, /_sdn_flow_reset_runtime_state/);
   assert.match(prepared.command, /_sdn_flow_enqueue_trigger_frames/);
   assert.match(prepared.command, /_sdn_flow_begin_node_invocation/);
+  assert.match(prepared.command, /_sdn_flow_apply_node_invocation_result/);
 
   const artifact = await compiler.compile({ program: flow });
   assert.equal(artifact.programId, flow.programId);
@@ -200,6 +207,10 @@ test("emception compiler adapter prepares a single-source C++ compile plan with 
   assert.equal(
     artifact.runtimeExports.readyNodeSymbol,
     "sdn_flow_get_ready_node_index",
+  );
+  assert.equal(
+    artifact.runtimeExports.applyInvocationResultSymbol,
+    "sdn_flow_apply_node_invocation_result",
   );
   assert.equal(artifact.pluginVersions.length, 6);
   assert.equal(artifact.requiredCapabilities.includes("storage_query"), true);

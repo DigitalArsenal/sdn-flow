@@ -186,6 +186,10 @@ function normalizeRuntimeExports(exports = {}) {
       exports.completeInvocationSymbol ??
       exports.complete_invocation_symbol ??
       null,
+    applyInvocationResultSymbol:
+      exports.applyInvocationResultSymbol ??
+      exports.apply_invocation_result_symbol ??
+      null,
   };
 }
 

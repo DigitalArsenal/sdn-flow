@@ -17,6 +17,14 @@ export {
   FlowInvocationDescriptorLayout,
 } from "./invocationAbi.js";
 export {
+  bindCompiledDescriptorAbi,
+  DefaultRequiredDescriptorExportRoles,
+  FlowNodeDispatchDescriptorLayout,
+  SignedArtifactDependencyDescriptorLayout,
+} from "./descriptorAbi.js";
+export { instantiateEmbeddedDependencies } from "./dependencyRuntime.js";
+export { bindCompiledFlowRuntimeHost } from "./compiledFlowRuntimeHost.js";
+export {
   normalizeHostedBinding,
   normalizeHostedRuntime,
   normalizeHostedRuntimePlan,

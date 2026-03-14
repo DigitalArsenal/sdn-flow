@@ -8,6 +8,7 @@ export const DefaultRequiredRuntimeExportRoles = Object.freeze([
   "readyNodeSymbol",
   "beginInvocationSymbol",
   "completeInvocationSymbol",
+  "applyInvocationResultSymbol",
 ]);
 
 function getWasmExports(target = null) {

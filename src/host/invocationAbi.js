@@ -19,6 +19,7 @@ export const DefaultRequiredInvocationExportRoles = Object.freeze([
   "prepareInvocationDescriptorSymbol",
   "enqueueTriggerFrameSymbol",
   "enqueueEdgeFrameSymbol",
+  "applyInvocationResultSymbol",
 ]);
 
 const INVALID_INDEX = 0xffffffff;
@@ -49,6 +50,22 @@ function readCString(memory, pointer) {
   return new TextDecoder().decode(bytes.subarray(pointer >>> 0, end));
 }
 
+function writeCString(memory, pointer, value) {
+  const bytes = new Uint8Array(memory.buffer);
+  const encoded = new TextEncoder().encode(`${String(value ?? "")}\0`);
+  bytes.set(encoded, pointer >>> 0);
+}
+
+function cloneBytes(memory, offset, size) {
+  const base = Number(offset) >>> 0;
+  const length = Number(size) >>> 0;
+  if (length === 0) {
+    return new Uint8Array();
+  }
+  const bytes = new Uint8Array(memory.buffer, base, length);
+  return new Uint8Array(bytes);
+}
+
 function readFrameDescriptor(memory, pointer) {
   if (!pointer) {
     return null;
@@ -63,6 +80,14 @@ function readFrameDescriptor(memory, pointer) {
     typeDescriptorIndex: view.getUint32(
       base + FlowFrameDescriptorLayout.fields.typeDescriptorIndex.offset,
       true,
+    ),
+    portIdPointer: view.getUint32(
+      base + FlowFrameDescriptorLayout.fields.portIdPointer.offset,
+      true,
+    ),
+    portId: readCString(
+      memory,
+      view.getUint32(base + FlowFrameDescriptorLayout.fields.portIdPointer.offset, true),
     ),
     alignment: view.getUint32(
       base + FlowFrameDescriptorLayout.fields.alignment.offset,
@@ -98,7 +123,17 @@ function readFrameDescriptor(memory, pointer) {
   };
 }
 
-function writeFrameDescriptor(memory, pointer, frame = {}) {
+function allocateCString(bound, memory, value) {
+  if (value === null || value === undefined) {
+    return 0;
+  }
+  const encoded = new TextEncoder().encode(`${String(value)}\0`);
+  const pointer = Number(bound.resolvedByRole.mallocSymbol(encoded.length)) >>> 0;
+  writeCString(memory, pointer, value);
+  return pointer;
+}
+
+function writeFrameDescriptor(memory, pointer, frame = {}, portIdPointer = 0) {
   const view = new DataView(memory.buffer);
   const base = pointer >>> 0;
   view.setUint32(
@@ -111,6 +146,11 @@ function writeFrameDescriptor(memory, pointer, frame = {}) {
     Number(
       frame.typeDescriptorIndex ?? frame.type_descriptor_index ?? INVALID_INDEX,
     ) >>> 0,
+    true,
+  );
+  view.setUint32(
+    base + FlowFrameDescriptorLayout.fields.portIdPointer.offset,
+    Number(portIdPointer) >>> 0,
     true,
   );
   view.setUint32(
@@ -214,11 +254,87 @@ function withAllocatedFrame(bound, memory, frame, invoke) {
   const malloc = bound.resolvedByRole.mallocSymbol;
   const free = bound.resolvedByRole.freeSymbol;
   const pointer = Number(malloc(FlowFrameDescriptorLayout.size)) >>> 0;
+  const portIdPointer = allocateCString(
+    bound,
+    memory,
+    frame.portId ?? frame.port_id ?? null,
+  );
   try {
-    writeFrameDescriptor(memory, pointer, frame);
+    writeFrameDescriptor(memory, pointer, frame, portIdPointer);
     return invoke(pointer);
   } finally {
+    if (portIdPointer) {
+      free(portIdPointer);
+    }
     free(pointer);
+  }
+}
+
+function withAllocatedFrames(bound, memory, frames = [], invoke) {
+  const normalizedFrames = Array.isArray(frames) ? frames : [];
+  if (normalizedFrames.length === 0) {
+    return invoke(0, 0);
+  }
+  const malloc = bound.resolvedByRole.mallocSymbol;
+  const free = bound.resolvedByRole.freeSymbol;
+  const descriptorBytes = FlowFrameDescriptorLayout.size * normalizedFrames.length;
+  const descriptorsPointer = Number(malloc(descriptorBytes)) >>> 0;
+  const portIdPointers = [];
+  const payloadPointers = [];
+  try {
+    normalizedFrames.forEach((frame, index) => {
+      const portIdPointer = allocateCString(
+        bound,
+        memory,
+        frame.portId ?? frame.port_id ?? null,
+      );
+      portIdPointers.push(portIdPointer);
+      const payload =
+        frame.bytes ??
+        frame.data ??
+        frame.payloadBytes ??
+        frame.payload_bytes ??
+        null;
+      let payloadPointer = Number(frame.offset ?? 0) >>> 0;
+      let payloadSize = Number(frame.size ?? 0) >>> 0;
+      if (payload instanceof Uint8Array || ArrayBuffer.isView(payload) || payload instanceof ArrayBuffer) {
+        const payloadBytes = payload instanceof Uint8Array
+          ? payload
+          : payload instanceof ArrayBuffer
+            ? new Uint8Array(payload)
+            : new Uint8Array(payload.buffer, payload.byteOffset, payload.byteLength);
+        payloadPointer = Number(malloc(payloadBytes.byteLength || 1)) >>> 0;
+        payloadSize = payloadBytes.byteLength;
+        new Uint8Array(memory.buffer).set(payloadBytes, payloadPointer);
+        payloadPointers.push(payloadPointer);
+      }
+      writeFrameDescriptor(
+        memory,
+        descriptorsPointer + index * FlowFrameDescriptorLayout.size,
+        {
+          ...frame,
+          offset: payloadPointer,
+          size: payloadSize,
+        },
+        portIdPointer,
+      );
+    });
+    return invoke(descriptorsPointer, normalizedFrames.length);
+  } finally {
+    portIdPointers.forEach((pointer) => {
+      if (pointer) {
+        free(pointer);
+      }
+    });
+    // Descriptor memory is only needed for the duration of the host call.
+    free(descriptorsPointer);
+    // Payload memory is retained by the compiled runtime until reset; caller is
+    // expected to release tracked allocations through the bound host helpers.
+    payloadPointers.forEach((pointer) => {
+      if (pointer) {
+        bound.retainedArenaAllocations.add(pointer);
+      }
+    });
   }
 }
 
@@ -236,10 +352,29 @@ export async function bindCompiledInvocationAbi({
     requiredRoles,
   });
   const resolvedMemory = resolveMemory(bound, memory);
+  bound.retainedArenaAllocations = new Set();
 
   return {
     ...bound,
     memory: resolvedMemory,
+    retainedArenaAllocations: bound.retainedArenaAllocations,
+    releaseRetainedArenaAllocations() {
+      const free = bound.resolvedByRole.freeSymbol;
+      for (const pointer of this.retainedArenaAllocations) {
+        free(pointer);
+      }
+      this.retainedArenaAllocations.clear();
+    },
+    readFrameBytes(frame) {
+      if (!frame) {
+        return new Uint8Array();
+      }
+      return cloneBytes(
+        resolvedMemory,
+        frame.offset ?? frame.offset_bytes ?? 0,
+        frame.size ?? 0,
+      );
+    },
     readCurrentInvocation() {
       const pointer =
         Number(bound.resolvedByRole.currentInvocationDescriptorSymbol()) >>> 0;
@@ -278,6 +413,26 @@ export async function bindCompiledInvocationAbi({
       return withAllocatedFrame(bound, resolvedMemory, frame, (pointer) =>
         bound.resolvedByRole.enqueueEdgeFrameSymbol(edgeIndex, pointer),
       );
+    },
+    applyNodeInvocationResult(nodeIndex, result = {}) {
+      return withAllocatedFrames(
+        bound,
+        resolvedMemory,
+        result.outputs ?? [],
+        (pointer, count) =>
+          bound.resolvedByRole.applyInvocationResultSymbol(
+            nodeIndex,
+            Number(result.statusCode ?? result.status_code ?? 0) >>> 0,
+            Number(result.backlogRemaining ?? result.backlog_remaining ?? 0) >>> 0,
+            Boolean(result.yielded ?? false),
+            pointer,
+            count,
+          ),
+      );
+    },
+    resetRuntimeState() {
+      bound.resolvedByRole.resetStateSymbol();
+      this.releaseRetainedArenaAllocations();
     },
   };
 }
