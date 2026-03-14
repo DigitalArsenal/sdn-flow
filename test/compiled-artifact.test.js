@@ -61,6 +61,9 @@ test("compiled artifacts normalize extended runtime descriptor exports", async (
       prepare_invocation_descriptor_symbol:
         "sdn_flow_prepare_node_invocation_descriptor",
       apply_invocation_result_symbol: "sdn_flow_apply_node_invocation_result",
+      dispatch_host_invocation_symbol:
+        "sdn_flow_dispatch_next_ready_node_with_host",
+      drain_with_host_dispatch_symbol: "sdn_flow_drain_with_host_dispatch",
       enqueue_trigger_frame_symbol: "sdn_flow_enqueue_trigger_frame",
       enqueue_edge_frame_symbol: "sdn_flow_enqueue_edge_frame",
       external_interface_descriptors_symbol:
@@ -109,6 +112,14 @@ test("compiled artifacts normalize extended runtime descriptor exports", async (
     "sdn_flow_apply_node_invocation_result",
   );
   assert.equal(
+    artifact.runtimeExports.dispatchHostInvocationSymbol,
+    "sdn_flow_dispatch_next_ready_node_with_host",
+  );
+  assert.equal(
+    artifact.runtimeExports.drainWithHostDispatchSymbol,
+    "sdn_flow_drain_with_host_dispatch",
+  );
+  assert.equal(
     artifact.runtimeExports.enqueueTriggerFrameSymbol,
     "sdn_flow_enqueue_trigger_frame",
   );
@@ -141,6 +152,7 @@ test("serialized compiled artifacts can be decoded back into runtime artifacts",
     manifestBuffer: new Uint8Array([0x46, 0x4c, 0x4f, 0x57]),
     runtimeExports: {
       readyNodeSymbol: "sdn_flow_get_ready_node_index",
+      drainWithHostDispatchSymbol: "sdn_flow_drain_with_host_dispatch",
     },
   });
   const serialized = serializeCompiledArtifact(normalized);
@@ -155,6 +167,10 @@ test("serialized compiled artifacts can be decoded back into runtime artifacts",
   assert.equal(
     decoded.runtimeExports.readyNodeSymbol,
     "sdn_flow_get_ready_node_index",
+  );
+  assert.equal(
+    decoded.runtimeExports.drainWithHostDispatchSymbol,
+    "sdn_flow_drain_with_host_dispatch",
   );
 });
 

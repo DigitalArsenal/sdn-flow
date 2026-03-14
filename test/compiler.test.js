@@ -115,6 +115,14 @@ test("emception compiler adapter prepares a single-source C++ compile plan with 
     prepared.runtimeExports.applyInvocationResultSymbol,
     "sdn_flow_apply_node_invocation_result",
   );
+  assert.equal(
+    prepared.runtimeExports.dispatchHostInvocationSymbol,
+    "sdn_flow_dispatch_next_ready_node_with_host",
+  );
+  assert.equal(
+    prepared.runtimeExports.drainWithHostDispatchSymbol,
+    "sdn_flow_drain_with_host_dispatch",
+  );
   assert.match(prepared.command, /\/working\/flow-runtime\.mjs$/);
   assert.match(
     prepared.source,
@@ -211,6 +219,14 @@ test("emception compiler adapter prepares a single-source C++ compile plan with 
   assert.equal(
     artifact.runtimeExports.applyInvocationResultSymbol,
     "sdn_flow_apply_node_invocation_result",
+  );
+  assert.equal(
+    artifact.runtimeExports.dispatchHostInvocationSymbol,
+    "sdn_flow_dispatch_next_ready_node_with_host",
+  );
+  assert.equal(
+    artifact.runtimeExports.drainWithHostDispatchSymbol,
+    "sdn_flow_drain_with_host_dispatch",
   );
   assert.equal(artifact.pluginVersions.length, 6);
   assert.equal(artifact.requiredCapabilities.includes("storage_query"), true);

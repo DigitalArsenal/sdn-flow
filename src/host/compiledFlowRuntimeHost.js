@@ -20,16 +20,44 @@ function getInstantiatedExports(target = null) {
   return null;
 }
 
-function resolveArtifactImportObject(imports, artifact) {
+function mergeImportObjects(base = {}, extra = {}) {
+  const merged = { ...(base ?? {}) };
+  for (const [moduleName, moduleValue] of Object.entries(extra ?? {})) {
+    const existing = merged[moduleName];
+    if (
+      existing &&
+      typeof existing === "object" &&
+      !Array.isArray(existing) &&
+      moduleValue &&
+      typeof moduleValue === "object" &&
+      !Array.isArray(moduleValue)
+    ) {
+      merged[moduleName] = {
+        ...existing,
+        ...moduleValue,
+      };
+      continue;
+    }
+    merged[moduleName] = moduleValue;
+  }
+  return merged;
+}
+
+function resolveArtifactImportObject(
+  imports,
+  artifact,
+  additionalImports = {},
+) {
   if (typeof imports === "function") {
-    return imports(artifact) ?? {};
+    return mergeImportObjects(imports(artifact) ?? {}, additionalImports);
   }
   if (imports instanceof Map) {
-    return (
+    return mergeImportObjects(
       imports.get(artifact?.programId) ??
-      imports.get(artifact?.artifactId) ??
-      imports.get("default") ??
-      {}
+        imports.get(artifact?.artifactId) ??
+        imports.get("default") ??
+        {},
+      additionalImports,
     );
   }
   if (imports && typeof imports === "object") {
@@ -38,16 +66,17 @@ function resolveArtifactImportObject(imports, artifact) {
       "wasi_snapshot_preview1" in imports ||
       "default" in imports
     ) {
-      return imports;
+      return mergeImportObjects(imports, additionalImports);
     }
-    return (
+    return mergeImportObjects(
       imports[artifact?.programId] ??
-      imports[artifact?.artifactId] ??
-      imports.default ??
-      {}
+        imports[artifact?.artifactId] ??
+        imports.default ??
+        {},
+      additionalImports,
     );
   }
-  return {};
+  return mergeImportObjects({}, additionalImports);
 }
 
 function resolveNamedExport(exports, symbol) {
@@ -116,6 +145,7 @@ async function resolveCompiledArtifactRuntime({
   instance = null,
   wasmExports = null,
   artifactImports = {},
+  internalImports = {},
   instantiateArtifact = WebAssembly.instantiate,
 } = {}) {
   if (instance || wasmExports) {
@@ -136,7 +166,7 @@ async function resolveCompiledArtifactRuntime({
   }
   const instantiated = await instantiateArtifact(
     artifact.wasm,
-    resolveArtifactImportObject(artifactImports, artifact),
+    resolveArtifactImportObject(artifactImports, artifact, internalImports),
   );
   return {
     instance: instantiated?.instance ?? instantiated ?? null,
@@ -185,6 +215,120 @@ function resolveHandler(
   return null;
 }
 
+function isPromiseLike(value) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    typeof value.then === "function"
+  );
+}
+
+function resolveInvocationBinding(host, invocation = null) {
+  const dispatchDescriptor =
+    invocation?.dispatchDescriptorIndex === INVALID_INDEX
+      ? null
+      : host.readNodeDispatchDescriptorAt(invocation?.dispatchDescriptorIndex);
+  const dependencyDescriptor =
+    dispatchDescriptor?.dependencyIndex === INVALID_INDEX
+      ? null
+      : host.readDependencyDescriptorAt(dispatchDescriptor?.dependencyIndex);
+  return {
+    dispatchDescriptor,
+    dependencyDescriptor,
+    handler: host.findHandler({
+      pluginId: invocation?.pluginId,
+      methodId: invocation?.methodId,
+      dependencyId:
+        dispatchDescriptor?.dependencyId ?? dependencyDescriptor?.dependencyId,
+      nodeId: dispatchDescriptor?.nodeId ?? null,
+    }),
+  };
+}
+
+async function executeCurrentInvocationInternal(
+  host,
+  {
+    nodeIndex = INVALID_INDEX,
+    outputStreamCap = 16,
+    consumed = 0,
+    dependencyInvoker = null,
+    dependencyStreamBridge = null,
+  } = {},
+) {
+  const invocation = host.readCurrentInvocation();
+  const { dispatchDescriptor, dependencyDescriptor, handler } =
+    resolveInvocationBinding(host, invocation);
+  const instantiatedDependency =
+    (typeof dependencyInvoker === "function" ||
+      typeof dependencyStreamBridge === "function") &&
+    dependencyDescriptor
+      ? await host.getInstantiatedDependency({
+          dependencyId:
+            dispatchDescriptor?.dependencyId ??
+            dependencyDescriptor?.dependencyId,
+          pluginId: invocation?.pluginId,
+          dependencyIndex:
+            dispatchDescriptor?.dependencyIndex ??
+            dependencyDescriptor?.dependencyIndex,
+        })
+      : null;
+
+  if (
+    typeof handler !== "function" &&
+    typeof dependencyInvoker !== "function" &&
+    typeof dependencyStreamBridge !== "function"
+  ) {
+    throw new Error(
+      `No compiled flow host handler is registered for ${invocation?.pluginId}:${invocation?.methodId}.`,
+    );
+  }
+
+  const inputs = (invocation.frames ?? []).map((frame) => ({
+    ...frame,
+    bytes: host.readFrameBytes(frame),
+  }));
+  const invocationArgs = {
+    nodeIndex,
+    pluginId: invocation?.pluginId,
+    methodId: invocation?.methodId,
+    dispatchDescriptor,
+    dependencyDescriptor,
+    instantiatedDependency,
+    inputs,
+    outputStreamCap,
+    invocation,
+  };
+  const result =
+    typeof handler === "function"
+      ? await handler(invocationArgs)
+      : typeof dependencyInvoker === "function"
+        ? await dependencyInvoker(invocationArgs)
+        : await dependencyStreamBridge(invocationArgs);
+  const routedOutputs = Number(
+    host.applyNodeInvocationResult(nodeIndex, {
+      statusCode:
+        result?.statusCode ?? result?.status_code ?? result?.errorCode ?? 0,
+      backlogRemaining:
+        result?.backlogRemaining ?? result?.backlog_remaining ?? 0,
+      yielded: result?.yielded ?? false,
+      outputs: result?.outputs ?? [],
+    }),
+  );
+  return {
+    executed: true,
+    idle: false,
+    nodeIndex,
+    pluginId: invocation?.pluginId,
+    methodId: invocation?.methodId,
+    dispatchDescriptor,
+    dependencyDescriptor,
+    instantiatedDependency,
+    consumed,
+    routedOutputs,
+    outputs: result?.outputs ?? [],
+  };
+}
+
 export async function bindCompiledFlowRuntimeHost({
   artifact,
   instance = null,
@@ -198,11 +342,34 @@ export async function bindCompiledFlowRuntimeHost({
   dependencyImports = {},
   instantiateDependency = WebAssembly.instantiate,
 } = {}) {
+  const hostContext = {
+    current: null,
+  };
+  const internalImports = {
+    sdn_flow_host: {
+      dispatch_current_invocation(outputStreamCap = 16) {
+        const currentHost = hostContext.current;
+        if (!currentHost) {
+          throw new Error(
+            "Compiled flow host dispatch import was called before host initialization completed.",
+          );
+        }
+        return (
+          Number(
+            currentHost.dispatchCurrentInvocation({
+              outputStreamCap: Number(outputStreamCap) >>> 0,
+            }),
+          ) >>> 0
+        );
+      },
+    },
+  };
   const resolvedRuntime = await resolveCompiledArtifactRuntime({
     artifact,
     instance,
     wasmExports,
     artifactImports,
+    internalImports,
     instantiateArtifact,
   });
   const resolvedInstance = resolvedRuntime.instance ?? instance;
@@ -239,14 +406,18 @@ export async function bindCompiledFlowRuntimeHost({
     return dependencyRuntime;
   }
 
-  return {
+  const host = {
     ...bound,
     descriptors,
     handlers: normalizedHandlers,
     instance: resolvedInstance,
     wasmExports: resolvedWasmExports,
     memory: resolvedMemory,
-    artifactImports,
+    artifactImports: resolveArtifactImportObject(
+      artifactImports,
+      artifact,
+      internalImports,
+    ),
     instantiateArtifact,
     dependencyInvoker,
     dependencyStreamBridge,
@@ -318,9 +489,93 @@ export async function bindCompiledFlowRuntimeHost({
       const runtime = await getDependencyRuntime();
       return runtime.destroyAll(...args);
     },
+    getInstantiatedDependencySync(binding = {}) {
+      if (!dependencyRuntime) {
+        return null;
+      }
+      return dependencyRuntime.getDependency(binding);
+    },
     async getInstantiatedDependency(binding = {}) {
       const runtime = await getDependencyRuntime();
       return runtime.getDependency(binding);
+    },
+    dispatchCurrentInvocation({ outputStreamCap = 16 } = {}) {
+      const nodeIndex =
+        this.readCurrentInvocation()?.nodeIndex ?? INVALID_INDEX;
+      const invocation = this.readCurrentInvocation();
+      const { dispatchDescriptor, dependencyDescriptor, handler } =
+        resolveInvocationBinding(this, invocation);
+      const instantiatedDependency =
+        (typeof dependencyInvoker === "function" ||
+          typeof dependencyStreamBridge === "function") &&
+        dependencyDescriptor
+          ? this.getInstantiatedDependencySync({
+              dependencyId:
+                dispatchDescriptor?.dependencyId ??
+                dependencyDescriptor?.dependencyId,
+              pluginId: invocation?.pluginId,
+              dependencyIndex:
+                dispatchDescriptor?.dependencyIndex ??
+                dependencyDescriptor?.dependencyIndex,
+            })
+          : null;
+
+      if (
+        typeof handler !== "function" &&
+        typeof dependencyInvoker !== "function" &&
+        typeof dependencyStreamBridge !== "function"
+      ) {
+        throw new Error(
+          `No compiled flow host handler is registered for ${invocation?.pluginId}:${invocation?.methodId}.`,
+        );
+      }
+      if (
+        dependencyDescriptor &&
+        (typeof dependencyInvoker === "function" ||
+          typeof dependencyStreamBridge === "function") &&
+        !instantiatedDependency
+      ) {
+        throw new Error(
+          "Compiled flow host dispatch import requires dependencies to be instantiated before in-module dispatch.",
+        );
+      }
+
+      const inputs = (invocation?.frames ?? []).map((frame) => ({
+        ...frame,
+        bytes: this.readFrameBytes(frame),
+      }));
+      const invocationArgs = {
+        nodeIndex,
+        pluginId: invocation?.pluginId,
+        methodId: invocation?.methodId,
+        dispatchDescriptor,
+        dependencyDescriptor,
+        instantiatedDependency,
+        inputs,
+        outputStreamCap,
+        invocation,
+      };
+      const result =
+        typeof handler === "function"
+          ? handler(invocationArgs)
+          : typeof dependencyInvoker === "function"
+            ? dependencyInvoker(invocationArgs)
+            : dependencyStreamBridge(invocationArgs);
+      if (isPromiseLike(result)) {
+        throw new Error(
+          "Compiled flow host in-module dispatch currently requires synchronous handlers/dependency bridges.",
+        );
+      }
+      return Number(
+        this.applyNodeInvocationResult(nodeIndex, {
+          statusCode:
+            result?.statusCode ?? result?.status_code ?? result?.errorCode ?? 0,
+          backlogRemaining:
+            result?.backlogRemaining ?? result?.backlog_remaining ?? 0,
+          yielded: result?.yielded ?? false,
+          outputs: result?.outputs ?? [],
+        }),
+      );
     },
     async executeNextReadyNode({ frameBudget = 1, outputStreamCap = 16 } = {}) {
       const nodeIndex = Number(bound.resolvedByRole.readyNodeSymbol()) >>> 0;
@@ -334,93 +589,77 @@ export async function bindCompiledFlowRuntimeHost({
       const consumed = Number(
         bound.resolvedByRole.beginInvocationSymbol(nodeIndex, frameBudget),
       );
-      const invocation = this.readCurrentInvocation();
-      const dispatchDescriptor =
-        invocation?.dispatchDescriptorIndex === INVALID_INDEX
-          ? null
-          : this.readNodeDispatchDescriptorAt(
-              invocation?.dispatchDescriptorIndex,
-            );
-      const dependencyDescriptor =
-        dispatchDescriptor?.dependencyIndex === INVALID_INDEX
-          ? null
-          : this.readDependencyDescriptorAt(
-              dispatchDescriptor?.dependencyIndex,
-            );
-      const handler = this.findHandler({
-        pluginId: invocation?.pluginId,
-        methodId: invocation?.methodId,
-        dependencyId:
-          dispatchDescriptor?.dependencyId ??
-          dependencyDescriptor?.dependencyId,
-        nodeId: dispatchDescriptor?.nodeId ?? null,
-      });
-      const instantiatedDependency =
-        (typeof dependencyInvoker === "function" ||
-          typeof dependencyStreamBridge === "function") &&
-        dependencyDescriptor
-          ? await this.getInstantiatedDependency({
-              dependencyId:
-                dispatchDescriptor?.dependencyId ??
-                dependencyDescriptor?.dependencyId,
-              pluginId: invocation?.pluginId,
-              dependencyIndex:
-                dispatchDescriptor?.dependencyIndex ??
-                dependencyDescriptor?.dependencyIndex,
-            })
-          : null;
-      if (
-        typeof handler !== "function" &&
-        typeof dependencyInvoker !== "function" &&
-        typeof dependencyStreamBridge !== "function"
-      ) {
-        throw new Error(
-          `No compiled flow host handler is registered for ${invocation?.pluginId}:${invocation?.methodId}.`,
-        );
-      }
-      const inputs = (invocation.frames ?? []).map((frame) => ({
-        ...frame,
-        bytes: this.readFrameBytes(frame),
-      }));
-      const invocationArgs = {
+      return executeCurrentInvocationInternal(this, {
         nodeIndex,
-        pluginId: invocation.pluginId,
-        methodId: invocation.methodId,
-        dispatchDescriptor,
-        dependencyDescriptor,
-        instantiatedDependency,
-        inputs,
         outputStreamCap,
-        invocation,
-      };
-      const result =
-        typeof handler === "function"
-          ? await handler(invocationArgs)
-          : typeof dependencyInvoker === "function"
-            ? await dependencyInvoker(invocationArgs)
-            : await dependencyStreamBridge(invocationArgs);
-      const routedOutputs = Number(
-        this.applyNodeInvocationResult(nodeIndex, {
-          statusCode:
-            result?.statusCode ?? result?.status_code ?? result?.errorCode ?? 0,
-          backlogRemaining:
-            result?.backlogRemaining ?? result?.backlog_remaining ?? 0,
-          yielded: result?.yielded ?? false,
-          outputs: result?.outputs ?? [],
-        }),
+        consumed,
+        dependencyInvoker,
+        dependencyStreamBridge,
+      });
+    },
+    async dispatchNextReadyNodeWithHost({
+      frameBudget = 1,
+      outputStreamCap = 16,
+    } = {}) {
+      const drainExport = this.resolveEntrypoint(
+        artifact?.runtimeExports?.dispatchHostInvocationSymbol ??
+          "sdn_flow_dispatch_next_ready_node_with_host",
       );
+      if (!drainExport) {
+        return this.executeNextReadyNode({
+          frameBudget,
+          outputStreamCap,
+        });
+      }
+      const nodeIndex =
+        Number(
+          drainExport.value(frameBudget, outputStreamCap) ?? INVALID_INDEX,
+        ) >>> 0;
+      if (nodeIndex === INVALID_INDEX) {
+        return {
+          executed: false,
+          idle: true,
+          nodeIndex,
+        };
+      }
+      const invocation = this.readCurrentInvocation();
+      const { dispatchDescriptor, dependencyDescriptor } =
+        resolveInvocationBinding(this, invocation);
       return {
         executed: true,
         idle: false,
         nodeIndex,
-        pluginId: invocation.pluginId,
-        methodId: invocation.methodId,
+        pluginId: invocation?.pluginId ?? null,
+        methodId: invocation?.methodId ?? null,
         dispatchDescriptor,
         dependencyDescriptor,
-        instantiatedDependency,
-        consumed,
-        routedOutputs,
-        outputs: result?.outputs ?? [],
+      };
+    },
+    async drainWithHostDispatch({
+      frameBudget = 1,
+      outputStreamCap = 16,
+      maxIterations = 1024,
+    } = {}) {
+      const drainExport = this.resolveEntrypoint(
+        artifact?.runtimeExports?.drainWithHostDispatchSymbol ??
+          "sdn_flow_drain_with_host_dispatch",
+      );
+      if (!drainExport) {
+        return this.drain({
+          frameBudget,
+          outputStreamCap,
+          maxIterations,
+        });
+      }
+      const iterations =
+        Number(
+          drainExport.value(frameBudget, outputStreamCap, maxIterations) ?? 0,
+        ) >>> 0;
+      return {
+        idle:
+          Number(bound.resolvedByRole.readyNodeSymbol()) >>> 0 ===
+          INVALID_INDEX,
+        iterations,
       };
     },
     async drain({
@@ -451,6 +690,14 @@ export async function bindCompiledFlowRuntimeHost({
       };
     },
   };
+  if (
+    typeof dependencyInvoker === "function" ||
+    typeof dependencyStreamBridge === "function"
+  ) {
+    await getDependencyRuntime();
+  }
+  hostContext.current = host;
+  return host;
 }
 
 export default bindCompiledFlowRuntimeHost;

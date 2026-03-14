@@ -224,6 +224,14 @@ function normalizeRuntimeExports(exports = {}) {
       exports.applyInvocationResultSymbol ??
       exports.apply_invocation_result_symbol ??
       null,
+    dispatchHostInvocationSymbol:
+      exports.dispatchHostInvocationSymbol ??
+      exports.dispatch_host_invocation_symbol ??
+      null,
+    drainWithHostDispatchSymbol:
+      exports.drainWithHostDispatchSymbol ??
+      exports.drain_with_host_dispatch_symbol ??
+      null,
   };
 }
 

@@ -1182,6 +1182,10 @@ test("compiled flow runtime host can instantiate the root artifact when exports 
     _sdn_flow_get_dependency_count() {
       return 0;
     },
+    _main() {
+      wasmExports._sdn_flow_begin_node_invocation(0, 1);
+      return currentImports.sdn_flow_host.dispatch_current_invocation(16);
+    },
     _sdn_flow_apply_node_invocation_result(
       _nodeIndex,
       _statusCode,
@@ -1209,13 +1213,18 @@ test("compiled flow runtime host can instantiate the root artifact when exports 
       return outputCount;
     },
   };
+  let currentImports = null;
 
   const host = await bindCompiledFlowRuntimeHost({
     artifact,
     instantiateArtifact: async (moduleBytes, imports) => {
       instantiateCalls += 1;
       assert.deepEqual(Array.from(moduleBytes), Array.from(artifact.wasm));
-      assert.deepEqual(imports, {});
+      assert.equal(
+        typeof imports.sdn_flow_host.dispatch_current_invocation,
+        "function",
+      );
+      currentImports = imports;
       return {
         instance: {
           exports: wasmExports,
@@ -1235,11 +1244,11 @@ test("compiled flow runtime host can instantiate the root artifact when exports 
     },
   });
 
-  const execution = await host.executeNextReadyNode();
+  const entrypoint = host.runEntrypoint({
+    argv: ["flow-runtime", "--frame-budget=1", "--output-stream-cap=16"],
+  });
   assert.equal(instantiateCalls, 1);
-  assert.equal(execution.executed, true);
-  assert.equal(execution.pluginId, "com.digitalarsenal.propagator.sgp4");
-  assert.equal(execution.methodId, "catalog_query");
+  assert.equal(entrypoint.exitCode, 1);
   assert.equal(lastOutputPort, "results");
   assert.deepEqual(lastOutputBytes, [1, 2, 3, 9, 10]);
 });
