@@ -50,6 +50,67 @@ function resolveArtifactImportObject(imports, artifact) {
   return {};
 }
 
+function resolveNamedExport(exports, symbol) {
+  if (!symbol || !exports || typeof exports !== "object") {
+    return null;
+  }
+  if (typeof exports[symbol] === "function") {
+    return {
+      name: symbol,
+      value: exports[symbol],
+    };
+  }
+  const underscored = `_${symbol}`;
+  if (typeof exports[underscored] === "function") {
+    return {
+      name: underscored,
+      value: exports[underscored],
+    };
+  }
+  return null;
+}
+
+function writeCString(memory, pointer, value) {
+  const bytes = new Uint8Array(memory.buffer);
+  const encoded = new TextEncoder().encode(`${String(value ?? "")}\0`);
+  bytes.set(encoded, Number(pointer) >>> 0);
+}
+
+function allocateCString(bound, memory, value) {
+  const encoded = new TextEncoder().encode(`${String(value ?? "")}\0`);
+  const pointer =
+    Number(bound.resolvedByRole.mallocSymbol(encoded.length)) >>> 0;
+  writeCString(memory, pointer, value);
+  return pointer;
+}
+
+function allocateArgv(bound, memory, argv = []) {
+  const pointers = argv.map((value) => allocateCString(bound, memory, value));
+  const argvPointer =
+    Number(bound.resolvedByRole.mallocSymbol((pointers.length + 1) * 4)) >>> 0;
+  const view = new DataView(memory.buffer);
+  pointers.forEach((pointer, index) => {
+    view.setUint32(argvPointer + index * 4, pointer, true);
+  });
+  view.setUint32(argvPointer + pointers.length * 4, 0, true);
+  return {
+    argvPointer,
+    stringPointers: pointers,
+  };
+}
+
+function releaseArgv(bound, allocation = null) {
+  if (!allocation) {
+    return;
+  }
+  for (const pointer of allocation.stringPointers ?? []) {
+    bound.resolvedByRole.freeSymbol(pointer);
+  }
+  if (allocation.argvPointer) {
+    bound.resolvedByRole.freeSymbol(allocation.argvPointer);
+  }
+}
+
 async function resolveCompiledArtifactRuntime({
   artifact,
   instance = null,
@@ -190,6 +251,57 @@ export async function bindCompiledFlowRuntimeHost({
     dependencyInvoker,
     dependencyStreamBridge,
     dependencyImports,
+    resolveEntrypoint(entrypoint = artifact?.entrypoint ?? "main") {
+      return resolveNamedExport(resolvedWasmExports, entrypoint);
+    },
+    runEntrypoint({
+      entrypoint = artifact?.entrypoint ?? "main",
+      args = [],
+      argv = null,
+      programName = artifact?.programId ??
+        artifact?.artifactId ??
+        "flow-runtime",
+    } = {}) {
+      const resolvedEntrypoint = this.resolveEntrypoint(entrypoint);
+      if (!resolvedEntrypoint) {
+        throw new Error(
+          `Compiled flow host entrypoint "${entrypoint}" is not present on the instantiated runtime.`,
+        );
+      }
+      if (
+        resolvedEntrypoint.name === "_start" ||
+        resolvedEntrypoint.name === "start" ||
+        resolvedEntrypoint.value.length === 0
+      ) {
+        return {
+          entrypoint: resolvedEntrypoint.name,
+          argc: 0,
+          argv: [],
+          exitCode: Number(resolvedEntrypoint.value() ?? 0),
+        };
+      }
+
+      const normalizedArgv = Array.isArray(argv)
+        ? argv.map((value) => String(value))
+        : [String(programName), ...args.map((value) => String(value))];
+      const allocation = allocateArgv(bound, resolvedMemory, normalizedArgv);
+      try {
+        const exitCode = Number(
+          resolvedEntrypoint.value(
+            normalizedArgv.length,
+            allocation.argvPointer,
+          ) ?? 0,
+        );
+        return {
+          entrypoint: resolvedEntrypoint.name,
+          argc: normalizedArgv.length,
+          argv: normalizedArgv,
+          exitCode,
+        };
+      } finally {
+        releaseArgv(bound, allocation);
+      }
+    },
     readNodeDispatchDescriptorAt(index) {
       return descriptors.readNodeDispatchDescriptorAt(index);
     },
