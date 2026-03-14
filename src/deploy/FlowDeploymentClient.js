@@ -13,6 +13,35 @@ import {
 } from "../utils/encoding.js";
 import { sha256Bytes } from "../utils/crypto.js";
 
+function maybeParseStructuredInput(input) {
+  if (typeof input === "string") {
+    const trimmed = input.trim();
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      return JSON.parse(trimmed);
+    }
+    return input;
+  }
+  if (input instanceof Uint8Array || ArrayBuffer.isView(input)) {
+    const decoded = new TextDecoder().decode(
+      input instanceof Uint8Array
+        ? input
+        : new Uint8Array(input.buffer, input.byteOffset, input.byteLength),
+    );
+    const trimmed = decoded.trim();
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      return JSON.parse(trimmed);
+    }
+  }
+  if (input instanceof ArrayBuffer) {
+    const decoded = new TextDecoder().decode(new Uint8Array(input));
+    const trimmed = decoded.trim();
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      return JSON.parse(trimmed);
+    }
+  }
+  return input;
+}
+
 function serializeTarget(target = null) {
   if (typeof target === "string") {
     return {
@@ -304,38 +333,42 @@ export async function resolveCompiledArtifactEnvelope(
   input = {},
   options = {},
 ) {
-  if (input && typeof input === "object") {
-    if (input.encrypted === true && input.envelope) {
+  const normalizedInput = maybeParseStructuredInput(input);
+  if (normalizedInput && typeof normalizedInput === "object") {
+    if (normalizedInput.encrypted === true && normalizedInput.envelope) {
       if (typeof options.decrypt !== "function") {
         throw new Error(
           "Encrypted compiled flow deployments must be decrypted before host startup.",
         );
       }
-      const decrypted = await options.decrypt(input.envelope, input);
+      const decrypted = await options.decrypt(
+        normalizedInput.envelope,
+        normalizedInput,
+      );
       return resolveCompiledArtifactEnvelope(decrypted, options);
     }
     if (
-      input.payload &&
-      typeof input.payload === "object" &&
-      input.payload.kind === "compiled-flow-wasm-deployment"
+      normalizedInput.payload &&
+      typeof normalizedInput.payload === "object" &&
+      normalizedInput.payload.kind === "compiled-flow-wasm-deployment"
     ) {
-      return input.payload;
+      return normalizedInput.payload;
     }
-    if (input.kind === "compiled-flow-wasm-deployment") {
-      return input;
+    if (normalizedInput.kind === "compiled-flow-wasm-deployment") {
+      return normalizedInput;
     }
-    if (input.artifact) {
+    if (normalizedInput.artifact) {
       return {
         kind: "compiled-flow-artifact-input",
-        artifact: input.artifact,
-        source: input,
+        artifact: normalizedInput.artifact,
+        source: normalizedInput,
       };
     }
   }
 
   return {
     kind: "compiled-flow-artifact-input",
-    artifact: input,
+    artifact: normalizedInput,
   };
 }
 

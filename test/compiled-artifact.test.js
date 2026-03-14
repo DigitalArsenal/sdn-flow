@@ -181,6 +181,29 @@ test("deployment payloads can be resolved into compiled runtime artifacts", asyn
   assert.deepEqual(Array.from(resolved.wasm), Array.from(artifact.wasm));
 });
 
+test("serialized deployment json can be resolved into compiled runtime artifacts", async () => {
+  const client = new FlowDeploymentClient();
+  const artifact = await normalizeCompiledArtifact({
+    programId: "flow.artifact.serialized.deployment",
+    wasm: new Uint8Array([0x00, 0x61, 0x73, 0x6d]),
+    manifestBuffer: new Uint8Array([0x46, 0x4c, 0x4f, 0x57]),
+  });
+  const deployment = await client.prepareDeployment({
+    artifact,
+    target: {
+      kind: "local",
+      runtimeId: "runtime-json-deployment",
+    },
+  });
+
+  const resolved = await resolveCompiledArtifactInput(
+    JSON.stringify(deployment),
+  );
+
+  assert.equal(resolved.programId, artifact.programId);
+  assert.deepEqual(Array.from(resolved.wasm), Array.from(artifact.wasm));
+});
+
 test("encrypted deployment payloads fail closed during host artifact resolution", async () => {
   await assert.rejects(
     resolveCompiledArtifactInput({
