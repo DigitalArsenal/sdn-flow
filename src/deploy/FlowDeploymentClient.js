@@ -5,7 +5,12 @@ import {
 } from "../auth/index.js";
 import { DefaultManifestExports } from "../runtime/constants.js";
 import { encryptJsonForRecipient } from "../transport/index.js";
-import { bytesToBase64, bytesToHex, toUint8Array } from "../utils/encoding.js";
+import {
+  base64ToBytes,
+  bytesToBase64,
+  bytesToHex,
+  toUint8Array,
+} from "../utils/encoding.js";
 import { sha256Bytes } from "../utils/crypto.js";
 
 function serializeTarget(target = null) {
@@ -273,6 +278,52 @@ export function serializeCompiledArtifact(artifact) {
     schemaBindings: artifact.schemaBindings,
     abiVersion: artifact.abiVersion,
   };
+}
+
+export async function deserializeCompiledArtifact(serializedArtifact = {}) {
+  if (
+    serializedArtifact.wasmBase64 !== undefined ||
+    serializedArtifact.manifestBase64 !== undefined
+  ) {
+    return normalizeCompiledArtifact({
+      ...serializedArtifact,
+      wasm: base64ToBytes(serializedArtifact.wasmBase64),
+      manifestBuffer: base64ToBytes(serializedArtifact.manifestBase64),
+      manifestExports:
+        serializedArtifact.manifestExports ??
+        serializedArtifact.manifest_exports,
+      runtimeExports:
+        serializedArtifact.runtimeExports ??
+        serializedArtifact.runtime_exports,
+    });
+  }
+
+  return normalizeCompiledArtifact(serializedArtifact);
+}
+
+export async function resolveCompiledArtifactInput(input = {}) {
+  if (input && typeof input === "object") {
+    if (input.encrypted === true && input.envelope) {
+      throw new Error(
+        "Encrypted compiled flow deployments must be decrypted before host startup.",
+      );
+    }
+    if (
+      input.payload &&
+      typeof input.payload === "object" &&
+      input.payload.kind === "compiled-flow-wasm-deployment"
+    ) {
+      return deserializeCompiledArtifact(input.payload.artifact);
+    }
+    if (input.kind === "compiled-flow-wasm-deployment") {
+      return deserializeCompiledArtifact(input.artifact);
+    }
+    if (input.artifact) {
+      return deserializeCompiledArtifact(input.artifact);
+    }
+  }
+
+  return deserializeCompiledArtifact(input);
 }
 
 export class FlowDeploymentClient {

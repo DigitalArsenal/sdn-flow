@@ -1,7 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { normalizeCompiledArtifact } from "../src/index.js";
+import {
+  deserializeCompiledArtifact,
+  FlowDeploymentClient,
+  normalizeCompiledArtifact,
+  resolveCompiledArtifactInput,
+  serializeCompiledArtifact,
+} from "../src/index.js";
 
 test("compiled artifacts require an embedded manifest and default manifest exports", async () => {
   const artifact = await normalizeCompiledArtifact({
@@ -125,5 +131,64 @@ test("compiled artifacts normalize extended runtime descriptor exports", async (
   assert.equal(
     artifact.runtimeExports.nodeIngressIndexCountSymbol,
     "sdn_flow_get_node_ingress_index_count",
+  );
+});
+
+test("serialized compiled artifacts can be decoded back into runtime artifacts", async () => {
+  const normalized = await normalizeCompiledArtifact({
+    programId: "flow.artifact.serialized",
+    wasm: new Uint8Array([0x00, 0x61, 0x73, 0x6d]),
+    manifestBuffer: new Uint8Array([0x46, 0x4c, 0x4f, 0x57]),
+    runtimeExports: {
+      readyNodeSymbol: "sdn_flow_get_ready_node_index",
+    },
+  });
+  const serialized = serializeCompiledArtifact(normalized);
+  const decoded = await deserializeCompiledArtifact(serialized);
+
+  assert.equal(decoded.programId, normalized.programId);
+  assert.deepEqual(Array.from(decoded.wasm), Array.from(normalized.wasm));
+  assert.deepEqual(
+    Array.from(decoded.manifestBuffer),
+    Array.from(normalized.manifestBuffer),
+  );
+  assert.equal(
+    decoded.runtimeExports.readyNodeSymbol,
+    "sdn_flow_get_ready_node_index",
+  );
+});
+
+test("deployment payloads can be resolved into compiled runtime artifacts", async () => {
+  const client = new FlowDeploymentClient();
+  const artifact = await normalizeCompiledArtifact({
+    programId: "flow.artifact.deployment",
+    wasm: new Uint8Array([0x00, 0x61, 0x73, 0x6d]),
+    manifestBuffer: new Uint8Array([0x46, 0x4c, 0x4f, 0x57]),
+  });
+  const deployment = await client.prepareDeployment({
+    artifact,
+    target: {
+      kind: "local",
+      runtimeId: "runtime-deploy-test",
+      transport: "same-app",
+    },
+  });
+
+  const resolved = await resolveCompiledArtifactInput(deployment);
+
+  assert.equal(resolved.programId, artifact.programId);
+  assert.equal(resolved.runtimeModel, "compiled-cpp-wasm");
+  assert.deepEqual(Array.from(resolved.wasm), Array.from(artifact.wasm));
+});
+
+test("encrypted deployment payloads fail closed during host artifact resolution", async () => {
+  await assert.rejects(
+    resolveCompiledArtifactInput({
+      encrypted: true,
+      envelope: {
+        ciphertextBase64: "abc",
+      },
+    }),
+    /must be decrypted before host startup/,
   );
 });
