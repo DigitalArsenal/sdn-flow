@@ -301,12 +301,16 @@ export async function deserializeCompiledArtifact(serializedArtifact = {}) {
   return normalizeCompiledArtifact(serializedArtifact);
 }
 
-export async function resolveCompiledArtifactInput(input = {}) {
+export async function resolveCompiledArtifactInput(input = {}, options = {}) {
   if (input && typeof input === "object") {
     if (input.encrypted === true && input.envelope) {
-      throw new Error(
-        "Encrypted compiled flow deployments must be decrypted before host startup.",
-      );
+      if (typeof options.decrypt !== "function") {
+        throw new Error(
+          "Encrypted compiled flow deployments must be decrypted before host startup.",
+        );
+      }
+      const decrypted = await options.decrypt(input.envelope, input);
+      return resolveCompiledArtifactInput(decrypted, options);
     }
     if (
       input.payload &&

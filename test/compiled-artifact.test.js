@@ -192,3 +192,38 @@ test("encrypted deployment payloads fail closed during host artifact resolution"
     /must be decrypted before host startup/,
   );
 });
+
+test("encrypted deployment payloads can be resolved with an explicit decryptor", async () => {
+  const client = new FlowDeploymentClient();
+  const artifact = await normalizeCompiledArtifact({
+    programId: "flow.artifact.encrypted",
+    wasm: new Uint8Array([0x00, 0x61, 0x73, 0x6d]),
+    manifestBuffer: new Uint8Array([0x46, 0x4c, 0x4f, 0x57]),
+  });
+  const deployment = await client.prepareDeployment({
+    artifact,
+    target: {
+      kind: "local",
+      runtimeId: "runtime-encrypted-test",
+      transport: "same-app",
+    },
+  });
+
+  const resolved = await resolveCompiledArtifactInput(
+    {
+      encrypted: true,
+      envelope: {
+        opaque: true,
+      },
+    },
+    {
+      async decrypt(envelope) {
+        assert.equal(envelope.opaque, true);
+        return deployment;
+      },
+    },
+  );
+
+  assert.equal(resolved.programId, artifact.programId);
+  assert.deepEqual(Array.from(resolved.wasm), Array.from(artifact.wasm));
+});
