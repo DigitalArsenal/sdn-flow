@@ -293,15 +293,17 @@ export async function deserializeCompiledArtifact(serializedArtifact = {}) {
         serializedArtifact.manifestExports ??
         serializedArtifact.manifest_exports,
       runtimeExports:
-        serializedArtifact.runtimeExports ??
-        serializedArtifact.runtime_exports,
+        serializedArtifact.runtimeExports ?? serializedArtifact.runtime_exports,
     });
   }
 
   return normalizeCompiledArtifact(serializedArtifact);
 }
 
-export async function resolveCompiledArtifactInput(input = {}, options = {}) {
+export async function resolveCompiledArtifactEnvelope(
+  input = {},
+  options = {},
+) {
   if (input && typeof input === "object") {
     if (input.encrypted === true && input.envelope) {
       if (typeof options.decrypt !== "function") {
@@ -310,24 +312,47 @@ export async function resolveCompiledArtifactInput(input = {}, options = {}) {
         );
       }
       const decrypted = await options.decrypt(input.envelope, input);
-      return resolveCompiledArtifactInput(decrypted, options);
+      return resolveCompiledArtifactEnvelope(decrypted, options);
     }
     if (
       input.payload &&
       typeof input.payload === "object" &&
       input.payload.kind === "compiled-flow-wasm-deployment"
     ) {
-      return deserializeCompiledArtifact(input.payload.artifact);
+      return input.payload;
     }
     if (input.kind === "compiled-flow-wasm-deployment") {
-      return deserializeCompiledArtifact(input.artifact);
+      return input;
     }
     if (input.artifact) {
-      return deserializeCompiledArtifact(input.artifact);
+      return {
+        kind: "compiled-flow-artifact-input",
+        artifact: input.artifact,
+        source: input,
+      };
     }
   }
 
-  return deserializeCompiledArtifact(input);
+  return {
+    kind: "compiled-flow-artifact-input",
+    artifact: input,
+  };
+}
+
+export async function resolveCompiledArtifactInput(input = {}, options = {}) {
+  const resolved = await resolveCompiledArtifactEnvelope(input, options);
+  if (
+    resolved &&
+    typeof resolved === "object" &&
+    resolved.kind === "compiled-flow-wasm-deployment"
+  ) {
+    return deserializeCompiledArtifact(resolved.artifact);
+  }
+  if (resolved && typeof resolved === "object" && resolved.artifact) {
+    return deserializeCompiledArtifact(resolved.artifact);
+  }
+
+  return deserializeCompiledArtifact(resolved);
 }
 
 export class FlowDeploymentClient {

@@ -5,6 +5,7 @@ import {
   deserializeCompiledArtifact,
   FlowDeploymentClient,
   normalizeCompiledArtifact,
+  resolveCompiledArtifactEnvelope,
   resolveCompiledArtifactInput,
   serializeCompiledArtifact,
 } from "../src/index.js";
@@ -59,8 +60,7 @@ test("compiled artifacts normalize extended runtime descriptor exports", async (
         "sdn_flow_get_current_invocation_descriptor",
       prepare_invocation_descriptor_symbol:
         "sdn_flow_prepare_node_invocation_descriptor",
-      apply_invocation_result_symbol:
-        "sdn_flow_apply_node_invocation_result",
+      apply_invocation_result_symbol: "sdn_flow_apply_node_invocation_result",
       enqueue_trigger_frame_symbol: "sdn_flow_enqueue_trigger_frame",
       enqueue_edge_frame_symbol: "sdn_flow_enqueue_edge_frame",
       external_interface_descriptors_symbol:
@@ -226,4 +226,59 @@ test("encrypted deployment payloads can be resolved with an explicit decryptor",
 
   assert.equal(resolved.programId, artifact.programId);
   assert.deepEqual(Array.from(resolved.wasm), Array.from(artifact.wasm));
+});
+
+test("deployment envelope resolution preserves authorization metadata after decryption", async () => {
+  const client = new FlowDeploymentClient();
+  const issuedAt = Date.now();
+  const artifact = await normalizeCompiledArtifact({
+    programId: "flow.artifact.authorized",
+    wasm: new Uint8Array([0x00, 0x61, 0x73, 0x6d]),
+    manifestBuffer: new Uint8Array([0x46, 0x4c, 0x4f, 0x57]),
+  });
+  const deployment = await client.prepareDeployment({
+    artifact,
+    signer: {
+      algorithm: "test",
+      publicKeyHex: "abc123",
+      async sign(bytes) {
+        return bytes.subarray(0, Math.min(bytes.length, 8));
+      },
+    },
+    authorization: {
+      version: 1,
+      action: "deploy-flow",
+      artifactId: artifact.artifactId,
+      programId: artifact.programId,
+      graphHash: artifact.graphHash,
+      manifestHash: artifact.manifestHash,
+      target: {
+        kind: "local",
+        id: "runtime-auth",
+      },
+      capabilities: [],
+      issuedAt,
+      expiresAt: issuedAt + 60_000,
+      nonce: "abc123",
+    },
+  });
+
+  const resolved = await resolveCompiledArtifactEnvelope(
+    {
+      encrypted: true,
+      envelope: {
+        opaque: true,
+      },
+    },
+    {
+      async decrypt(envelope) {
+        assert.equal(envelope.opaque, true);
+        return deployment;
+      },
+    },
+  );
+
+  assert.equal(resolved.kind, "compiled-flow-wasm-deployment");
+  assert.equal(resolved.authorization.payload.programId, artifact.programId);
+  assert.equal(resolved.target.kind, "remote");
 });
