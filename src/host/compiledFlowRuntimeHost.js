@@ -4,6 +4,85 @@ import { instantiateEmbeddedDependencies } from "./dependencyRuntime.js";
 
 const INVALID_INDEX = 0xffffffff;
 
+function getInstantiatedExports(target = null) {
+  if (
+    target?.instance?.exports &&
+    typeof target.instance.exports === "object"
+  ) {
+    return target.instance.exports;
+  }
+  if (target?.exports && typeof target.exports === "object") {
+    return target.exports;
+  }
+  if (target && typeof target === "object") {
+    return target;
+  }
+  return null;
+}
+
+function resolveArtifactImportObject(imports, artifact) {
+  if (typeof imports === "function") {
+    return imports(artifact) ?? {};
+  }
+  if (imports instanceof Map) {
+    return (
+      imports.get(artifact?.programId) ??
+      imports.get(artifact?.artifactId) ??
+      imports.get("default") ??
+      {}
+    );
+  }
+  if (imports && typeof imports === "object") {
+    if (
+      "env" in imports ||
+      "wasi_snapshot_preview1" in imports ||
+      "default" in imports
+    ) {
+      return imports;
+    }
+    return (
+      imports[artifact?.programId] ??
+      imports[artifact?.artifactId] ??
+      imports.default ??
+      {}
+    );
+  }
+  return {};
+}
+
+async function resolveCompiledArtifactRuntime({
+  artifact,
+  instance = null,
+  wasmExports = null,
+  artifactImports = {},
+  instantiateArtifact = WebAssembly.instantiate,
+} = {}) {
+  if (instance || wasmExports) {
+    return {
+      instance,
+      wasmExports,
+    };
+  }
+  if (!(artifact?.wasm instanceof Uint8Array)) {
+    throw new Error(
+      "Compiled flow host requires artifact.wasm bytes when no instance or wasmExports are supplied.",
+    );
+  }
+  if (typeof instantiateArtifact !== "function") {
+    throw new TypeError(
+      "bindCompiledFlowRuntimeHost requires instantiateArtifact to be a function when instantiating the root artifact.",
+    );
+  }
+  const instantiated = await instantiateArtifact(
+    artifact.wasm,
+    resolveArtifactImportObject(artifactImports, artifact),
+  );
+  return {
+    instance: instantiated?.instance ?? instantiated ?? null,
+    wasmExports: getInstantiatedExports(instantiated),
+  };
+}
+
 function normalizeHandlers(handlers = {}) {
   if (handlers instanceof Map) {
     return handlers;
@@ -50,24 +129,36 @@ export async function bindCompiledFlowRuntimeHost({
   instance = null,
   wasmExports = null,
   memory = null,
+  artifactImports = {},
+  instantiateArtifact = WebAssembly.instantiate,
   handlers = {},
   dependencyInvoker = null,
   dependencyStreamBridge = null,
   dependencyImports = {},
   instantiateDependency = WebAssembly.instantiate,
 } = {}) {
+  const resolvedRuntime = await resolveCompiledArtifactRuntime({
+    artifact,
+    instance,
+    wasmExports,
+    artifactImports,
+    instantiateArtifact,
+  });
+  const resolvedInstance = resolvedRuntime.instance ?? instance;
+  const resolvedWasmExports = resolvedRuntime.wasmExports ?? wasmExports;
+  const resolvedMemory = memory ?? resolvedWasmExports?.memory ?? null;
   const [bound, descriptors] = await Promise.all([
     bindCompiledInvocationAbi({
       artifact,
-      instance,
-      wasmExports,
-      memory,
+      instance: resolvedInstance,
+      wasmExports: resolvedWasmExports,
+      memory: resolvedMemory,
     }),
     bindCompiledDescriptorAbi({
       artifact,
-      instance,
-      wasmExports,
-      memory,
+      instance: resolvedInstance,
+      wasmExports: resolvedWasmExports,
+      memory: resolvedMemory,
     }),
   ]);
   const normalizedHandlers = normalizeHandlers(handlers);
@@ -77,9 +168,9 @@ export async function bindCompiledFlowRuntimeHost({
     if (!dependencyRuntime) {
       dependencyRuntime = await instantiateEmbeddedDependencies({
         artifact,
-        instance,
-        wasmExports,
-        memory,
+        instance: resolvedInstance,
+        wasmExports: resolvedWasmExports,
+        memory: resolvedMemory,
         imports: dependencyImports,
         instantiate: instantiateDependency,
       });
@@ -91,6 +182,11 @@ export async function bindCompiledFlowRuntimeHost({
     ...bound,
     descriptors,
     handlers: normalizedHandlers,
+    instance: resolvedInstance,
+    wasmExports: resolvedWasmExports,
+    memory: resolvedMemory,
+    artifactImports,
+    instantiateArtifact,
     dependencyInvoker,
     dependencyStreamBridge,
     dependencyImports,
@@ -130,16 +226,21 @@ export async function bindCompiledFlowRuntimeHost({
       const dispatchDescriptor =
         invocation?.dispatchDescriptorIndex === INVALID_INDEX
           ? null
-          : this.readNodeDispatchDescriptorAt(invocation?.dispatchDescriptorIndex);
+          : this.readNodeDispatchDescriptorAt(
+              invocation?.dispatchDescriptorIndex,
+            );
       const dependencyDescriptor =
         dispatchDescriptor?.dependencyIndex === INVALID_INDEX
           ? null
-          : this.readDependencyDescriptorAt(dispatchDescriptor?.dependencyIndex);
+          : this.readDependencyDescriptorAt(
+              dispatchDescriptor?.dependencyIndex,
+            );
       const handler = this.findHandler({
         pluginId: invocation?.pluginId,
         methodId: invocation?.methodId,
         dependencyId:
-          dispatchDescriptor?.dependencyId ?? dependencyDescriptor?.dependencyId,
+          dispatchDescriptor?.dependencyId ??
+          dependencyDescriptor?.dependencyId,
         nodeId: dispatchDescriptor?.nodeId ?? null,
       });
       const instantiatedDependency =
@@ -210,7 +311,11 @@ export async function bindCompiledFlowRuntimeHost({
         outputs: result?.outputs ?? [],
       };
     },
-    async drain({ frameBudget = 1, outputStreamCap = 16, maxIterations = 1024 } = {}) {
+    async drain({
+      frameBudget = 1,
+      outputStreamCap = 16,
+      maxIterations = 1024,
+    } = {}) {
       const executions = [];
       for (let iteration = 0; iteration < maxIterations; iteration += 1) {
         const execution = await this.executeNextReadyNode({

@@ -23,6 +23,8 @@ import {
 } from "../src/index.js";
 import { generateRuntimeAbiLayoutsSource } from "../scripts/build-runtime-abi.mjs";
 
+const INVALID_INDEX = 0xffffffff;
+
 function compiledArtifactStub() {
   return {
     programId: "com.digitalarsenal.license.local",
@@ -453,7 +455,8 @@ test("compiled descriptor abi decodes node dispatch and embedded dependency reco
     true,
   );
   view.setUint32(
-    nodeDispatchPointer + FlowNodeDispatchDescriptorLayout.fields.nodeIndex.offset,
+    nodeDispatchPointer +
+      FlowNodeDispatchDescriptorLayout.fields.nodeIndex.offset,
     0,
     true,
   );
@@ -538,7 +541,8 @@ test("compiled descriptor abi decodes node dispatch and embedded dependency reco
 
   view.setUint32(
     dependencyPointer +
-      SignedArtifactDependencyDescriptorLayout.fields.dependencyIdPointer.offset,
+      SignedArtifactDependencyDescriptorLayout.fields.dependencyIdPointer
+        .offset,
     strings.dependencyId,
     true,
   );
@@ -568,7 +572,8 @@ test("compiled descriptor abi decodes node dispatch and embedded dependency reco
   );
   view.setUint32(
     dependencyPointer +
-      SignedArtifactDependencyDescriptorLayout.fields.signerPublicKeyPointer.offset,
+      SignedArtifactDependencyDescriptorLayout.fields.signerPublicKeyPointer
+        .offset,
     strings.signerPublicKey,
     true,
   );
@@ -580,13 +585,15 @@ test("compiled descriptor abi decodes node dispatch and embedded dependency reco
   );
   view.setUint32(
     dependencyPointer +
-      SignedArtifactDependencyDescriptorLayout.fields.manifestBytesSymbolPointer.offset,
+      SignedArtifactDependencyDescriptorLayout.fields.manifestBytesSymbolPointer
+        .offset,
     strings.manifestBytesSymbol,
     true,
   );
   view.setUint32(
     dependencyPointer +
-      SignedArtifactDependencyDescriptorLayout.fields.manifestSizeSymbolPointer.offset,
+      SignedArtifactDependencyDescriptorLayout.fields.manifestSizeSymbolPointer
+        .offset,
     strings.manifestSizeSymbol,
     true,
   );
@@ -598,13 +605,15 @@ test("compiled descriptor abi decodes node dispatch and embedded dependency reco
   );
   view.setUint32(
     dependencyPointer +
-      SignedArtifactDependencyDescriptorLayout.fields.destroySymbolPointer.offset,
+      SignedArtifactDependencyDescriptorLayout.fields.destroySymbolPointer
+        .offset,
     strings.destroySymbol,
     true,
   );
   view.setUint32(
     dependencyPointer +
-      SignedArtifactDependencyDescriptorLayout.fields.mallocSymbolPointer.offset,
+      SignedArtifactDependencyDescriptorLayout.fields.mallocSymbolPointer
+        .offset,
     strings.mallocSymbol,
     true,
   );
@@ -616,7 +625,8 @@ test("compiled descriptor abi decodes node dispatch and embedded dependency reco
   );
   view.setUint32(
     dependencyPointer +
-      SignedArtifactDependencyDescriptorLayout.fields.streamInvokeSymbolPointer.offset,
+      SignedArtifactDependencyDescriptorLayout.fields.streamInvokeSymbolPointer
+        .offset,
     strings.streamInvokeSymbol,
     true,
   );
@@ -634,7 +644,8 @@ test("compiled descriptor abi decodes node dispatch and embedded dependency reco
   );
   view.setUint32(
     dependencyPointer +
-      SignedArtifactDependencyDescriptorLayout.fields.manifestBytesPointer.offset,
+      SignedArtifactDependencyDescriptorLayout.fields.manifestBytesPointer
+        .offset,
     manifestBytesPointer,
     true,
   );
@@ -706,7 +717,10 @@ test("compiled descriptor abi decodes node dispatch and embedded dependency reco
   assert.equal(dependency.pluginId, "com.digitalarsenal.propagator.sgp4");
   assert.equal(dependency.version, "1.2.3");
   assert.deepEqual(Array.from(dependency.wasmBytes), [0x00, 0x61, 0x73, 0x6d]);
-  assert.deepEqual(Array.from(dependency.manifestBytes), [0x46, 0x4c, 0x4f, 0x57]);
+  assert.deepEqual(
+    Array.from(dependency.manifestBytes),
+    [0x46, 0x4c, 0x4f, 0x57],
+  );
 });
 
 test("compiled flow runtime host executes a ready node through bound handlers", async () => {
@@ -754,7 +768,8 @@ test("compiled flow runtime host executes a ready node through bound handlers", 
     true,
   );
   view.setUint32(
-    nodeDispatchPointer + FlowNodeDispatchDescriptorLayout.fields.nodeIndex.offset,
+    nodeDispatchPointer +
+      FlowNodeDispatchDescriptorLayout.fields.nodeIndex.offset,
     0,
     true,
   );
@@ -785,7 +800,8 @@ test("compiled flow runtime host executes a ready node through bound handlers", 
 
   view.setUint32(
     dependencyPointer +
-      SignedArtifactDependencyDescriptorLayout.fields.dependencyIdPointer.offset,
+      SignedArtifactDependencyDescriptorLayout.fields.dependencyIdPointer
+        .offset,
     dependencyIdPointer,
     true,
   );
@@ -809,7 +825,8 @@ test("compiled flow runtime host executes a ready node through bound handlers", 
   );
   view.setUint32(
     dependencyPointer +
-      SignedArtifactDependencyDescriptorLayout.fields.manifestBytesPointer.offset,
+      SignedArtifactDependencyDescriptorLayout.fields.manifestBytesPointer
+        .offset,
     dependencyManifestPointer,
     true,
   );
@@ -940,7 +957,9 @@ test("compiled flow runtime host executes a ready node through bound handlers", 
           while (bytes[end] !== 0) {
             end += 1;
           }
-          lastOutputPort = new TextDecoder().decode(bytes.subarray(portPointer, end));
+          lastOutputPort = new TextDecoder().decode(
+            bytes.subarray(portPointer, end),
+          );
           lastOutputBytes = Array.from(
             bytes.subarray(payloadOffset, payloadOffset + payloadSize),
           );
@@ -956,25 +975,21 @@ test("compiled flow runtime host executes a ready node through bound handlers", 
       }) => {
         lastDependencyId = dependencyDescriptor?.dependencyId ?? null;
         return {
-        statusCode: 0,
-        backlogRemaining: 0,
-        yielded: false,
-        outputs: [
-          {
-            portId: "out",
-            typeDescriptorIndex: inputs[0].typeDescriptorIndex,
-            alignment: inputs[0].alignment,
-            streamId: 12,
-            sequence: 8,
-            traceToken: 77,
-            endOfStream: false,
-            bytes: new Uint8Array([
-              ...inputs[0].bytes,
-              9,
-              10,
-            ]),
-          },
-        ],
+          statusCode: 0,
+          backlogRemaining: 0,
+          yielded: false,
+          outputs: [
+            {
+              portId: "out",
+              typeDescriptorIndex: inputs[0].typeDescriptorIndex,
+              alignment: inputs[0].alignment,
+              streamId: 12,
+              sequence: 8,
+              traceToken: 77,
+              endOfStream: false,
+              bytes: new Uint8Array([...inputs[0].bytes, 9, 10]),
+            },
+          ],
         };
       },
     },
@@ -1002,6 +1017,231 @@ test("compiled flow runtime host executes a ready node through bound handlers", 
   host.resetRuntimeState();
   assert.equal(resetCalls, 1);
   assert.equal(freedPointers.length > 0, true);
+});
+
+test("compiled flow runtime host can instantiate the root artifact when exports are not preloaded", async () => {
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  const bytes = new Uint8Array(memory.buffer);
+  const view = new DataView(memory.buffer);
+  const pluginIdPointer = 512;
+  const methodIdPointer = 576;
+  const inputPortPointer = 640;
+  const nodeIdPointer = 704;
+  const invocationFramePointer = 1152;
+  const invocationPointer = 1280;
+  const nodeDispatchPointer = 1408;
+  let allocPointer = 2048;
+  let ready = true;
+  let instantiateCalls = 0;
+  let lastOutputPort = null;
+  let lastOutputBytes = null;
+
+  const writeCString = (pointer, value) => {
+    bytes.set(new TextEncoder().encode(`${value}\0`), pointer);
+  };
+  writeCString(pluginIdPointer, "com.digitalarsenal.propagator.sgp4");
+  writeCString(methodIdPointer, "catalog_query");
+  writeCString(inputPortPointer, "query");
+  writeCString(nodeIdPointer, "catalog-node");
+  bytes.set([1, 2, 3], 1234);
+
+  view.setUint32(
+    nodeDispatchPointer +
+      FlowNodeDispatchDescriptorLayout.fields.nodeIdPointer.offset,
+    nodeIdPointer,
+    true,
+  );
+  view.setUint32(
+    nodeDispatchPointer +
+      FlowNodeDispatchDescriptorLayout.fields.nodeIndex.offset,
+    0,
+    true,
+  );
+  view.setUint32(
+    nodeDispatchPointer +
+      FlowNodeDispatchDescriptorLayout.fields.dependencyIdPointer.offset,
+    0,
+    true,
+  );
+  view.setUint32(
+    nodeDispatchPointer +
+      FlowNodeDispatchDescriptorLayout.fields.dependencyIndex.offset,
+    INVALID_INDEX,
+    true,
+  );
+  view.setUint32(
+    nodeDispatchPointer +
+      FlowNodeDispatchDescriptorLayout.fields.pluginIdPointer.offset,
+    pluginIdPointer,
+    true,
+  );
+  view.setUint32(
+    nodeDispatchPointer +
+      FlowNodeDispatchDescriptorLayout.fields.methodIdPointer.offset,
+    methodIdPointer,
+    true,
+  );
+
+  const artifact = {
+    ...compiledArtifactStub(),
+    programId: "com.digitalarsenal.compiled.host.instantiate",
+    runtimeExports: {
+      mallocSymbol: "malloc",
+      freeSymbol: "free",
+      descriptorSymbol: "sdn_flow_get_runtime_descriptor",
+      resetStateSymbol: "sdn_flow_reset_runtime_state",
+      enqueueTriggerSymbol: "sdn_flow_enqueue_trigger_frames",
+      enqueueTriggerFrameSymbol: "sdn_flow_enqueue_trigger_frame",
+      enqueueEdgeSymbol: "sdn_flow_enqueue_edge_frames",
+      enqueueEdgeFrameSymbol: "sdn_flow_enqueue_edge_frame",
+      readyNodeSymbol: "sdn_flow_get_ready_node_index",
+      beginInvocationSymbol: "sdn_flow_begin_node_invocation",
+      completeInvocationSymbol: "sdn_flow_complete_node_invocation",
+      ingressFrameDescriptorsSymbol: "sdn_flow_get_ingress_frame_descriptors",
+      ingressFrameDescriptorCountSymbol:
+        "sdn_flow_get_ingress_frame_descriptor_count",
+      currentInvocationDescriptorSymbol:
+        "sdn_flow_get_current_invocation_descriptor",
+      prepareInvocationDescriptorSymbol:
+        "sdn_flow_prepare_node_invocation_descriptor",
+      applyInvocationResultSymbol: "sdn_flow_apply_node_invocation_result",
+      nodeDispatchDescriptorsSymbol: "sdn_flow_get_node_dispatch_descriptors",
+      nodeDispatchDescriptorCountSymbol:
+        "sdn_flow_get_node_dispatch_descriptor_count",
+      dependencyDescriptorsSymbol: "sdn_flow_get_dependency_descriptors",
+      dependencyCountSymbol: "sdn_flow_get_dependency_count",
+    },
+  };
+
+  const wasmExports = {
+    memory,
+    _malloc(size) {
+      const pointer = allocPointer;
+      allocPointer += Number(size);
+      return pointer;
+    },
+    _free() {},
+    _sdn_flow_get_runtime_descriptor() {
+      return 64;
+    },
+    _sdn_flow_reset_runtime_state() {},
+    _sdn_flow_enqueue_trigger_frames() {},
+    _sdn_flow_enqueue_trigger_frame() {
+      return 1;
+    },
+    _sdn_flow_enqueue_edge_frames() {},
+    _sdn_flow_enqueue_edge_frame() {
+      return 1;
+    },
+    _sdn_flow_get_ready_node_index() {
+      return ready ? 0 : 0xffffffff;
+    },
+    _sdn_flow_begin_node_invocation(nodeIndex) {
+      view.setUint32(invocationFramePointer + 0, 0, true);
+      view.setUint32(invocationFramePointer + 4, 0xffffffff, true);
+      view.setUint32(invocationFramePointer + 8, inputPortPointer, true);
+      view.setUint32(invocationFramePointer + 12, 8, true);
+      view.setUint32(invocationFramePointer + 16, 1234, true);
+      view.setUint32(invocationFramePointer + 20, 3, true);
+      view.setUint32(invocationFramePointer + 24, 1, true);
+      view.setUint32(invocationFramePointer + 28, 1, true);
+      view.setBigUint64(invocationFramePointer + 32, BigInt(9), true);
+      view.setUint8(invocationFramePointer + 40, 0);
+      view.setUint8(invocationFramePointer + 41, 1);
+
+      view.setUint32(invocationPointer + 0, nodeIndex, true);
+      view.setUint32(invocationPointer + 4, 0, true);
+      view.setUint32(invocationPointer + 8, pluginIdPointer, true);
+      view.setUint32(invocationPointer + 12, methodIdPointer, true);
+      view.setUint32(invocationPointer + 16, invocationFramePointer, true);
+      view.setUint32(invocationPointer + 20, 1, true);
+      return 1;
+    },
+    _sdn_flow_complete_node_invocation() {},
+    _sdn_flow_get_ingress_frame_descriptors() {
+      return invocationFramePointer;
+    },
+    _sdn_flow_get_ingress_frame_descriptor_count() {
+      return 1;
+    },
+    _sdn_flow_get_current_invocation_descriptor() {
+      return invocationPointer;
+    },
+    _sdn_flow_prepare_node_invocation_descriptor() {
+      return 1;
+    },
+    _sdn_flow_get_node_dispatch_descriptors() {
+      return nodeDispatchPointer;
+    },
+    _sdn_flow_get_node_dispatch_descriptor_count() {
+      return 1;
+    },
+    _sdn_flow_get_dependency_descriptors() {
+      return 0;
+    },
+    _sdn_flow_get_dependency_count() {
+      return 0;
+    },
+    _sdn_flow_apply_node_invocation_result(
+      _nodeIndex,
+      _statusCode,
+      _backlogRemaining,
+      _yielded,
+      outputsPointer,
+      outputCount,
+    ) {
+      ready = false;
+      if (outputCount > 0) {
+        const payloadOffset = view.getUint32(outputsPointer + 16, true);
+        const payloadSize = view.getUint32(outputsPointer + 20, true);
+        const portPointer = view.getUint32(outputsPointer + 8, true);
+        let end = portPointer;
+        while (bytes[end] !== 0) {
+          end += 1;
+        }
+        lastOutputPort = new TextDecoder().decode(
+          bytes.subarray(portPointer, end),
+        );
+        lastOutputBytes = Array.from(
+          bytes.subarray(payloadOffset, payloadOffset + payloadSize),
+        );
+      }
+      return outputCount;
+    },
+  };
+
+  const host = await bindCompiledFlowRuntimeHost({
+    artifact,
+    instantiateArtifact: async (moduleBytes, imports) => {
+      instantiateCalls += 1;
+      assert.deepEqual(Array.from(moduleBytes), Array.from(artifact.wasm));
+      assert.deepEqual(imports, {});
+      return {
+        instance: {
+          exports: wasmExports,
+        },
+      };
+    },
+    handlers: {
+      "com.digitalarsenal.propagator.sgp4:catalog_query": ({ inputs }) => ({
+        outputs: [
+          {
+            portId: "results",
+            bytes: new Uint8Array([...inputs[0].bytes, 9, 10]),
+            alignment: 8,
+          },
+        ],
+      }),
+    },
+  });
+
+  const execution = await host.executeNextReadyNode();
+  assert.equal(instantiateCalls, 1);
+  assert.equal(execution.executed, true);
+  assert.equal(execution.pluginId, "com.digitalarsenal.propagator.sgp4");
+  assert.equal(execution.methodId, "catalog_query");
+  assert.equal(lastOutputPort, "results");
+  assert.deepEqual(lastOutputBytes, [1, 2, 3, 9, 10]);
 });
 
 test("embedded dependencies can be instantiated from the compiled bundle and used by a dependency stream bridge", async () => {
@@ -1051,7 +1291,8 @@ test("embedded dependencies can be instantiated from the compiled bundle and use
     true,
   );
   view.setUint32(
-    nodeDispatchPointer + FlowNodeDispatchDescriptorLayout.fields.nodeIndex.offset,
+    nodeDispatchPointer +
+      FlowNodeDispatchDescriptorLayout.fields.nodeIndex.offset,
     0,
     true,
   );
@@ -1088,7 +1329,8 @@ test("embedded dependencies can be instantiated from the compiled bundle and use
 
   view.setUint32(
     dependencyPointer +
-      SignedArtifactDependencyDescriptorLayout.fields.dependencyIdPointer.offset,
+      SignedArtifactDependencyDescriptorLayout.fields.dependencyIdPointer
+        .offset,
     dependencyIdPointer,
     true,
   );
@@ -1100,13 +1342,15 @@ test("embedded dependencies can be instantiated from the compiled bundle and use
   );
   view.setUint32(
     dependencyPointer +
-      SignedArtifactDependencyDescriptorLayout.fields.destroySymbolPointer.offset,
+      SignedArtifactDependencyDescriptorLayout.fields.destroySymbolPointer
+        .offset,
     destroySymbolPointer,
     true,
   );
   view.setUint32(
     dependencyPointer +
-      SignedArtifactDependencyDescriptorLayout.fields.streamInvokeSymbolPointer.offset,
+      SignedArtifactDependencyDescriptorLayout.fields.streamInvokeSymbolPointer
+        .offset,
     streamInvokeSymbolPointer,
     true,
   );
@@ -1245,7 +1489,8 @@ test("embedded dependencies can be instantiated from the compiled bundle and use
     },
   });
   assert.equal(
-    dependencyRuntime.byDependencyId.get("dep-sgp4").resolvedExports.streamInvoke,
+    dependencyRuntime.byDependencyId.get("dep-sgp4").resolvedExports
+      .streamInvoke,
     fakeDependencyStreamInvoke,
   );
   dependencyRuntime.destroyAll();
