@@ -114,25 +114,8 @@ export class EditorPanel {
         // Register completion providers
         this._registerCompletions(monaco);
 
-        // Language select binding
-        const langSelect = document.getElementById(this.langSelectId);
-        if (langSelect) {
-          langSelect.addEventListener("change", () => {
-            const lang = LANG_MAP[langSelect.value] || langSelect.value;
-            monaco.editor.setModelLanguage(this.editor.getModel(), lang);
-            if (this._currentNodeId && this._model) {
-              this._model.updateNode(this._currentNodeId, { lang: langSelect.value });
-            }
-          });
-        }
-
-        // Content change → update model
-        this.editor.onDidChangeModelContent(() => {
-          if (this._suppressChange) return;
-          if (this._currentNodeId && this._model) {
-            this._model.updateNode(this._currentNodeId, { source: this.editor.getValue() });
-          }
-        });
+        // Editor is read-only (generated source view)
+        // Language select is informational only
 
         resolve();
       });
@@ -146,26 +129,19 @@ export class EditorPanel {
   }
 
   setNode(nodeId) {
+    // No longer used for per-node editing; editor is read-only generated source
     this._currentNodeId = nodeId;
-    if (!nodeId || !this._model) {
-      this._suppressChange = true;
-      this.editor?.setValue("");
-      this._suppressChange = false;
-      return;
-    }
-    const node = this._model.nodes.get(nodeId);
-    if (!node) return;
+  }
 
+  /** Set the generated C++ flow source (read-only). */
+  setGeneratedSource(source) {
+    if (!this.editor) return;
     this._suppressChange = true;
-    this.editor.setValue(node.source || "");
+    this.editor.setValue(source);
+    this.editor.updateOptions({ readOnly: true });
     this._suppressChange = false;
-
-    // Set language
-    if (node.lang && this.monaco) {
-      const lang = LANG_MAP[node.lang] || node.lang;
-      this.monaco.editor.setModelLanguage(this.editor.getModel(), lang);
-      const langSelect = document.getElementById(this.langSelectId);
-      if (langSelect) langSelect.value = node.lang;
+    if (this.monaco) {
+      this.monaco.editor.setModelLanguage(this.editor.getModel(), "cpp");
     }
   }
 

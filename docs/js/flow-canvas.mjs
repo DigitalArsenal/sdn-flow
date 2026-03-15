@@ -5,10 +5,11 @@
 
 import { KIND_COLORS } from "./flow-model.mjs";
 
-const NODE_W = 180;
-const NODE_H = 44;
+const NODE_W = 160;
+const TITLE_H = 22;       // compact title bar
+const PORT_ROW_H = 16;    // space per port row
+const NODE_PAD_BOTTOM = 4;
 const PORT_R = 5;
-const PORT_SPACING = 20;
 const GRID_SNAP = 20;
 const MIN_ZOOM = 0.15;
 const MAX_ZOOM = 3;
@@ -60,6 +61,7 @@ export class FlowCanvas {
 
   onNodeSelect(fn) { this._onNodeSelect = fn; }
   onEdgeSelect(fn) { this._onEdgeSelect = fn; }
+  onNodeDblClick(fn) { this._onNodeDblClick = fn; }
 
   selectNode(nodeId, additive = false) {
     if (!additive) {
@@ -87,7 +89,7 @@ export class FlowCanvas {
     const minX = Math.min(...xs) - 100;
     const minY = Math.min(...ys) - 100;
     const maxX = Math.max(...xs) + NODE_W + 100;
-    const maxY = Math.max(...ys) + NODE_H + 100;
+    const maxY = Math.max(...ys) + TITLE_H + 60 + 100;
     const rect = this.svg.getBoundingClientRect();
     const scaleX = rect.width / (maxX - minX);
     const scaleY = rect.height / (maxY - minY);
@@ -126,31 +128,41 @@ export class FlowCanvas {
     const color = KIND_COLORS[node.kind] || "#569cd6";
     const nInputs = node.ports?.inputs?.length || 0;
     const nOutputs = node.ports?.outputs?.length || 0;
-    const h = Math.max(NODE_H, Math.max(nInputs, nOutputs) * PORT_SPACING + 14);
+    const portRows = Math.max(nInputs, nOutputs);
+    const bodyH = portRows > 0 ? portRows * PORT_ROW_H + NODE_PAD_BOTTOM : NODE_PAD_BOTTOM;
+    const totalH = TITLE_H + bodyH;
 
     const g = svgEl("g", { class: "flow-node", "data-node-id": node.nodeId, transform: `translate(${pos.x},${pos.y})` }, this.nodesLayer);
 
-    // Body
-    svgEl("rect", { class: "node-body", x: 0, y: 0, width: NODE_W, height: h }, g);
+    // ── Title bar (colored background) ──
+    svgEl("rect", { class: "node-title-bg", x: 0, y: 0, width: NODE_W, height: TITLE_H, rx: 4, ry: 4, fill: color }, g);
+    // Square off bottom corners of title bar
+    svgEl("rect", { fill: color, x: 0, y: TITLE_H - 4, width: NODE_W, height: 4 }, g);
 
-    // Kind color bar (left side)
-    svgEl("rect", { class: "node-kind-bar", x: 0, y: 0, width: 5, height: h, fill: color }, g);
+    // Title text — small, white, truncated
+    const titleText = svgEl("text", { class: "node-title", x: 8, y: 15 }, g);
+    titleText.textContent = node.label || node.nodeId;
 
-    // Label
-    svgEl("text", { class: "node-label", x: 14, y: 18 }, g).textContent = node.label || node.nodeId;
+    // Status dot in title bar
+    svgEl("circle", { class: "node-status", cx: NODE_W - 10, cy: 11, r: 3 }, g);
 
-    // Sublabel
+    // ── Body (dark background for ports) ──
+    svgEl("rect", { class: "node-body", x: 0, y: TITLE_H, width: NODE_W, height: bodyH, rx: 0, ry: 0 }, g);
+    // Round bottom corners
+    svgEl("rect", { class: "node-body-bottom", x: 0, y: TITLE_H + bodyH - 4, width: NODE_W, height: 4, rx: 4, ry: 4, fill: "var(--node-bg, #1e1e1e)" }, g);
+
+    // ── Sublabel (pluginId — tiny, inside body) ──
     if (node.pluginId || node.lang) {
-      svgEl("text", { class: "node-sublabel", x: 14, y: 32 }, g).textContent = node.pluginId || node.lang || "";
+      const sub = node.pluginId || node.lang || "";
+      // Truncate long plugin IDs
+      const truncated = sub.length > 28 ? sub.slice(0, 27) + "\u2026" : sub;
+      svgEl("text", { class: "node-sublabel", x: NODE_W / 2, y: TITLE_H + bodyH - 2, "text-anchor": "middle" }, g).textContent = truncated;
     }
 
-    // Status dot
-    svgEl("circle", { class: "node-status", cx: NODE_W - 12, cy: 12 }, g);
-
-    // Input ports
+    // ── Input ports (left side, in body area) ──
     if (node.ports?.inputs) {
       node.ports.inputs.forEach((port, i) => {
-        const py = 16 + i * PORT_SPACING;
+        const py = TITLE_H + 10 + i * PORT_ROW_H;
         const circle = svgEl("circle", { class: "port port-in", cx: 0, cy: py, r: PORT_R, "data-port-id": port.id, "data-dir": "input" }, g);
         circle._nodeId = node.nodeId;
         circle._portId = port.id;
@@ -159,10 +171,10 @@ export class FlowCanvas {
       });
     }
 
-    // Output ports
+    // ── Output ports (right side, in body area) ──
     if (node.ports?.outputs) {
       node.ports.outputs.forEach((port, i) => {
-        const py = 16 + i * PORT_SPACING;
+        const py = TITLE_H + 10 + i * PORT_ROW_H;
         const circle = svgEl("circle", { class: "port port-out", cx: NODE_W, cy: py, r: PORT_R, "data-port-id": port.id, "data-dir": "output" }, g);
         circle._nodeId = node.nodeId;
         circle._portId = port.id;
@@ -170,6 +182,9 @@ export class FlowCanvas {
         svgEl("text", { class: "port-label", x: NODE_W - 8, y: py + 3, "text-anchor": "end" }, g).textContent = port.label || port.id;
       });
     }
+
+    // ── Outer border (full node outline) ──
+    svgEl("rect", { class: "node-outline", x: 0, y: 0, width: NODE_W, height: totalH, rx: 4, ry: 4 }, g);
 
     this.nodeElements.set(node.nodeId, g);
     this._updatePortPositions(node.nodeId);
@@ -184,12 +199,12 @@ export class FlowCanvas {
     if (!node || !pos) return;
     if (node.ports?.inputs) {
       node.ports.inputs.forEach((port, i) => {
-        this.portPositions.set(`${nodeId}:input:${port.id}`, { x: pos.x, y: pos.y + 16 + i * PORT_SPACING });
+        this.portPositions.set(`${nodeId}:input:${port.id}`, { x: pos.x, y: pos.y + TITLE_H + 10 + i * PORT_ROW_H });
       });
     }
     if (node.ports?.outputs) {
       node.ports.outputs.forEach((port, i) => {
-        this.portPositions.set(`${nodeId}:output:${port.id}`, { x: pos.x + NODE_W, y: pos.y + 16 + i * PORT_SPACING });
+        this.portPositions.set(`${nodeId}:output:${port.id}`, { x: pos.x + NODE_W, y: pos.y + TITLE_H + 10 + i * PORT_ROW_H });
       });
     }
   }
@@ -438,6 +453,15 @@ export class FlowCanvas {
         for (const nodeId of this.model.nodes.keys()) {
           this.selectNode(nodeId, true);
         }
+      }
+    });
+
+    // Double-click node → load plugin metadata
+    this.svg.addEventListener("dblclick", (e) => {
+      const nodeG = e.target.closest(".flow-node");
+      if (nodeG) {
+        const nodeId = nodeG.dataset.nodeId;
+        this._onNodeDblClick?.(nodeId);
       }
     });
 

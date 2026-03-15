@@ -176,12 +176,64 @@ function esc(s) { return (s || "").replace(/"/g, "&quot;").replace(/</g, "&lt;")
 // ── Wire canvas + editor + props ──
 canvas.onNodeSelect((nodeId) => {
   renderProps(nodeId);
-  editorPanel.setNode(nodeId);
+  updateGeneratedSource();
+});
+
+// Double-click node → load plugin metadata from manifest
+canvas.onNodeDblClick(async (nodeId) => {
+  const node = model.nodes.get(nodeId);
+  if (!node) return;
+  if (!node.pluginId) {
+    termLog(`Node ${node.label}: no pluginId set, cannot load metadata.`, "warn");
+    return;
+  }
+  termLog(`Loading metadata for plugin: ${node.pluginId}...`, "info");
+
+  // Try fetching manifest from examples
+  const manifests = [
+    `../examples/plugins/${node.pluginId.split(".").pop()}/manifest.json`,
+    `../examples/plugins/${node.methodId}/manifest.json`,
+  ];
+  let found = false;
+  for (const url of manifests) {
+    try {
+      const resp = await fetch(url);
+      if (resp.ok) {
+        const manifest = await resp.json();
+        termLog(`Plugin manifest loaded: ${manifest.pluginId || node.pluginId}`, "success");
+        termLog(JSON.stringify(manifest, null, 2), "info");
+        // Update node with manifest data
+        if (manifest.methods) {
+          const methods = Array.isArray(manifest.methods) ? manifest.methods : Object.values(manifest.methods);
+          const method = methods.find(m => m.methodId === node.methodId) || methods[0];
+          if (method) {
+            const ports = { inputs: [], outputs: [] };
+            if (method.inputs) method.inputs.forEach(p => ports.inputs.push({ id: p.portId || p.id, label: p.label || p.portId || p.id }));
+            if (method.outputs) method.outputs.forEach(p => ports.outputs.push({ id: p.portId || p.id, label: p.label || p.portId || p.id }));
+            if (ports.inputs.length || ports.outputs.length) {
+              model.updateNode(nodeId, { ports });
+              termLog(`  Updated ports from manifest`, "success");
+            }
+          }
+        }
+        found = true;
+        break;
+      }
+    } catch (e) { /* try next */ }
+  }
+  if (!found) {
+    // Show what we know in the terminal
+    termLog(`  pluginId: ${node.pluginId}`, "info");
+    termLog(`  methodId: ${node.methodId}`, "info");
+    termLog(`  kind: ${node.kind}`, "info");
+    termLog(`  drainPolicy: ${node.drainPolicy}`, "info");
+    termLog(`  (manifest not found locally — set up artifact catalog for remote resolution)`, "warn");
+  }
+  renderProps(nodeId);
 });
 
 canvas.onEdgeSelect((edgeId) => {
   renderProps(null);
-  editorPanel.setNode(null);
   if (edgeId) {
     const edge = model.edges.get(edgeId);
     if (edge) {
@@ -212,7 +264,101 @@ model.addEventListener("change", () => {
   // Update CRC badge
   const crc = model.computeCRC();
   document.getElementById("crc-badge").textContent = crc;
+  updateGeneratedSource();
 });
+
+// ── Generated Source (read-only view of the compiled flow) ──
+
+function updateGeneratedSource() {
+  const json = model.toJSON();
+  const nodes = json.nodes || [];
+  const edges = json.edges || [];
+  const triggers = json.triggers || [];
+
+  // Generate a C++ source preview of the flow runtime
+  const includes = [
+    '#include <cstdint>',
+    '#include <cstring>',
+    '#include "flatbuffers/flatbuffers.h"',
+    '#include "flow_manifest_generated.h"',
+    '',
+    '// ═══════════════════════════════════════════════════',
+    `// Generated flow: ${json.name || "Untitled"}`,
+    `// Program ID:     ${json.programId || "(none)"}`,
+    `// Nodes: ${nodes.length}  Edges: ${edges.length}  Triggers: ${triggers.length}`,
+    `// CRC-32: ${model.computeCRC()}`,
+    '// ═══════════════════════════════════════════════════',
+    '',
+  ];
+
+  // Manifest embed
+  const manifest = [
+    '// ── Embedded FlatBuffer manifest ──',
+    'static const uint8_t FLOW_MANIFEST[] = { /* built at compile time */ };',
+    'static const uint32_t FLOW_MANIFEST_SIZE = sizeof(FLOW_MANIFEST);',
+    '',
+    'extern "C" const uint8_t* flow_get_manifest_flatbuffer() { return FLOW_MANIFEST; }',
+    'extern "C" uint32_t flow_get_manifest_flatbuffer_size() { return FLOW_MANIFEST_SIZE; }',
+    '',
+  ];
+
+  // Plugin artifact imports
+  const plugins = [...new Set(nodes.map(n => n.pluginId).filter(Boolean))];
+  const pluginDecls = plugins.length > 0 ? [
+    '// ── Plugin artifact imports ──',
+    ...plugins.map((p, i) => `static const uint8_t* PLUGIN_${i}_WASM = nullptr;  // ${p}`),
+    ...plugins.map((p, i) => `static uint32_t PLUGIN_${i}_SIZE = 0;`),
+    '',
+  ] : [];
+
+  // Node declarations
+  const nodeDecls = [
+    '// ── Node declarations ──',
+    ...nodes.map(n => {
+      const kind = n.kind.toUpperCase();
+      return `// [${kind}] ${n.label}  (${n.pluginId || "inline"} :: ${n.methodId || "process"})`;
+    }),
+    '',
+  ];
+
+  // Topology (edges)
+  const topo = edges.length > 0 ? [
+    '// ── Topology ──',
+    ...edges.map(e =>
+      `//   ${e.fromNodeId}:${e.fromPortId} ──► ${e.toNodeId}:${e.toPortId}  [${e.backpressurePolicy}, depth=${e.queueDepth}]`
+    ),
+    '',
+  ] : [];
+
+  // Trigger bindings
+  const trigBindings = (json.triggerBindings || []).length > 0 ? [
+    '// ── Trigger bindings ──',
+    ...(json.triggerBindings || []).map(b =>
+      `//   ${b.triggerId} ──► ${b.targetNodeId}:${b.targetPortId}  [${b.backpressurePolicy}]`
+    ),
+    '',
+  ] : [];
+
+  // Main entry
+  const main = [
+    '// ── Runtime entry ──',
+    'extern "C" int flow_init() {',
+    '    // Initialize node state, wire topology, register triggers',
+    ...nodes.map(n => `    // init_node("${n.nodeId}", ${n.kind});`),
+    ...edges.map(e => `    // wire("${e.fromNodeId}:${e.fromPortId}", "${e.toNodeId}:${e.toPortId}");`),
+    '    return 0;',
+    '}',
+    '',
+    'extern "C" int flow_step(const uint8_t* frame, uint32_t len) {',
+    '    // Dispatch frame through topology',
+    '    return 0;',
+    '}',
+  ];
+
+  const source = [...includes, ...manifest, ...pluginDecls, ...nodeDecls, ...topo, ...trigBindings, ...main].join('\n');
+
+  editorPanel.setGeneratedSource(source);
+}
 
 // ── Palette drag ──
 document.querySelectorAll(".palette-item[draggable]").forEach(item => {
