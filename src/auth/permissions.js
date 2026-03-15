@@ -28,7 +28,7 @@ function normalizeTarget(target = null) {
   };
 }
 
-export function createDeploymentAuthorization(options = {}) {
+export async function createDeploymentAuthorization(options = {}) {
   const issuedAt = Number(options.issuedAt ?? Date.now());
   const ttlMs = Number(options.ttlMs ?? 5 * 60 * 1000);
   const artifact = options.artifact ?? {};
@@ -49,7 +49,7 @@ export function createDeploymentAuthorization(options = {}) {
     ),
     issuedAt,
     expiresAt: issuedAt + ttlMs,
-    nonce: options.nonce ?? bytesToHex(randomBytes(16)),
+    nonce: options.nonce ?? bytesToHex(await randomBytes(16)),
     constraints: options.constraints ?? null,
   };
 }

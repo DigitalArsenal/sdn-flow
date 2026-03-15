@@ -55,7 +55,6 @@ The project is built around a small set of hard rules:
 ## What The Package Does Not Do
 
 - It does not define your host-specific schemas.
-- It does not compile WASM by itself.
 - It does not assume a specific host application or server runtime.
 - It does not ship host adapters for installation, persistence, or execution.
 

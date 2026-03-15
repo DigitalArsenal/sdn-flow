@@ -421,7 +421,7 @@ export class FlowDeploymentClient {
       requiredCapabilities ?? normalizedArtifact.requiredCapabilities;
     const authorizationPayload =
       authorization ??
-      createDeploymentAuthorization({
+      await createDeploymentAuthorization({
         artifact: normalizedArtifact,
         target: targetDescriptor,
         capabilities,

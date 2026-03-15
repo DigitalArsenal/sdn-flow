@@ -5,7 +5,14 @@ import {
   hexToBytes,
   toUint8Array,
 } from "../utils/encoding.js";
-import { getCrypto, randomBytes } from "../utils/crypto.js";
+import {
+  aesGcmDecrypt,
+  aesGcmEncrypt,
+  hkdfBytes,
+  randomBytes,
+  x25519PublicKey,
+  x25519SharedSecret,
+} from "../utils/wasmCrypto.js";
 
 const HKDF_SALT_LABEL = new TextEncoder().encode("sdn-flow");
 
@@ -23,86 +30,27 @@ function normalizePrivateKey(value) {
   return toUint8Array(value);
 }
 
-function buildPkcs8(privateKeyBytes) {
-  const pkcs8Header = new Uint8Array([
-    0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x6e,
-    0x04, 0x22, 0x04, 0x20,
-  ]);
-  const pkcs8Key = new Uint8Array(pkcs8Header.length + privateKeyBytes.length);
-  pkcs8Key.set(pkcs8Header, 0);
-  pkcs8Key.set(privateKeyBytes, pkcs8Header.length);
-  return pkcs8Key;
-}
-
-async function importPrivateKey(privateKey) {
-  return getCrypto().subtle.importKey(
-    "pkcs8",
-    buildPkcs8(normalizePrivateKey(privateKey)),
-    { name: "X25519" },
-    false,
-    ["deriveBits"],
-  );
-}
-
-async function importPublicKey(publicKey) {
-  return getCrypto().subtle.importKey(
-    "raw",
-    normalizePublicKey(publicKey),
-    { name: "X25519" },
-    false,
-    [],
-  );
-}
-
 async function deriveSharedSecret(privateKey, publicKey) {
-  const sharedBits = await getCrypto().subtle.deriveBits(
-    {
-      name: "X25519",
-      public: await importPublicKey(publicKey),
-    },
-    await importPrivateKey(privateKey),
-    256,
+  return x25519SharedSecret(
+    normalizePrivateKey(privateKey),
+    normalizePublicKey(publicKey),
   );
-  return new Uint8Array(sharedBits);
 }
 
 async function deriveAesKey(sharedSecret, salt, context) {
-  const hkdfKey = await getCrypto().subtle.importKey(
-    "raw",
+  return hkdfBytes(
     sharedSecret,
-    { name: "HKDF" },
-    false,
-    ["deriveKey"],
-  );
-  return getCrypto().subtle.deriveKey(
-    {
-      name: "HKDF",
-      salt,
-      info: new TextEncoder().encode(context),
-      hash: "SHA-256",
-    },
-    hkdfKey,
-    { name: "AES-GCM", length: 256 },
-    false,
-    ["encrypt", "decrypt"],
+    salt,
+    new TextEncoder().encode(context),
+    32,
   );
 }
 
 export async function generateX25519Keypair() {
-  const keyPair = await getCrypto().subtle.generateKey({ name: "X25519" }, true, [
-    "deriveBits",
-  ]);
-  const publicKeyBuffer = await getCrypto().subtle.exportKey(
-    "raw",
-    keyPair.publicKey,
-  );
-  const privateKeyBuffer = await getCrypto().subtle.exportKey(
-    "pkcs8",
-    keyPair.privateKey,
-  );
-  const privateKey = new Uint8Array(privateKeyBuffer).slice(16, 48);
+  const privateKey = await randomBytes(32);
+  const publicKey = await x25519PublicKey(privateKey);
   return {
-    publicKey: new Uint8Array(publicKeyBuffer),
+    publicKey,
     privateKey,
   };
 }
@@ -117,19 +65,22 @@ export async function encryptBytesForRecipient({
     throw new Error("encryptBytesForRecipient requires recipientPublicKey.");
   }
   const sender = senderKeyPair ?? (await generateX25519Keypair());
-  const salt = randomBytes(32);
+  const salt = await randomBytes(32);
   salt.set(HKDF_SALT_LABEL.slice(0, Math.min(HKDF_SALT_LABEL.length, salt.length)));
-  const iv = randomBytes(12);
+  const iv = await randomBytes(12);
   const sharedSecret = await deriveSharedSecret(
     sender.privateKey,
     recipientPublicKey,
   );
   const aesKey = await deriveAesKey(sharedSecret, salt, context);
-  const ciphertext = await getCrypto().subtle.encrypt(
-    { name: "AES-GCM", iv },
+  const { ciphertext, tag } = await aesGcmEncrypt(
     aesKey,
     toUint8Array(plaintext),
+    iv,
   );
+  const packedCiphertext = new Uint8Array(ciphertext.length + tag.length);
+  packedCiphertext.set(ciphertext, 0);
+  packedCiphertext.set(tag, ciphertext.length);
   return {
     version: 1,
     scheme: "x25519-hkdf-aes-256-gcm",
@@ -137,7 +88,7 @@ export async function encryptBytesForRecipient({
     senderPublicKeyBase64: bytesToBase64(sender.publicKey),
     saltBase64: bytesToBase64(salt),
     ivBase64: bytesToBase64(iv),
-    ciphertextBase64: bytesToBase64(new Uint8Array(ciphertext)),
+    ciphertextBase64: bytesToBase64(packedCiphertext),
   };
 }
 
@@ -157,12 +108,18 @@ export async function decryptBytesFromEnvelope({
     base64ToBytes(envelope.saltBase64),
     envelope.context,
   );
-  const plaintext = await getCrypto().subtle.decrypt(
-    { name: "AES-GCM", iv: base64ToBytes(envelope.ivBase64) },
+  const packedCiphertext = base64ToBytes(envelope.ciphertextBase64);
+  if (packedCiphertext.length < 16) {
+    throw new Error("Encrypted envelope payload is truncated.");
+  }
+  const ciphertext = packedCiphertext.slice(0, packedCiphertext.length - 16);
+  const tag = packedCiphertext.slice(packedCiphertext.length - 16);
+  return aesGcmDecrypt(
     aesKey,
-    base64ToBytes(envelope.ciphertextBase64),
+    ciphertext,
+    tag,
+    base64ToBytes(envelope.ivBase64),
   );
-  return new Uint8Array(plaintext);
 }
 
 export async function encryptJsonForRecipient(options = {}) {

@@ -32,7 +32,7 @@ test("deployment authorization can be signed and verified", async () => {
     manifestHash: "manifest123",
     requiredCapabilities: ["pubsub", "timers"],
   };
-  const authorization = createDeploymentAuthorization({
+  const authorization = await createDeploymentAuthorization({
     artifact,
     target: {
       kind: "remote",
