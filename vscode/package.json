@@ -1,0 +1,61 @@
+{
+  "name": "sdn-flow-editor",
+  "displayName": "SDN Flow Editor",
+  "description": "Visual Node-RED style flow editor for sdn-flow WASM compilation pipelines. Integrates emception (in-browser C++ → WASM), Pyodide (Python → WASM), Monaco editor with multi-language intellisense, and HD-wallet signing.",
+  "version": "0.1.0",
+  "publisher": "digitalarsenal",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:sdnFlow.openEditor",
+    "onLanguage:json",
+    "workspaceContains:**/flow.json"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "sdnFlow.openEditor",
+        "title": "SDN Flow: Open Flow Editor",
+        "category": "SDN Flow"
+      },
+      {
+        "command": "sdnFlow.openFile",
+        "title": "SDN Flow: Open Flow File",
+        "category": "SDN Flow"
+      }
+    ],
+    "customEditors": [
+      {
+        "viewType": "sdnFlow.flowEditor",
+        "displayName": "SDN Flow Editor",
+        "selector": [
+          {
+            "filenamePattern": "*.flow.json"
+          },
+          {
+            "filenamePattern": "flow.json"
+          }
+        ],
+        "priority": "default"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "when": "resourceExtname == .json",
+          "command": "sdnFlow.openFile",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/vscode": "^1.85.0"
+  }
+}
