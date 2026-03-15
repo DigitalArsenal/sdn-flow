@@ -43,7 +43,7 @@ function frame(portId, schemaName, fileIdentifier, payload, overrides = {}) {
 test("ISS proximity OEM example summarizes external requirements for the visual editor", async () => {
   const flow = await readJson("../examples/flows/iss-proximity-oem/flow.json");
   const manifests = await Promise.all([
-    readJson("../examples/plugins/flatsql-memory/manifest.json"),
+    readJson("../examples/plugins/flatsql-store/manifest.json"),
     readJson("../examples/plugins/query-anchor/manifest.json"),
     readJson("../examples/plugins/sgp4-propagator/manifest.json"),
     readJson("../examples/plugins/oem-generator/manifest.json"),
@@ -56,6 +56,7 @@ test("ISS proximity OEM example summarizes external requirements for the visual 
 
   assert.deepEqual(summary.capabilities, [
     "pubsub",
+    "storage_adapter",
     "storage_query",
     "storage_write",
   ]);
@@ -78,6 +79,14 @@ test("ISS proximity OEM example summarizes external requirements for the visual 
   assert.equal(
     summary.externalInterfaces.some(
       (item) =>
+        item.kind === "host-service" &&
+        item.resource === "storage-adapter://flatsql",
+    ),
+    true,
+  );
+  assert.equal(
+    summary.externalInterfaces.some(
+      (item) =>
         item.kind === "database" && item.resource === "memory://iss-proximity",
     ),
     true,
@@ -87,7 +96,7 @@ test("ISS proximity OEM example summarizes external requirements for the visual 
 test("ISS proximity OEM example runs through the temporary reference harness end-to-end", async () => {
   const flow = await readJson("../examples/flows/iss-proximity-oem/flow.json");
   const manifests = {
-    flatsql: await readJson("../examples/plugins/flatsql-memory/manifest.json"),
+    flatsql: await readJson("../examples/plugins/flatsql-store/manifest.json"),
     queryAnchor: await readJson(
       "../examples/plugins/query-anchor/manifest.json",
     ),
@@ -111,15 +120,15 @@ test("ISS proximity OEM example runs through the temporary reference harness end
   registry.registerPlugin({
     manifest: manifests.flatsql,
     handlers: {
-      upsert_omm_records: ({ inputs }) => {
+      upsert_records: ({ inputs }) => {
         const outputs = [];
         for (const input of inputs) {
           ommStore.set(input.payload.norad, input.payload);
           outputs.push(
             frame(
-              "records",
-              "CatalogRecord.fbs",
-              "CTLG",
+              "stored",
+              "StoredRecordRef.fbs",
+              "STRF",
               { norad: input.payload.norad },
               {
                 sequence: input.sequence,
@@ -149,6 +158,15 @@ test("ISS proximity OEM example runs through the temporary reference harness end
           yielded: false,
         };
       },
+      query_sql: () => ({
+        outputs: [
+          frame("rows", "SqlQueryResult.fbs", "SQLR", {
+            rows: Array.from(ommStore.keys()),
+          }),
+        ],
+        backlogRemaining: 0,
+        yielded: false,
+      }),
     },
   });
 
@@ -236,7 +254,7 @@ test("ISS proximity OEM example runs through the temporary reference harness end
 
   runtime.enqueueTriggerFrames("omm-subscription", [
     frame(
-      "omms",
+      "records",
       "OMM.fbs",
       "OMM ",
       { norad: 25544, distanceKm: 0 },

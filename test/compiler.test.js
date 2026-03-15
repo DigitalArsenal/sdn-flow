@@ -167,7 +167,7 @@ test("emception compiler adapter prepares a single-source C++ compile plan with 
   assert.match(prepared.source, /kNodeIngressIndices/);
   assert.match(prepared.source, /kNodeRuntimeStates/);
   assert.match(prepared.source, /sdn_flow_get_dependency_descriptors/);
-  assert.match(prepared.source, /com\.digitalarsenal\.flatsql\.memory/);
+  assert.match(prepared.source, /com\.digitalarsenal\.flatsql\.store/);
   assert.match(prepared.command, /_sdn_flow_get_runtime_descriptor/);
   assert.match(prepared.command, /_malloc/);
   assert.match(prepared.command, /_free/);

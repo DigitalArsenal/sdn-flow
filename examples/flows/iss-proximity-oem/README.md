@@ -3,7 +3,7 @@
 This example models a deployable `sdn-flow` graph that:
 
 1. streams OMMs from SDN pubsub
-2. ingests them into an in-memory WASM FlatSQL database
+2. ingests them into a FlatSQL storage plugin
 3. queries all objects within `50 km` of `NORAD_CAT_ID=25544`
 4. propagates each match for `90` samples across one orbit
 5. generates OEMs
@@ -19,7 +19,9 @@ The flow requires:
 
 - SDN pubsub input on `/sdn/catalog/omm`
 - a timer that fires every `15000 ms`
-- an in-memory FlatSQL database at `memory://iss-proximity`
+- a FlatSQL storage plugin backend
+- the example defaults to `memory://iss-proximity`
+- hosts may satisfy the same plugin contract through a host storage adapter
 - filesystem write access to `file:///var/tmp/sdn-flow/oem`
 - SDN pubsub output on `/sdn/oem/iss-proximity`
 

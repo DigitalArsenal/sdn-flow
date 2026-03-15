@@ -2,12 +2,12 @@
   "programId": "com.digitalarsenal.examples.iss-proximity-oem",
   "name": "ISS Proximity OEM Flow",
   "version": "0.1.0",
-  "description": "Stream OMMs into an in-memory WASM FlatSQL database, query objects within 50 km of NORAD 25544, propagate 90 samples for one orbit, and generate OEMs.",
+  "description": "Stream OMMs into a FlatSQL storage plugin, query objects within 50 km of NORAD 25544, propagate 90 samples for one orbit, and generate OEMs.",
   "nodes": [
     {
       "nodeId": "db-ingest",
-      "pluginId": "com.digitalarsenal.flatsql.memory",
-      "methodId": "upsert_omm_records",
+      "pluginId": "com.digitalarsenal.flatsql.store",
+      "methodId": "upsert_records",
       "kind": "transform",
       "drainPolicy": "drain-until-yield"
     },
@@ -20,7 +20,7 @@
     },
     {
       "nodeId": "db-query",
-      "pluginId": "com.digitalarsenal.flatsql.memory",
+      "pluginId": "com.digitalarsenal.flatsql.store",
       "methodId": "query_objects_within_radius",
       "kind": "analyzer",
       "drainPolicy": "drain-until-yield"
@@ -132,7 +132,7 @@
     {
       "triggerId": "omm-subscription",
       "targetNodeId": "db-ingest",
-      "targetPortId": "omms",
+      "targetPortId": "records",
       "backpressurePolicy": "queue",
       "queueDepth": 4096
     },
@@ -145,7 +145,7 @@
     }
   ],
   "requiredPlugins": [
-    "com.digitalarsenal.flatsql.memory",
+    "com.digitalarsenal.flatsql.store",
     "com.digitalarsenal.flow.query-anchor",
     "com.digitalarsenal.propagator.sgp4",
     "com.digitalarsenal.oem.generator",
@@ -153,6 +153,18 @@
     "com.digitalarsenal.oem.publisher"
   ],
   "externalInterfaces": [
+    {
+      "interfaceId": "catalog-store",
+      "kind": "database",
+      "direction": "bidirectional",
+      "capability": "storage_query",
+      "resource": "memory://iss-proximity",
+      "description": "This deployment configures the FlatSQL storage plugin to use an in-memory backend.",
+      "properties": {
+        "pluginId": "com.digitalarsenal.flatsql.store",
+        "backend": "memory"
+      }
+    },
     {
       "interfaceId": "iss-anchor-constraint",
       "kind": "local-runtime",
@@ -163,15 +175,17 @@
   ],
   "artifactDependencies": [
     {
-      "dependencyId": "flatsql-memory-signed",
-      "pluginId": "com.digitalarsenal.flatsql.memory",
-      "version": "1.0.0",
-      "artifactUri": "signed://plugins/flatsql-memory/1.0.0",
+      "dependencyId": "flatsql-store-signed",
+      "pluginId": "com.digitalarsenal.flatsql.store",
+      "version": "1.1.0",
+      "artifactUri": "signed://plugins/flatsql-store/1.1.0",
       "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "signature": "ed25519:demo-flatsql-memory-signature",
+      "signature": "ed25519:demo-flatsql-store-signature",
       "signerPublicKey": "ed25519:demo-signer-1",
       "requiredCapabilities": [
-        "storage_query"
+        "storage_query",
+        "storage_write",
+        "storage_adapter"
       ]
     },
     {
@@ -209,9 +223,7 @@
       "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
       "signature": "ed25519:demo-oem-file-writer-signature",
       "signerPublicKey": "ed25519:demo-signer-1",
-      "requiredCapabilities": [
-        "storage_write"
-      ]
+      "requiredCapabilities": ["storage_write"]
     },
     {
       "dependencyId": "oem-publisher-signed",
@@ -221,9 +233,7 @@
       "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
       "signature": "ed25519:demo-oem-publisher-signature",
       "signerPublicKey": "ed25519:demo-signer-1",
-      "requiredCapabilities": [
-        "pubsub"
-      ]
+      "requiredCapabilities": ["pubsub"]
     }
   ],
   "editor": {

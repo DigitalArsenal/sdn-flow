@@ -46,6 +46,17 @@ Plugins may also declare `externalInterfaces` so visual editors and deployment
 tooling can show the real network, protocol, filesystem, database, or host
 service bindings required to make the graph run.
 
+Storage engines follow the same rule. A FlatSQL database should be represented
+as a storage plugin/runtime that:
+
+- ingests aligned FlatBuffer records
+- exposes query methods
+- declares whether it is backed by transient memory or a host-provided storage
+  adapter
+
+The host should not hide a second engine-owned SQL source of truth behind that
+plugin surface.
+
 ## Manifest Rule
 
 Every plugin must embed a FlatBuffer manifest buffer and expose callable exports

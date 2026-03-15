@@ -48,6 +48,13 @@ Depending on host needs, manifests may also declare:
 - `schemasUsed`
 - `buildArtifacts`
 
+For storage plugins, manifests should also make backend selection explicit.
+Typical patterns are:
+
+- a logical database interface exposed to the flow
+- a host-service storage-adapter interface that declares whether the plugin can
+  run against memory, persistent host storage, or both
+
 ## Runtime Interpretation
 
 The manifest is used to:

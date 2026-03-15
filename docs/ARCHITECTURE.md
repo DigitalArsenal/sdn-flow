@@ -186,7 +186,7 @@ The repo includes a concrete example in
 that:
 
 - streams OMMs from SDN pubsub
-- ingests them into an in-memory FlatSQL database
+- ingests them into a FlatSQL storage plugin
 - queries objects within `50 km` of object `25544`
 - propagates `90` samples for one orbit
 - generates OEMs

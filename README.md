@@ -7,6 +7,8 @@ It provides the portable pieces needed to:
 
 - model work as typed flow graphs
 - treat a single plugin as a valid one-node flow
+- treat storage engines such as FlatSQL as first-class plugins instead of
+  hidden host subsystems
 - summarize external inputs, outputs, and capabilities for visual editors
 - describe hosted runtime startup phases and local/remote transport bindings
 - compile deployable flows into one authoritative C++/WASM runtime artifact
@@ -188,6 +190,7 @@ Default export names:
 
 - [Basic Propagator Plugin](./examples/plugins/basic-propagator/README.md)
 - [Basic Sensor Plugin](./examples/plugins/basic-sensor/README.md)
+- [FlatSQL Storage Plugin](./examples/plugins/flatsql-store/README.md)
 - [Single-Plugin Flow](./examples/flows/single-plugin-flow.json)
 - [ISS Proximity OEM Flow](./examples/flows/iss-proximity-oem/README.md)
 

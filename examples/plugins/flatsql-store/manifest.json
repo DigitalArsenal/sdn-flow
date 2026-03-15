@@ -1,0 +1,170 @@
+{
+  "pluginId": "com.digitalarsenal.flatsql.store",
+  "name": "FlatSQL Store",
+  "version": "1.1.0",
+  "pluginFamily": "storage",
+  "capabilities": ["storage_query", "storage_write", "storage_adapter"],
+  "externalInterfaces": [
+    {
+      "interfaceId": "storage-backing",
+      "kind": "host-service",
+      "direction": "bidirectional",
+      "capability": "storage_adapter",
+      "resource": "storage-adapter://flatsql",
+      "description": "Selects whether the FlatSQL runtime uses transient memory or a host-provided storage adapter.",
+      "properties": {
+        "supportedBackends": ["memory", "host-adapter"],
+        "defaultBackend": "memory",
+        "hostAdapterContract": "flatsql-storage-adapter-v1"
+      }
+    },
+    {
+      "interfaceId": "logical-database",
+      "kind": "database",
+      "direction": "bidirectional",
+      "capability": "storage_query",
+      "resource": "storage://flatsql",
+      "description": "Logical FlatSQL dataset exposed by the storage plugin after backend resolution.",
+      "properties": {
+        "logicalDatabase": true
+      }
+    }
+  ],
+  "methods": [
+    {
+      "methodId": "upsert_records",
+      "displayName": "Upsert Records",
+      "inputPorts": [
+        {
+          "portId": "records",
+          "acceptedTypeSets": [
+            {
+              "setId": "any-flatbuffer",
+              "description": "Accept any aligned FlatBuffer payload, including REC-wrapped SDS records.",
+              "allowedTypes": [
+                {
+                  "acceptsAnyFlatbuffer": true
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 1,
+          "required": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portId": "stored",
+          "acceptedTypeSets": [
+            {
+              "setId": "stored-record-ref",
+              "allowedTypes": [
+                {
+                  "schemaName": "StoredRecordRef.fbs",
+                  "fileIdentifier": "STRF"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 1,
+          "required": true
+        }
+      ],
+      "maxBatch": 4096,
+      "drainPolicy": "drain-until-yield",
+      "description": "Stores arbitrary aligned FlatBuffer records in the configured FlatSQL backend."
+    },
+    {
+      "methodId": "query_sql",
+      "displayName": "Query SQL",
+      "inputPorts": [
+        {
+          "portId": "query",
+          "acceptedTypeSets": [
+            {
+              "setId": "sql-query",
+              "allowedTypes": [
+                {
+                  "schemaName": "SqlQueryRequest.fbs",
+                  "fileIdentifier": "SQLQ"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 1,
+          "required": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portId": "rows",
+          "acceptedTypeSets": [
+            {
+              "setId": "sql-result",
+              "allowedTypes": [
+                {
+                  "schemaName": "SqlQueryResult.fbs",
+                  "fileIdentifier": "SQLR"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 1,
+          "required": true
+        }
+      ],
+      "maxBatch": 32,
+      "drainPolicy": "drain-until-yield",
+      "description": "Executes structured queries against the configured FlatSQL backend."
+    },
+    {
+      "methodId": "query_objects_within_radius",
+      "displayName": "Query Objects Within Radius",
+      "inputPorts": [
+        {
+          "portId": "query",
+          "acceptedTypeSets": [
+            {
+              "setId": "radius-query",
+              "allowedTypes": [
+                {
+                  "schemaName": "AnchorRadiusQuery.fbs",
+                  "fileIdentifier": "ARQY"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 1,
+          "required": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portId": "matches",
+          "acceptedTypeSets": [
+            {
+              "setId": "proximity-set",
+              "allowedTypes": [
+                {
+                  "schemaName": "ProximitySelection.fbs",
+                  "fileIdentifier": "PRXY"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 1,
+          "required": true
+        }
+      ],
+      "maxBatch": 32,
+      "drainPolicy": "drain-until-yield",
+      "description": "Runs a proximity query over stored records without changing the flow-facing API."
+    }
+  ]
+}
