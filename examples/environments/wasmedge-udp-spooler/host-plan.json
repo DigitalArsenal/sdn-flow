@@ -1,0 +1,32 @@
+{
+  "hostId": "wasmedge-edge-node",
+  "hostKind": "wasmedge",
+  "adapter": "host-internal",
+  "description": "Extension-backed UDP ingest flow for a WasmEdge-style host profile.",
+  "disconnectedCapable": true,
+  "runtimes": [
+    {
+      "runtimeId": "udp-spooler",
+      "kind": "flow",
+      "programId": "com.digitalarsenal.examples.wasmedge-udp-spooler",
+      "description": "Vendor-specific UDP ingest and filesystem spool runtime.",
+      "execution": "compiled-wasm",
+      "authority": "local",
+      "adapter": "host-internal",
+      "startupPhase": "session",
+      "autoStart": true,
+      "dependsOn": [],
+      "requiredCapabilities": ["network", "filesystem"],
+      "bindings": [
+        {
+          "bindingId": "udp-ingest-direct",
+          "direction": "listen",
+          "transport": "direct",
+          "url": "udp://0.0.0.0:40123",
+          "required": true,
+          "description": "Host-specific UDP ingress path backed by the WasmEdge socket profile."
+        }
+      ]
+    }
+  ]
+}

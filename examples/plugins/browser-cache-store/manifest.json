@@ -1,0 +1,63 @@
+{
+  "pluginId": "com.digitalarsenal.flow.browser-cache-store",
+  "name": "Browser Cache Store",
+  "version": "1.0.0",
+  "pluginFamily": "storage",
+  "capabilities": ["storage_query", "storage_write"],
+  "externalInterfaces": [
+    {
+      "interfaceId": "browser-cache",
+      "kind": "database",
+      "direction": "bidirectional",
+      "capability": "storage_write",
+      "resource": "opfs://browser-cache",
+      "description": "Stores aligned records in a browser-managed cache."
+    }
+  ],
+  "methods": [
+    {
+      "methodId": "upsert_records",
+      "displayName": "Upsert Records",
+      "inputPorts": [
+        {
+          "portId": "records",
+          "acceptedTypeSets": [
+            {
+              "setId": "record-batch",
+              "allowedTypes": [
+                {
+                  "schemaName": "AlignedRecordBatch.fbs",
+                  "fileIdentifier": "RECS"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 4,
+          "required": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portId": "stored",
+          "acceptedTypeSets": [
+            {
+              "setId": "stored-record-ref",
+              "allowedTypes": [
+                {
+                  "schemaName": "StoredRecordRef.fbs",
+                  "fileIdentifier": "STRF"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 4,
+          "required": true
+        }
+      ],
+      "maxBatch": 256,
+      "drainPolicy": "drain-until-yield"
+    }
+  ]
+}

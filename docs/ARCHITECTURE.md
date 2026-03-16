@@ -64,6 +64,10 @@ The host-planning layer owns portable hosted-runtime description:
 This keeps startup-only services such as local licensing in the same runtime
 model as any other flow/plugin deployment.
 
+See also:
+
+- [Host Capability Model](./HOST_CAPABILITY_MODEL.md)
+
 ### Compiler
 
 The compiler layer owns:
@@ -162,6 +166,9 @@ Hosts are expected to provide adapters for:
 Hosts may also use the portable host-planning surface to describe early-start
 services, same-app loopback bindings, or WebRTC-connected local runtimes
 without changing the flow/plugin ABI.
+
+Capability gaps must be documented at the host-profile level. Do not solve a
+missing runtime capability by inventing a second deploy/runtime model.
 
 This package deliberately leaves those host integrations outside the portable
 core.

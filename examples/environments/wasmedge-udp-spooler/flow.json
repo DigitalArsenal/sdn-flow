@@ -1,0 +1,77 @@
+{
+  "programId": "com.digitalarsenal.examples.wasmedge-udp-spooler",
+  "name": "WasmEdge UDP Spooler",
+  "version": "0.1.0",
+  "description": "Extension-backed WASI demo that receives UDP datagrams through a host profile and writes normalized payloads to a spool directory.",
+  "nodes": [
+    {
+      "nodeId": "udp-spool",
+      "pluginId": "com.digitalarsenal.flow.udp-spooler",
+      "methodId": "spool_packets",
+      "kind": "sink",
+      "drainPolicy": "drain-until-yield"
+    }
+  ],
+  "edges": [],
+  "triggers": [
+    {
+      "triggerId": "udp-packet-ready",
+      "kind": "system-event",
+      "source": "udp-packet",
+      "acceptedTypes": [
+        {
+          "schemaName": "UdpDatagram.fbs",
+          "fileIdentifier": "UDPG"
+        }
+      ],
+      "description": "Host profile injects UDP packets into the flow as explicit trigger frames."
+    }
+  ],
+  "triggerBindings": [
+    {
+      "triggerId": "udp-packet-ready",
+      "targetNodeId": "udp-spool",
+      "targetPortId": "packet",
+      "backpressurePolicy": "queue",
+      "queueDepth": 512
+    }
+  ],
+  "requiredPlugins": [
+    "com.digitalarsenal.flow.udp-spooler"
+  ],
+  "externalInterfaces": [
+    {
+      "interfaceId": "udp-socket",
+      "kind": "network",
+      "direction": "input",
+      "capability": "network",
+      "resource": "udp://0.0.0.0:40123",
+      "description": "Vendor-specific host profile provides a UDP socket and converts packets into trigger frames.",
+      "properties": {
+        "transport": "udp",
+        "mode": "listen",
+        "hostProfile": "wasmedge-wasi-sockets"
+      }
+    },
+    {
+      "interfaceId": "spool-dir",
+      "kind": "filesystem",
+      "direction": "output",
+      "capability": "filesystem",
+      "resource": "file:///var/lib/wasmedge/spool",
+      "description": "Spool directory for normalized packet payloads."
+    }
+  ],
+  "artifactDependencies": [
+    {
+      "dependencyId": "udp-spooler-signed",
+      "pluginId": "com.digitalarsenal.flow.udp-spooler",
+      "version": "1.0.0",
+      "artifactUri": "signed://plugins/udp-spooler/1.0.0",
+      "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "signature": "ed25519:demo-udp-spooler-signature",
+      "signerPublicKey": "ed25519:demo-signer-1",
+      "requiredCapabilities": ["network", "filesystem"]
+    }
+  ]
+}

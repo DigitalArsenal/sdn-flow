@@ -1,0 +1,209 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+
+import {
+  FlowDesignerSession,
+  summarizeHostedRuntimePlan,
+} from "../src/index.js";
+
+async function readJson(relativePath) {
+  const url = new URL(relativePath, import.meta.url);
+  return JSON.parse(await fs.readFile(url, "utf8"));
+}
+
+async function loadDemoManifests() {
+  const manifests = await Promise.all([
+    readJson("../examples/plugins/http-fetcher/manifest.json"),
+    readJson("../examples/plugins/browser-cache-store/manifest.json"),
+    readJson("../examples/plugins/filesystem-writer/manifest.json"),
+    readJson("../examples/plugins/https-file-server/manifest.json"),
+    readJson("../examples/plugins/ipfs-publisher/manifest.json"),
+    readJson("../examples/plugins/pnm-notifier/manifest.json"),
+    readJson("../examples/plugins/obs-associator/manifest.json"),
+    readJson("../examples/plugins/pipe-logger/manifest.json"),
+    readJson("../examples/plugins/udp-spooler/manifest.json"),
+    readJson("../examples/plugins/flatsql-store/manifest.json"),
+  ]);
+  return manifests;
+}
+
+function hasInterface(summary, predicate) {
+  return summary.externalInterfaces.some(predicate);
+}
+
+test("browser demo declares outbound HTTP and browser-managed cache storage", async () => {
+  const flow = await readJson(
+    "../examples/environments/orbpro-browser-omm-cache/flow.json",
+  );
+  const manifests = await loadDemoManifests();
+  const session = new FlowDesignerSession({ program: flow });
+  const summary = session.inspectRequirements({ manifests });
+
+  assert.deepEqual(summary.capabilities, ["http", "storage_query", "storage_write"]);
+  assert.equal(
+    hasInterface(
+      summary,
+      (item) =>
+        item.kind === "http" &&
+        item.direction === "output" &&
+        item.resource?.includes("celestrak.org"),
+    ),
+    true,
+  );
+  assert.equal(
+    hasInterface(
+      summary,
+      (item) =>
+        item.kind === "database" &&
+        item.resource === "opfs://orbpro-browser-omm-cache",
+    ),
+    true,
+  );
+});
+
+test("sdn-js demo declares filesystem, pipe, and inbound HTTP bindings", async () => {
+  const flow = await readJson(
+    "../examples/environments/sdn-js-catalog-gateway/flow.json",
+  );
+  const manifests = await loadDemoManifests();
+  const session = new FlowDesignerSession({ program: flow });
+  const summary = session.inspectRequirements({ manifests });
+
+  assert.deepEqual(summary.capabilities, ["filesystem", "http", "pipe"]);
+  assert.equal(
+    hasInterface(
+      summary,
+      (item) =>
+        item.kind === "filesystem" &&
+        item.resource === "file:///var/lib/sdn/catalog-cache",
+    ),
+    true,
+  );
+  assert.equal(
+    hasInterface(
+      summary,
+      (item) => item.kind === "pipe" && item.resource === "stderr",
+    ),
+    true,
+  );
+  assert.equal(
+    hasInterface(
+      summary,
+      (item) =>
+        item.kind === "http" &&
+        item.direction === "input" &&
+        item.path === "/catalog/latest",
+    ),
+    true,
+  );
+});
+
+test("go demo declares HTTP, FlatSQL, IPFS, and SDS protocol requirements", async () => {
+  const flow = await readJson(
+    "../examples/environments/go-sdn-omm-service/flow.json",
+  );
+  const manifests = await loadDemoManifests();
+  const session = new FlowDesignerSession({ program: flow });
+  const summary = session.inspectRequirements({ manifests });
+
+  assert.deepEqual(summary.capabilities, [
+    "filesystem",
+    "http",
+    "ipfs",
+    "protocol_dial",
+    "storage_adapter",
+    "storage_query",
+    "storage_write",
+  ]);
+  assert.equal(
+    hasInterface(
+      summary,
+      (item) =>
+        item.kind === "host-service" &&
+        item.resource === "ipfs://publish-and-pin",
+    ),
+    true,
+  );
+  assert.equal(
+    hasInterface(
+      summary,
+      (item) =>
+        item.kind === "protocol" &&
+        item.protocolId === "/sds/pnm/1.0.0",
+    ),
+    true,
+  );
+  assert.equal(
+    hasInterface(
+      summary,
+      (item) =>
+        item.kind === "database" &&
+        item.resource === "file:///var/lib/sdn/flatsql/omm.db",
+    ),
+    true,
+  );
+});
+
+test("wasmedge demo marks UDP and filesystem access as explicit host-profile requirements", async () => {
+  const flow = await readJson(
+    "../examples/environments/wasmedge-udp-spooler/flow.json",
+  );
+  const manifests = await loadDemoManifests();
+  const session = new FlowDesignerSession({ program: flow });
+  const summary = session.inspectRequirements({ manifests });
+
+  assert.deepEqual(summary.capabilities, ["filesystem", "network"]);
+  assert.equal(
+    hasInterface(
+      summary,
+      (item) =>
+        item.kind === "network" &&
+        item.resource === "udp://0.0.0.0:40123",
+    ),
+    true,
+  );
+  assert.equal(
+    hasInterface(
+      summary,
+      (item) =>
+        item.kind === "filesystem" &&
+        item.resource === "file:///var/lib/wasmedge/spool",
+    ),
+    true,
+  );
+});
+
+test("environment host plans summarize the intended host adapters and bindings", async () => {
+  const browserPlan = await readJson(
+    "../examples/environments/orbpro-browser-omm-cache/host-plan.json",
+  );
+  const jsPlan = await readJson(
+    "../examples/environments/sdn-js-catalog-gateway/host-plan.json",
+  );
+  const goPlan = await readJson(
+    "../examples/environments/go-sdn-omm-service/host-plan.json",
+  );
+  const wasmedgePlan = await readJson(
+    "../examples/environments/wasmedge-udp-spooler/host-plan.json",
+  );
+
+  const browserSummary = summarizeHostedRuntimePlan(browserPlan);
+  const jsSummary = summarizeHostedRuntimePlan(jsPlan);
+  const goSummary = summarizeHostedRuntimePlan(goPlan);
+  const wasmedgeSummary = summarizeHostedRuntimePlan(wasmedgePlan);
+
+  assert.equal(browserSummary.adapter, "sdn-js");
+  assert.equal(browserSummary.transports.includes("same-app"), true);
+  assert.equal(jsSummary.transports.includes("http"), true);
+  assert.equal(goSummary.transports.includes("http"), true);
+  assert.equal(goSummary.transports.includes("sdn-protocol"), true);
+  assert.equal(wasmedgeSummary.adapter, "host-internal");
+  assert.equal(wasmedgeSummary.transports.includes("direct"), true);
+  assert.equal(
+    wasmedgeSummary.bindings.some(
+      (binding) => binding.url === "udp://0.0.0.0:40123",
+    ),
+    true,
+  );
+});

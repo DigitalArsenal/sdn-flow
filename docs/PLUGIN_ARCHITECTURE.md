@@ -46,6 +46,15 @@ Plugins may also declare `externalInterfaces` so visual editors and deployment
 tooling can show the real network, protocol, filesystem, database, or host
 service bindings required to make the graph run.
 
+Keep capability IDs coarse and portable. Use interface metadata to capture
+runtime-specific details such as:
+
+- HTTP method sets
+- TCP/UDP/raw-socket transport mode
+- filesystem sandbox or mount location
+- pipe or stream direction
+- IPFS or SDS service operation
+
 Storage engines follow the same rule. A FlatSQL database should be represented
 as a storage plugin/runtime that:
 
@@ -56,6 +65,10 @@ as a storage plugin/runtime that:
 
 The host should not hide a second engine-owned SQL source of truth behind that
 plugin surface.
+
+For the canonical host capability rules and environment profiles, see:
+
+- [Host Capability Model](./HOST_CAPABILITY_MODEL.md)
 
 ## Manifest Rule
 
@@ -118,3 +131,6 @@ Hosts are responsible for:
 
 `sdn-flow` owns the portable runtime and deployment model, not host-specific
 loading code.
+
+Host-specific runtime differences must stay in capability bindings and hosted
+runtime plans. They must not fork the plugin ABI.

@@ -1,0 +1,65 @@
+{
+  "pluginId": "com.digitalarsenal.flow.ipfs-publisher",
+  "name": "IPFS Publisher",
+  "version": "1.0.0",
+  "pluginFamily": "publisher",
+  "capabilities": ["ipfs"],
+  "externalInterfaces": [
+    {
+      "interfaceId": "ipfs-publish",
+      "kind": "host-service",
+      "direction": "output",
+      "capability": "ipfs",
+      "resource": "ipfs://publish-and-pin",
+      "description": "Publishes records to IPFS and requests pinning through a host service.",
+      "properties": {
+        "operations": ["put", "pin"]
+      }
+    }
+  ],
+  "methods": [
+    {
+      "methodId": "publish_and_pin",
+      "displayName": "Publish And Pin",
+      "inputPorts": [
+        {
+          "portId": "records",
+          "acceptedTypeSets": [
+            {
+              "setId": "record-batch",
+              "allowedTypes": [
+                {
+                  "acceptsAnyFlatbuffer": true
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 16,
+          "required": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portId": "content-addresses",
+          "acceptedTypeSets": [
+            {
+              "setId": "cid-ref",
+              "allowedTypes": [
+                {
+                  "schemaName": "CidRef.fbs",
+                  "fileIdentifier": "CIDR"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 16,
+          "required": true
+        }
+      ],
+      "maxBatch": 32,
+      "drainPolicy": "drain-until-yield"
+    }
+  ]
+}

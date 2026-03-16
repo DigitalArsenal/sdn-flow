@@ -1,0 +1,41 @@
+{
+  "hostId": "sdn-go-node",
+  "hostKind": "go-sdn",
+  "adapter": "go-sdn",
+  "description": "Go-hosted OMM service flow with persistent storage and outbound SDN notifications.",
+  "disconnectedCapable": true,
+  "runtimes": [
+    {
+      "runtimeId": "go-omm-service",
+      "kind": "flow",
+      "programId": "com.digitalarsenal.examples.go-sdn-omm-service",
+      "description": "Periodic OMM synchronization and association service.",
+      "execution": "compiled-wasm",
+      "authority": "local",
+      "adapter": "go-sdn",
+      "startupPhase": "session",
+      "autoStart": true,
+      "dependsOn": [],
+      "requiredCapabilities": ["timers", "http", "storage_query", "storage_write", "storage_adapter", "ipfs", "protocol_dial"],
+      "bindings": [
+        {
+          "bindingId": "https-download-listener",
+          "direction": "listen",
+          "transport": "http",
+          "url": "https://0.0.0.0:8443/catalog/omm/latest",
+          "required": true,
+          "description": "HTTPS listener for downloading the latest synchronized catalog."
+        },
+        {
+          "bindingId": "pnm-outbound",
+          "direction": "dial",
+          "transport": "sdn-protocol",
+          "protocolId": "/sds/pnm/1.0.0",
+          "audience": "sdn-peers",
+          "required": true,
+          "description": "Outbound SDS PNM notification channel."
+        }
+      ]
+    }
+  ]
+}

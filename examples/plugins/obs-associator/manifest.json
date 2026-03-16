@@ -1,0 +1,69 @@
+{
+  "pluginId": "com.digitalarsenal.flow.obs-associator",
+  "name": "Observation Associator",
+  "version": "1.0.0",
+  "pluginFamily": "analysis",
+  "capabilities": ["storage_query"],
+  "methods": [
+    {
+      "methodId": "associate_observations",
+      "displayName": "Associate Observations",
+      "inputPorts": [
+        {
+          "portId": "observations",
+          "acceptedTypeSets": [
+            {
+              "setId": "observation-batch",
+              "allowedTypes": [
+                {
+                  "schemaName": "ObservationBatch.fbs",
+                  "fileIdentifier": "OBSV"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 1,
+          "required": true
+        },
+        {
+          "portId": "catalog",
+          "acceptedTypeSets": [
+            {
+              "setId": "catalog-input",
+              "allowedTypes": [
+                {
+                  "acceptsAnyFlatbuffer": true
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 1,
+          "required": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portId": "associations",
+          "acceptedTypeSets": [
+            {
+              "setId": "association-batch",
+              "allowedTypes": [
+                {
+                  "schemaName": "AssociationBatch.fbs",
+                  "fileIdentifier": "ASSC"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 4,
+          "required": true
+        }
+      ],
+      "maxBatch": 16,
+      "drainPolicy": "drain-until-yield"
+    }
+  ]
+}

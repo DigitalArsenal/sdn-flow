@@ -27,6 +27,14 @@ example:
 Those artifacts are downstream views of the manifest, not alternate sources of
 truth.
 
+Compatibility wrappers must not become a shadow runtime model. In particular:
+
+- do not describe a runtime as "portable WASI" unless its required imports and
+  host bindings are actually portable
+- do not let host-specific wrappers own business logic that should live in the
+  compiled flow runtime
+- do not let generated JSON metadata become the canonical contract
+
 ## Deployment Compatibility
 
 Compatibility should never change the deploy boundary:
@@ -45,3 +53,7 @@ Older hosts may need adapters for:
 - installation and loading conventions
 
 Those adapters belong in host/tooling repos, not in the core runtime contract.
+
+See also:
+
+- [Host Capability Model](./HOST_CAPABILITY_MODEL.md)

@@ -55,6 +55,16 @@ Typical patterns are:
 - a host-service storage-adapter interface that declares whether the plugin can
   run against memory, persistent host storage, or both
 
+Capability guidance:
+
+- keep capability IDs coarse and stable across hosts
+- put runtime-specific transport details in `externalInterfaces[*].properties`
+- use `externalInterfaces` to describe HTTP endpoints, TCP/UDP or raw-socket
+  usage, filesystem paths, pipe/stream bindings, database surfaces, IPFS
+  services, and SDS protocol bindings
+- if a capability depends on a specific host profile, document that explicitly
+  instead of implying generic-WASI portability
+
 ## Runtime Interpretation
 
 The manifest is used to:
@@ -78,3 +88,4 @@ See:
 
 - [Basic Propagator Plugin](../examples/plugins/basic-propagator/README.md)
 - [Basic Sensor Plugin](../examples/plugins/basic-sensor/README.md)
+- [Host Capability Model](./HOST_CAPABILITY_MODEL.md)

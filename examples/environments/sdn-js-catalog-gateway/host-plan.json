@@ -1,0 +1,32 @@
+{
+  "hostId": "sdn-js-local",
+  "hostKind": "sdn-js",
+  "adapter": "sdn-js",
+  "description": "JS-hosted catalog gateway flow for Node, Deno, or Bun environments.",
+  "disconnectedCapable": true,
+  "runtimes": [
+    {
+      "runtimeId": "catalog-gateway",
+      "kind": "flow",
+      "programId": "com.digitalarsenal.examples.sdn-js-catalog-gateway",
+      "description": "Local catalog gateway with HTTP ingress and filesystem output.",
+      "execution": "compiled-wasm",
+      "authority": "local",
+      "adapter": "sdn-js",
+      "startupPhase": "session",
+      "autoStart": true,
+      "dependsOn": [],
+      "requiredCapabilities": ["timers", "http", "filesystem", "pipe"],
+      "bindings": [
+        {
+          "bindingId": "catalog-http-listener",
+          "direction": "listen",
+          "transport": "http",
+          "url": "http://127.0.0.1:9080/catalog/latest",
+          "required": true,
+          "description": "HTTP listener that exposes the current catalog snapshot."
+        }
+      ]
+    }
+  ]
+}

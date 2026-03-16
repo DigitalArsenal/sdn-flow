@@ -1,0 +1,31 @@
+{
+  "hostId": "orbpro-browser",
+  "hostKind": "orbpro",
+  "adapter": "sdn-js",
+  "description": "Browser-hosted compiled OMM cache flow.",
+  "disconnectedCapable": false,
+  "runtimes": [
+    {
+      "runtimeId": "browser-omm-cache",
+      "kind": "flow",
+      "programId": "com.digitalarsenal.examples.orbpro-browser-omm-cache",
+      "description": "Periodic browser OMM cache refresh.",
+      "execution": "compiled-wasm",
+      "authority": "local",
+      "adapter": "sdn-js",
+      "startupPhase": "session",
+      "autoStart": true,
+      "dependsOn": [],
+      "requiredCapabilities": ["timers", "http", "storage_query", "storage_write"],
+      "bindings": [
+        {
+          "bindingId": "browser-cache-loopback",
+          "direction": "listen",
+          "transport": "same-app",
+          "required": true,
+          "description": "Same-app binding used by OrbPro UI surfaces to inspect cached state."
+        }
+      ]
+    }
+  ]
+}

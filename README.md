@@ -36,6 +36,8 @@ The project is built around a small set of hard rules:
   callable manifest export symbols.
 - Local and remote deployment use the same signed artifact envelope.
 - Transport encryption protects the deployment package, not the runtime model.
+- Host capability differences are explicit and documented per environment
+  profile; they do not create a second plugin ABI.
 
 ## What The Package Provides
 
@@ -181,12 +183,14 @@ Default export names:
 ## Documentation
 
 - [Architecture](./docs/ARCHITECTURE.md)
+- [Host Capability Model](./docs/HOST_CAPABILITY_MODEL.md)
 - [Plugin Architecture](./docs/PLUGIN_ARCHITECTURE.md)
 - [Plugin Manifest](./docs/PLUGIN_MANIFEST.md)
 - [Compatibility Model](./docs/PLUGIN_COMPATIBILITY.md)
 
 ## Examples
 
+- [Environment Demos](./examples/environments/README.md)
 - [Basic Propagator Plugin](./examples/plugins/basic-propagator/README.md)
 - [Basic Sensor Plugin](./examples/plugins/basic-sensor/README.md)
 - [FlatSQL Storage Plugin](./examples/plugins/flatsql-store/README.md)

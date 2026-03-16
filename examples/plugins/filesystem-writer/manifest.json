@@ -1,0 +1,45 @@
+{
+  "pluginId": "com.digitalarsenal.flow.filesystem-writer",
+  "name": "Filesystem Writer",
+  "version": "1.0.0",
+  "pluginFamily": "sink",
+  "capabilities": ["filesystem"],
+  "externalInterfaces": [
+    {
+      "interfaceId": "filesystem-output",
+      "kind": "filesystem",
+      "direction": "output",
+      "capability": "filesystem",
+      "resource": "file:///var/lib/sdn/output",
+      "description": "Writes aligned record batches to a host filesystem path."
+    }
+  ],
+  "methods": [
+    {
+      "methodId": "write_records",
+      "displayName": "Write Records",
+      "inputPorts": [
+        {
+          "portId": "records",
+          "acceptedTypeSets": [
+            {
+              "setId": "record-batch",
+              "allowedTypes": [
+                {
+                  "schemaName": "AlignedRecordBatch.fbs",
+                  "fileIdentifier": "RECS"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 8,
+          "required": true
+        }
+      ],
+      "outputPorts": [],
+      "maxBatch": 128,
+      "drainPolicy": "drain-until-yield"
+    }
+  ]
+}

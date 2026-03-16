@@ -1,0 +1,186 @@
+{
+  "programId": "com.digitalarsenal.examples.sdn-js-catalog-gateway",
+  "name": "sdn-js Catalog Gateway",
+  "version": "0.1.0",
+  "description": "JS-hosted flow that fetches remote catalog data, writes it to a filesystem path, emits pipe logs, and serves the latest snapshot over HTTP.",
+  "nodes": [
+    {
+      "nodeId": "fetch-catalog",
+      "pluginId": "com.digitalarsenal.flow.http-fetcher",
+      "methodId": "fetch_records",
+      "kind": "transform",
+      "drainPolicy": "drain-until-yield"
+    },
+    {
+      "nodeId": "write-catalog",
+      "pluginId": "com.digitalarsenal.flow.filesystem-writer",
+      "methodId": "write_records",
+      "kind": "sink",
+      "drainPolicy": "drain-until-yield"
+    },
+    {
+      "nodeId": "log-update",
+      "pluginId": "com.digitalarsenal.flow.pipe-logger",
+      "methodId": "write_logs",
+      "kind": "sink",
+      "drainPolicy": "drain-until-yield"
+    },
+    {
+      "nodeId": "serve-catalog",
+      "pluginId": "com.digitalarsenal.flow.https-file-server",
+      "methodId": "serve_http_request",
+      "kind": "responder",
+      "drainPolicy": "drain-until-yield"
+    }
+  ],
+  "edges": [
+    {
+      "edgeId": "fetch-to-write",
+      "fromNodeId": "fetch-catalog",
+      "fromPortId": "records",
+      "toNodeId": "write-catalog",
+      "toPortId": "records",
+      "backpressurePolicy": "queue",
+      "queueDepth": 32
+    },
+    {
+      "edgeId": "fetch-to-log",
+      "fromNodeId": "fetch-catalog",
+      "fromPortId": "records",
+      "toNodeId": "log-update",
+      "toPortId": "records",
+      "backpressurePolicy": "latest",
+      "queueDepth": 1
+    }
+  ],
+  "triggers": [
+    {
+      "triggerId": "catalog-refresh",
+      "kind": "timer",
+      "source": "catalog-refresh",
+      "defaultIntervalMs": 60000,
+      "acceptedTypes": [
+        {
+          "schemaName": "TimerTick.fbs",
+          "fileIdentifier": "TICK"
+        }
+      ],
+      "description": "Fetches the latest catalog snapshot every 60 seconds."
+    },
+    {
+      "triggerId": "catalog-http",
+      "kind": "http-request",
+      "source": "/catalog/latest",
+      "acceptedTypes": [
+        {
+          "schemaName": "HttpRequest.fbs",
+          "fileIdentifier": "HREQ"
+        }
+      ],
+      "description": "Serves the most recent local catalog snapshot over HTTP."
+    }
+  ],
+  "triggerBindings": [
+    {
+      "triggerId": "catalog-refresh",
+      "targetNodeId": "fetch-catalog",
+      "targetPortId": "trigger",
+      "backpressurePolicy": "latest",
+      "queueDepth": 1
+    },
+    {
+      "triggerId": "catalog-http",
+      "targetNodeId": "serve-catalog",
+      "targetPortId": "request",
+      "backpressurePolicy": "queue",
+      "queueDepth": 32
+    }
+  ],
+  "requiredPlugins": [
+    "com.digitalarsenal.flow.http-fetcher",
+    "com.digitalarsenal.flow.filesystem-writer",
+    "com.digitalarsenal.flow.pipe-logger",
+    "com.digitalarsenal.flow.https-file-server"
+  ],
+  "externalInterfaces": [
+    {
+      "interfaceId": "catalog-http-source",
+      "kind": "http",
+      "direction": "output",
+      "capability": "http",
+      "resource": "https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=tle",
+      "description": "Outbound HTTP access for remote catalog fetch.",
+      "properties": {
+        "nodeId": "fetch-catalog",
+        "methods": ["GET"]
+      }
+    },
+    {
+      "interfaceId": "catalog-dir",
+      "kind": "filesystem",
+      "direction": "output",
+      "capability": "filesystem",
+      "resource": "file:///var/lib/sdn/catalog-cache",
+      "description": "Local directory used to persist the fetched catalog snapshot."
+    },
+    {
+      "interfaceId": "stderr-log",
+      "kind": "pipe",
+      "direction": "output",
+      "capability": "pipe",
+      "resource": "stderr",
+      "description": "Writes operational logs to stderr."
+    },
+    {
+      "interfaceId": "catalog-http-listener",
+      "kind": "http",
+      "direction": "input",
+      "capability": "http",
+      "resource": "/catalog/latest",
+      "path": "/catalog/latest",
+      "description": "HTTP endpoint that returns the current local snapshot."
+    }
+  ],
+  "artifactDependencies": [
+    {
+      "dependencyId": "http-fetcher-signed",
+      "pluginId": "com.digitalarsenal.flow.http-fetcher",
+      "version": "1.0.0",
+      "artifactUri": "signed://plugins/http-fetcher/1.0.0",
+      "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+      "signature": "ed25519:demo-http-fetcher-signature",
+      "signerPublicKey": "ed25519:demo-signer-1",
+      "requiredCapabilities": ["http"]
+    },
+    {
+      "dependencyId": "filesystem-writer-signed",
+      "pluginId": "com.digitalarsenal.flow.filesystem-writer",
+      "version": "1.0.0",
+      "artifactUri": "signed://plugins/filesystem-writer/1.0.0",
+      "sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+      "signature": "ed25519:demo-filesystem-writer-signature",
+      "signerPublicKey": "ed25519:demo-signer-1",
+      "requiredCapabilities": ["filesystem"]
+    },
+    {
+      "dependencyId": "pipe-logger-signed",
+      "pluginId": "com.digitalarsenal.flow.pipe-logger",
+      "version": "1.0.0",
+      "artifactUri": "signed://plugins/pipe-logger/1.0.0",
+      "sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+      "signature": "ed25519:demo-pipe-logger-signature",
+      "signerPublicKey": "ed25519:demo-signer-1",
+      "requiredCapabilities": ["pipe"]
+    },
+    {
+      "dependencyId": "https-file-server-signed",
+      "pluginId": "com.digitalarsenal.flow.https-file-server",
+      "version": "1.0.0",
+      "artifactUri": "signed://plugins/https-file-server/1.0.0",
+      "sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+      "signature": "ed25519:demo-https-file-server-signature",
+      "signerPublicKey": "ed25519:demo-signer-1",
+      "requiredCapabilities": ["http", "filesystem"]
+    }
+  ]
+}

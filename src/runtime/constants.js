@@ -41,11 +41,14 @@ export const ExternalInterfaceDirection = Object.freeze({
 });
 
 export const ExternalInterfaceKind = Object.freeze({
+  CLOCK: "clock",
+  RANDOM: "random",
   TIMER: "timer",
   PUBSUB: "pubsub",
   PROTOCOL: "protocol",
   HTTP: "http",
   FILESYSTEM: "filesystem",
+  PIPE: "pipe",
   NETWORK: "network",
   DATABASE: "database",
   LOCAL_RUNTIME: "local-runtime",

@@ -1,0 +1,109 @@
+{
+  "programId": "com.digitalarsenal.examples.orbpro-browser-omm-cache",
+  "name": "OrbPro Browser OMM Cache",
+  "version": "0.1.0",
+  "description": "Browser-hosted flow that periodically fetches OMM updates over HTTP and stores them in a browser-managed cache.",
+  "nodes": [
+    {
+      "nodeId": "fetch-omm",
+      "pluginId": "com.digitalarsenal.flow.http-fetcher",
+      "methodId": "fetch_records",
+      "kind": "transform",
+      "drainPolicy": "drain-until-yield"
+    },
+    {
+      "nodeId": "cache-store",
+      "pluginId": "com.digitalarsenal.flow.browser-cache-store",
+      "methodId": "upsert_records",
+      "kind": "sink",
+      "drainPolicy": "drain-until-yield"
+    }
+  ],
+  "edges": [
+    {
+      "edgeId": "fetch-to-cache",
+      "fromNodeId": "fetch-omm",
+      "fromPortId": "records",
+      "toNodeId": "cache-store",
+      "toPortId": "records",
+      "backpressurePolicy": "queue",
+      "queueDepth": 32
+    }
+  ],
+  "triggers": [
+    {
+      "triggerId": "refresh-omm",
+      "kind": "timer",
+      "source": "refresh-omm",
+      "defaultIntervalMs": 300000,
+      "acceptedTypes": [
+        {
+          "schemaName": "TimerTick.fbs",
+          "fileIdentifier": "TICK"
+        }
+      ],
+      "description": "Refreshes the browser cache from the remote OMM source every 5 minutes."
+    }
+  ],
+  "triggerBindings": [
+    {
+      "triggerId": "refresh-omm",
+      "targetNodeId": "fetch-omm",
+      "targetPortId": "trigger",
+      "backpressurePolicy": "latest",
+      "queueDepth": 1
+    }
+  ],
+  "requiredPlugins": [
+    "com.digitalarsenal.flow.http-fetcher",
+    "com.digitalarsenal.flow.browser-cache-store"
+  ],
+  "externalInterfaces": [
+    {
+      "interfaceId": "celestrak-http",
+      "kind": "http",
+      "direction": "output",
+      "capability": "http",
+      "resource": "https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=json",
+      "description": "Outbound browser HTTP access for OMM fetch.",
+      "properties": {
+        "nodeId": "fetch-omm",
+        "methods": ["GET"]
+      }
+    },
+    {
+      "interfaceId": "browser-opfs-cache",
+      "kind": "database",
+      "direction": "bidirectional",
+      "capability": "storage_write",
+      "resource": "opfs://orbpro-browser-omm-cache",
+      "description": "Browser-managed cache backing for downloaded OMM records.",
+      "properties": {
+        "pluginId": "com.digitalarsenal.flow.browser-cache-store",
+        "backend": "opfs"
+      }
+    }
+  ],
+  "artifactDependencies": [
+    {
+      "dependencyId": "http-fetcher-signed",
+      "pluginId": "com.digitalarsenal.flow.http-fetcher",
+      "version": "1.0.0",
+      "artifactUri": "signed://plugins/http-fetcher/1.0.0",
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "signature": "ed25519:demo-http-fetcher-signature",
+      "signerPublicKey": "ed25519:demo-signer-1",
+      "requiredCapabilities": ["http"]
+    },
+    {
+      "dependencyId": "browser-cache-store-signed",
+      "pluginId": "com.digitalarsenal.flow.browser-cache-store",
+      "version": "1.0.0",
+      "artifactUri": "signed://plugins/browser-cache-store/1.0.0",
+      "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "signature": "ed25519:demo-browser-cache-store-signature",
+      "signerPublicKey": "ed25519:demo-signer-1",
+      "requiredCapabilities": ["storage_query", "storage_write"]
+    }
+  ]
+}

@@ -1,0 +1,72 @@
+{
+  "pluginId": "com.digitalarsenal.flow.https-file-server",
+  "name": "HTTPS File Server",
+  "version": "1.0.0",
+  "pluginFamily": "responder",
+  "capabilities": ["http", "filesystem"],
+  "externalInterfaces": [
+    {
+      "interfaceId": "http-listener",
+      "kind": "http",
+      "direction": "input",
+      "capability": "http",
+      "resource": "/download",
+      "path": "/download",
+      "description": "Serves files over a host-managed HTTP or HTTPS listener."
+    },
+    {
+      "interfaceId": "served-directory",
+      "kind": "filesystem",
+      "direction": "input",
+      "capability": "filesystem",
+      "resource": "file:///var/lib/sdn/output",
+      "description": "Directory exposed through the HTTP handler."
+    }
+  ],
+  "methods": [
+    {
+      "methodId": "serve_http_request",
+      "displayName": "Serve HTTP Request",
+      "inputPorts": [
+        {
+          "portId": "request",
+          "acceptedTypeSets": [
+            {
+              "setId": "http-request",
+              "allowedTypes": [
+                {
+                  "schemaName": "HttpRequest.fbs",
+                  "fileIdentifier": "HREQ"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 16,
+          "required": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portId": "response",
+          "acceptedTypeSets": [
+            {
+              "setId": "http-response",
+              "allowedTypes": [
+                {
+                  "schemaName": "HttpResponse.fbs",
+                  "fileIdentifier": "HRSP"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 16,
+          "required": true
+        }
+      ],
+      "maxBatch": 16,
+      "drainPolicy": "drain-until-yield"
+    }
+  ]
+}

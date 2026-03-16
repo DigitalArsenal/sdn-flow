@@ -1,0 +1,75 @@
+{
+  "pluginId": "com.digitalarsenal.flow.udp-spooler",
+  "name": "UDP Spooler",
+  "version": "1.0.0",
+  "pluginFamily": "ingest",
+  "capabilities": ["network", "filesystem"],
+  "externalInterfaces": [
+    {
+      "interfaceId": "udp-socket",
+      "kind": "network",
+      "direction": "input",
+      "capability": "network",
+      "resource": "udp://0.0.0.0:40123",
+      "description": "Receives raw UDP packets from a host-provided socket.",
+      "properties": {
+        "transport": "udp",
+        "mode": "listen"
+      }
+    },
+    {
+      "interfaceId": "spool-dir",
+      "kind": "filesystem",
+      "direction": "output",
+      "capability": "filesystem",
+      "resource": "file:///var/lib/wasmedge/spool",
+      "description": "Writes normalized packet payloads to a spool directory."
+    }
+  ],
+  "methods": [
+    {
+      "methodId": "spool_packets",
+      "displayName": "Spool Packets",
+      "inputPorts": [
+        {
+          "portId": "packet",
+          "acceptedTypeSets": [
+            {
+              "setId": "udp-datagram",
+              "allowedTypes": [
+                {
+                  "schemaName": "UdpDatagram.fbs",
+                  "fileIdentifier": "UDPG"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 1,
+          "required": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portId": "stored",
+          "acceptedTypeSets": [
+            {
+              "setId": "stored-record-ref",
+              "allowedTypes": [
+                {
+                  "schemaName": "StoredRecordRef.fbs",
+                  "fileIdentifier": "STRF"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 8,
+          "required": true
+        }
+      ],
+      "maxBatch": 64,
+      "drainPolicy": "drain-until-yield"
+    }
+  ]
+}

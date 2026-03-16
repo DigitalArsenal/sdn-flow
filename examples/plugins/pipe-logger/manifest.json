@@ -1,0 +1,44 @@
+{
+  "pluginId": "com.digitalarsenal.flow.pipe-logger",
+  "name": "Pipe Logger",
+  "version": "1.0.0",
+  "pluginFamily": "sink",
+  "capabilities": ["pipe"],
+  "externalInterfaces": [
+    {
+      "interfaceId": "stderr-pipe",
+      "kind": "pipe",
+      "direction": "output",
+      "capability": "pipe",
+      "resource": "stderr",
+      "description": "Writes operational logs to a host pipe or stream."
+    }
+  ],
+  "methods": [
+    {
+      "methodId": "write_logs",
+      "displayName": "Write Logs",
+      "inputPorts": [
+        {
+          "portId": "records",
+          "acceptedTypeSets": [
+            {
+              "setId": "loggable-records",
+              "allowedTypes": [
+                {
+                  "acceptsAnyFlatbuffer": true
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 16,
+          "required": true
+        }
+      ],
+      "outputPorts": [],
+      "maxBatch": 64,
+      "drainPolicy": "drain-until-yield"
+    }
+  ]
+}

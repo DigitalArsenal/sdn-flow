@@ -1,0 +1,288 @@
+{
+  "programId": "com.digitalarsenal.examples.go-sdn-omm-service",
+  "name": "Go SDN OMM Service",
+  "version": "0.1.0",
+  "description": "Go-hosted service flow that fetches OMMs, stores them in FlatSQL, serves them over HTTPS, publishes to IPFS, notifies peer nodes, and runs observation association.",
+  "nodes": [
+    {
+      "nodeId": "fetch-omm",
+      "pluginId": "com.digitalarsenal.flow.http-fetcher",
+      "methodId": "fetch_records",
+      "kind": "transform",
+      "drainPolicy": "drain-until-yield"
+    },
+    {
+      "nodeId": "fetch-observations",
+      "pluginId": "com.digitalarsenal.flow.http-fetcher",
+      "methodId": "fetch_records",
+      "kind": "transform",
+      "drainPolicy": "drain-until-yield"
+    },
+    {
+      "nodeId": "store-omm",
+      "pluginId": "com.digitalarsenal.flatsql.store",
+      "methodId": "upsert_records",
+      "kind": "transform",
+      "drainPolicy": "drain-until-yield"
+    },
+    {
+      "nodeId": "serve-archive",
+      "pluginId": "com.digitalarsenal.flow.https-file-server",
+      "methodId": "serve_http_request",
+      "kind": "responder",
+      "drainPolicy": "drain-until-yield"
+    },
+    {
+      "nodeId": "publish-ipfs",
+      "pluginId": "com.digitalarsenal.flow.ipfs-publisher",
+      "methodId": "publish_and_pin",
+      "kind": "publisher",
+      "drainPolicy": "drain-until-yield"
+    },
+    {
+      "nodeId": "notify-pnm",
+      "pluginId": "com.digitalarsenal.flow.pnm-notifier",
+      "methodId": "send_notification",
+      "kind": "publisher",
+      "drainPolicy": "drain-until-yield"
+    },
+    {
+      "nodeId": "associate-obs",
+      "pluginId": "com.digitalarsenal.flow.obs-associator",
+      "methodId": "associate_observations",
+      "kind": "analyzer",
+      "drainPolicy": "drain-until-yield"
+    }
+  ],
+  "edges": [
+    {
+      "edgeId": "fetch-omm-to-store",
+      "fromNodeId": "fetch-omm",
+      "fromPortId": "records",
+      "toNodeId": "store-omm",
+      "toPortId": "records",
+      "backpressurePolicy": "queue",
+      "queueDepth": 128
+    },
+    {
+      "edgeId": "store-to-ipfs",
+      "fromNodeId": "store-omm",
+      "fromPortId": "stored",
+      "toNodeId": "publish-ipfs",
+      "toPortId": "records",
+      "backpressurePolicy": "queue",
+      "queueDepth": 128
+    },
+    {
+      "edgeId": "store-to-pnm",
+      "fromNodeId": "store-omm",
+      "fromPortId": "stored",
+      "toNodeId": "notify-pnm",
+      "toPortId": "message",
+      "backpressurePolicy": "latest",
+      "queueDepth": 1
+    },
+    {
+      "edgeId": "store-to-association",
+      "fromNodeId": "store-omm",
+      "fromPortId": "stored",
+      "toNodeId": "associate-obs",
+      "toPortId": "catalog",
+      "backpressurePolicy": "queue",
+      "queueDepth": 32
+    },
+    {
+      "edgeId": "obs-to-association",
+      "fromNodeId": "fetch-observations",
+      "fromPortId": "records",
+      "toNodeId": "associate-obs",
+      "toPortId": "observations",
+      "backpressurePolicy": "queue",
+      "queueDepth": 32
+    }
+  ],
+  "triggers": [
+    {
+      "triggerId": "omm-sync",
+      "kind": "timer",
+      "source": "omm-sync",
+      "defaultIntervalMs": 300000,
+      "acceptedTypes": [
+        {
+          "schemaName": "TimerTick.fbs",
+          "fileIdentifier": "TICK"
+        }
+      ],
+      "description": "Fetches OMMs and observation updates every 5 minutes."
+    },
+    {
+      "triggerId": "download-http",
+      "kind": "http-request",
+      "source": "/catalog/omm/latest",
+      "acceptedTypes": [
+        {
+          "schemaName": "HttpRequest.fbs",
+          "fileIdentifier": "HREQ"
+        }
+      ],
+      "description": "Serves the latest synchronized catalog archive over HTTPS."
+    }
+  ],
+  "triggerBindings": [
+    {
+      "triggerId": "omm-sync",
+      "targetNodeId": "fetch-omm",
+      "targetPortId": "trigger",
+      "backpressurePolicy": "latest",
+      "queueDepth": 1
+    },
+    {
+      "triggerId": "omm-sync",
+      "targetNodeId": "fetch-observations",
+      "targetPortId": "trigger",
+      "backpressurePolicy": "latest",
+      "queueDepth": 1
+    },
+    {
+      "triggerId": "download-http",
+      "targetNodeId": "serve-archive",
+      "targetPortId": "request",
+      "backpressurePolicy": "queue",
+      "queueDepth": 32
+    }
+  ],
+  "requiredPlugins": [
+    "com.digitalarsenal.flow.http-fetcher",
+    "com.digitalarsenal.flatsql.store",
+    "com.digitalarsenal.flow.https-file-server",
+    "com.digitalarsenal.flow.ipfs-publisher",
+    "com.digitalarsenal.flow.pnm-notifier",
+    "com.digitalarsenal.flow.obs-associator"
+  ],
+  "externalInterfaces": [
+    {
+      "interfaceId": "celestrak-http",
+      "kind": "http",
+      "direction": "output",
+      "capability": "http",
+      "resource": "https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=json",
+      "description": "Fetches OMM records from CelesTrak.",
+      "properties": {
+        "nodeId": "fetch-omm",
+        "methods": ["GET"]
+      }
+    },
+    {
+      "interfaceId": "seesat-http",
+      "kind": "http",
+      "direction": "output",
+      "capability": "http",
+      "resource": "https://www.satobs.org/seesat",
+      "description": "Fetches or scrapes SeeSat-L observations for downstream association.",
+      "properties": {
+        "nodeId": "fetch-observations",
+        "methods": ["GET"]
+      }
+    },
+    {
+      "interfaceId": "flatsql-database",
+      "kind": "database",
+      "direction": "bidirectional",
+      "capability": "storage_write",
+      "resource": "file:///var/lib/sdn/flatsql/omm.db",
+      "description": "Persistent FlatSQL backing store for synchronized OMM data.",
+      "properties": {
+        "pluginId": "com.digitalarsenal.flatsql.store",
+        "backend": "host-adapter"
+      }
+    },
+    {
+      "interfaceId": "https-download",
+      "kind": "http",
+      "direction": "input",
+      "capability": "http",
+      "resource": "/catalog/omm/latest",
+      "path": "/catalog/omm/latest",
+      "description": "HTTPS endpoint for downloading the latest synchronized OMM archive."
+    },
+    {
+      "interfaceId": "ipfs-publish",
+      "kind": "host-service",
+      "direction": "output",
+      "capability": "ipfs",
+      "resource": "ipfs://publish-and-pin",
+      "description": "Publishes synchronized artifacts to IPFS and requests pinning."
+    },
+    {
+      "interfaceId": "pnm-protocol",
+      "kind": "protocol",
+      "direction": "output",
+      "capability": "protocol_dial",
+      "resource": "/sds/pnm/1.0.0",
+      "protocolId": "/sds/pnm/1.0.0",
+      "description": "Notifies peer SDN nodes after synchronization completes."
+    }
+  ],
+  "artifactDependencies": [
+    {
+      "dependencyId": "http-fetcher-signed",
+      "pluginId": "com.digitalarsenal.flow.http-fetcher",
+      "version": "1.0.0",
+      "artifactUri": "signed://plugins/http-fetcher/1.0.0",
+      "sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+      "signature": "ed25519:demo-http-fetcher-signature",
+      "signerPublicKey": "ed25519:demo-signer-1",
+      "requiredCapabilities": ["http"]
+    },
+    {
+      "dependencyId": "flatsql-store-signed",
+      "pluginId": "com.digitalarsenal.flatsql.store",
+      "version": "1.1.0",
+      "artifactUri": "signed://plugins/flatsql-store/1.1.0",
+      "sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+      "signature": "ed25519:demo-flatsql-signature",
+      "signerPublicKey": "ed25519:demo-signer-1",
+      "requiredCapabilities": ["storage_query", "storage_write", "storage_adapter"]
+    },
+    {
+      "dependencyId": "https-file-server-signed",
+      "pluginId": "com.digitalarsenal.flow.https-file-server",
+      "version": "1.0.0",
+      "artifactUri": "signed://plugins/https-file-server/1.0.0",
+      "sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+      "signature": "ed25519:demo-https-file-server-signature",
+      "signerPublicKey": "ed25519:demo-signer-1",
+      "requiredCapabilities": ["http", "filesystem"]
+    },
+    {
+      "dependencyId": "ipfs-publisher-signed",
+      "pluginId": "com.digitalarsenal.flow.ipfs-publisher",
+      "version": "1.0.0",
+      "artifactUri": "signed://plugins/ipfs-publisher/1.0.0",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "signature": "ed25519:demo-ipfs-publisher-signature",
+      "signerPublicKey": "ed25519:demo-signer-1",
+      "requiredCapabilities": ["ipfs"]
+    },
+    {
+      "dependencyId": "pnm-notifier-signed",
+      "pluginId": "com.digitalarsenal.flow.pnm-notifier",
+      "version": "1.0.0",
+      "artifactUri": "signed://plugins/pnm-notifier/1.0.0",
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "signature": "ed25519:demo-pnm-notifier-signature",
+      "signerPublicKey": "ed25519:demo-signer-1",
+      "requiredCapabilities": ["protocol_dial"]
+    },
+    {
+      "dependencyId": "obs-associator-signed",
+      "pluginId": "com.digitalarsenal.flow.obs-associator",
+      "version": "1.0.0",
+      "artifactUri": "signed://plugins/obs-associator/1.0.0",
+      "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "signature": "ed25519:demo-obs-associator-signature",
+      "signerPublicKey": "ed25519:demo-signer-1",
+      "requiredCapabilities": ["storage_query"]
+    }
+  ]
+}

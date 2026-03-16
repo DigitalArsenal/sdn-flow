@@ -1,0 +1,63 @@
+{
+  "pluginId": "com.digitalarsenal.flow.http-fetcher",
+  "name": "HTTP Fetcher",
+  "version": "1.0.0",
+  "pluginFamily": "ingest",
+  "capabilities": ["http"],
+  "externalInterfaces": [
+    {
+      "interfaceId": "remote-http-source",
+      "kind": "http",
+      "direction": "output",
+      "capability": "http",
+      "resource": "https://remote-http-source.invalid",
+      "description": "Fetches remote records over HTTP. Deployments bind this to the real remote endpoint."
+    }
+  ],
+  "methods": [
+    {
+      "methodId": "fetch_records",
+      "displayName": "Fetch Records",
+      "inputPorts": [
+        {
+          "portId": "trigger",
+          "acceptedTypeSets": [
+            {
+              "setId": "timer-tick",
+              "allowedTypes": [
+                {
+                  "schemaName": "TimerTick.fbs",
+                  "fileIdentifier": "TICK"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 1,
+          "required": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portId": "records",
+          "acceptedTypeSets": [
+            {
+              "setId": "record-batch",
+              "allowedTypes": [
+                {
+                  "schemaName": "AlignedRecordBatch.fbs",
+                  "fileIdentifier": "RECS"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 4,
+          "required": true
+        }
+      ],
+      "maxBatch": 16,
+      "drainPolicy": "drain-until-yield"
+    }
+  ]
+}

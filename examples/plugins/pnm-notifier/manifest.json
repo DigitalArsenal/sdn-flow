@@ -1,0 +1,45 @@
+{
+  "pluginId": "com.digitalarsenal.flow.pnm-notifier",
+  "name": "PNM Notifier",
+  "version": "1.0.0",
+  "pluginFamily": "publisher",
+  "capabilities": ["protocol_dial"],
+  "externalInterfaces": [
+    {
+      "interfaceId": "pnm-protocol",
+      "kind": "protocol",
+      "direction": "output",
+      "capability": "protocol_dial",
+      "resource": "/sds/pnm/1.0.0",
+      "protocolId": "/sds/pnm/1.0.0",
+      "description": "Notifies peer SDN nodes using the SDS PNM protocol."
+    }
+  ],
+  "methods": [
+    {
+      "methodId": "send_notification",
+      "displayName": "Send Notification",
+      "inputPorts": [
+        {
+          "portId": "message",
+          "acceptedTypeSets": [
+            {
+              "setId": "any-flatbuffer",
+              "allowedTypes": [
+                {
+                  "acceptsAnyFlatbuffer": true
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 16,
+          "required": true
+        }
+      ],
+      "outputPorts": [],
+      "maxBatch": 32,
+      "drainPolicy": "drain-until-yield"
+    }
+  ]
+}
