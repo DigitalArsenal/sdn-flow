@@ -1,0 +1,121 @@
+{
+  "pluginId": "com.digitalarsenal.infrastructure.hd-wallet-wasm",
+  "name": "HD Wallet Crypto",
+  "version": "1.0.0",
+  "pluginFamily": "infrastructure",
+  "capabilities": ["random", "wallet_sign"],
+  "externalInterfaces": [
+    {
+      "interfaceId": "wallet-active-key",
+      "kind": "host-service",
+      "direction": "bidirectional",
+      "capability": "wallet_sign",
+      "resource": "wallet://active-key",
+      "description": "Host-provided signing and key-agreement surface for the hd-wallet-wasm runtime.",
+      "properties": {
+        "curves": ["secp256k1", "ed25519", "x25519"],
+        "residentKeyMaterial": true
+      }
+    },
+    {
+      "interfaceId": "host-rng",
+      "kind": "host-service",
+      "direction": "input",
+      "capability": "random",
+      "resource": "host-rng://default",
+      "description": "Entropy source injected by the host for IVs, salts, and ephemeral keys."
+    }
+  ],
+  "methods": [
+    {
+      "methodId": "encrypt_fields",
+      "displayName": "Encrypt Fields",
+      "inputPorts": [
+        {
+          "portId": "field_set",
+          "acceptedTypeSets": [
+            {
+              "setId": "field-selection-bundle",
+              "allowedTypes": [
+                {
+                  "schemaName": "FieldSelectionBundle.fbs",
+                  "fileIdentifier": "FSLB"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 1,
+          "required": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portId": "encrypted_fields",
+          "acceptedTypeSets": [
+            {
+              "setId": "encrypted-field-set",
+              "allowedTypes": [
+                {
+                  "schemaName": "EncryptedFieldSet.fbs",
+                  "fileIdentifier": "EFLD"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 1,
+          "required": true
+        }
+      ],
+      "maxBatch": 64,
+      "drainPolicy": "drain-until-yield",
+      "description": "Encrypts selected field payloads with hd-wallet-wasm primitives so per-field protection stays inside the flow runtime."
+    },
+    {
+      "methodId": "sign_detached",
+      "displayName": "Sign Detached",
+      "inputPorts": [
+        {
+          "portId": "message",
+          "acceptedTypeSets": [
+            {
+              "setId": "protected-catalog-entry",
+              "allowedTypes": [
+                {
+                  "schemaName": "ProtectedCatalogEntry.fbs",
+                  "fileIdentifier": "PRTC"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 1,
+          "required": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portId": "signature",
+          "acceptedTypeSets": [
+            {
+              "setId": "detached-signature",
+              "allowedTypes": [
+                {
+                  "schemaName": "DetachedSignature.fbs",
+                  "fileIdentifier": "SIGD"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 1,
+          "required": true
+        }
+      ],
+      "maxBatch": 64,
+      "drainPolicy": "drain-until-yield",
+      "description": "Signs flow-emitted FlatBuffer payloads without escaping to an ad hoc host-side crypto model."
+    }
+  ]
+}

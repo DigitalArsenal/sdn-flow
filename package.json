@@ -47,6 +47,9 @@
   "dependencies": {
     "hd-wallet-wasm": "^1.5.4"
   },
+  "devDependencies": {
+    "flatbuffers": "^25.9.23"
+  },
   "engines": {
     "node": ">=20.0.0"
   }

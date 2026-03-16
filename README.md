@@ -194,7 +194,10 @@ Default export names:
 - [Basic Propagator Plugin](./examples/plugins/basic-propagator/README.md)
 - [Basic Sensor Plugin](./examples/plugins/basic-sensor/README.md)
 - [FlatSQL Storage Plugin](./examples/plugins/flatsql-store/README.md)
+- [HD Wallet Crypto Plugin](./examples/plugins/hd-wallet-crypto/README.md)
+- [DA FlatBuffers Codec Plugin](./examples/plugins/da-flatbuffers-codec/README.md)
 - [Single-Plugin Flow](./examples/flows/single-plugin-flow.json)
+- [Field-Protected Catalog Entry Flow](./examples/flows/field-protected-catalog-entry/README.md)
 - [ISS Proximity OEM Flow](./examples/flows/iss-proximity-oem/README.md)
 
 ## Status

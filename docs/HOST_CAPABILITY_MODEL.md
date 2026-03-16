@@ -32,14 +32,14 @@ shape for each environment.
 
 Use the surfaces below together. They solve different problems.
 
-| Surface | Purpose | Example |
-| --- | --- | --- |
-| `manifest.capabilities` | coarse approval/signing scope | `["timers", "http", "storage_write"]` |
-| `manifest.externalInterfaces` | concrete plugin-level bindings | outbound HTTP, FlatSQL adapter, filesystem path |
-| `program.externalInterfaces` | flow-level bindings beyond a single plugin | shared HTTPS listener, shared pubsub topic |
-| `program.triggers` | trigger ownership | timer, protocol request, HTTP request |
-| hosted-runtime plan `requiredCapabilities` | runtime placement/startup requirements | early local service needs `protocol_handle` |
-| deployment authorization `requiredCapabilities` | signed approval at deploy time | remote install allowed to use `pubsub` and `ipfs` |
+| Surface                                         | Purpose                                    | Example                                           |
+| ----------------------------------------------- | ------------------------------------------ | ------------------------------------------------- |
+| `manifest.capabilities`                         | coarse approval/signing scope              | `["timers", "http", "storage_write"]`             |
+| `manifest.externalInterfaces`                   | concrete plugin-level bindings             | outbound HTTP, FlatSQL adapter, filesystem path   |
+| `program.externalInterfaces`                    | flow-level bindings beyond a single plugin | shared HTTPS listener, shared pubsub topic        |
+| `program.triggers`                              | trigger ownership                          | timer, protocol request, HTTP request             |
+| hosted-runtime plan `requiredCapabilities`      | runtime placement/startup requirements     | early local service needs `protocol_handle`       |
+| deployment authorization `requiredCapabilities` | signed approval at deploy time             | remote install allowed to use `pubsub` and `ipfs` |
 
 Keep capability IDs coarse and stable. Put transport-specific details in the
 interface object, not in a proliferating list of near-duplicate capability
@@ -78,6 +78,10 @@ Guidance:
 - Use `pipe` for stdin/stdout/stderr, named pipes, or stream-style host I/O.
 - Keep `ipfs` coarse. Pinning, block get/put, and publish behavior belong in
   interface metadata.
+- Compute-only infrastructure plugins such as DA FlatBuffers usually need no
+  host capability at all. `hd-wallet-wasm` style plugins should only declare
+  host capabilities such as `random` or `wallet_sign` when they genuinely need
+  host-provided entropy or resident key material.
 
 ## External Interface Patterns
 

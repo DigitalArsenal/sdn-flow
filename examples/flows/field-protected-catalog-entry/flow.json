@@ -1,0 +1,82 @@
+{
+  "programId": "com.digitalarsenal.examples.field-protected-catalog-entry",
+  "name": "Field-Protected Catalog Entry",
+  "version": "0.1.0",
+  "nodes": [
+    {
+      "nodeId": "extract-fields",
+      "pluginId": "com.digitalarsenal.infrastructure.da-flatbuffers",
+      "methodId": "extract_fields",
+      "kind": "transform",
+      "drainPolicy": "drain-until-yield"
+    },
+    {
+      "nodeId": "encrypt-fields",
+      "pluginId": "com.digitalarsenal.infrastructure.hd-wallet-wasm",
+      "methodId": "encrypt_fields",
+      "kind": "transform",
+      "drainPolicy": "drain-until-yield"
+    },
+    {
+      "nodeId": "pack-record",
+      "pluginId": "com.digitalarsenal.infrastructure.da-flatbuffers",
+      "methodId": "pack_protected_record",
+      "kind": "transform",
+      "drainPolicy": "drain-until-yield"
+    },
+    {
+      "nodeId": "sign-record",
+      "pluginId": "com.digitalarsenal.infrastructure.hd-wallet-wasm",
+      "methodId": "sign_detached",
+      "kind": "transform",
+      "drainPolicy": "drain-until-yield"
+    }
+  ],
+  "edges": [
+    {
+      "fromNodeId": "extract-fields",
+      "fromPortId": "public_fields",
+      "toNodeId": "pack-record",
+      "toPortId": "public_fields"
+    },
+    {
+      "fromNodeId": "extract-fields",
+      "fromPortId": "protected_fields",
+      "toNodeId": "encrypt-fields",
+      "toPortId": "field_set"
+    },
+    {
+      "fromNodeId": "encrypt-fields",
+      "fromPortId": "encrypted_fields",
+      "toNodeId": "pack-record",
+      "toPortId": "encrypted_fields"
+    },
+    {
+      "fromNodeId": "pack-record",
+      "fromPortId": "protected_record",
+      "toNodeId": "sign-record",
+      "toPortId": "message"
+    }
+  ],
+  "triggers": [
+    {
+      "triggerId": "manual-request",
+      "kind": "manual",
+      "source": "operator"
+    }
+  ],
+  "triggerBindings": [
+    {
+      "triggerId": "manual-request",
+      "targetNodeId": "extract-fields",
+      "targetPortId": "request",
+      "backpressurePolicy": "queue",
+      "queueDepth": 16
+    }
+  ],
+  "requiredPlugins": [
+    "com.digitalarsenal.infrastructure.da-flatbuffers",
+    "com.digitalarsenal.infrastructure.hd-wallet-wasm"
+  ],
+  "description": "Example flow that extracts sensitive FlatBuffer fields, encrypts them, repacks the protected record, and signs the result inside the flow runtime."
+}

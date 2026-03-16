@@ -66,6 +66,12 @@ as a storage plugin/runtime that:
 The host should not hide a second engine-owned SQL source of truth behind that
 plugin surface.
 
+Infrastructure libraries follow the same rule. If a deployable flow depends on
+`hd-wallet-wasm`, DA FlatBuffers, or similar runtime libraries for signing,
+envelope encryption, field-level encryption, schema transforms, or repacking,
+those surfaces should appear as normal manifest-defined plugins. Do not hide
+them behind host-only helper code.
+
 For the canonical host capability rules and environment profiles, see:
 
 - [Host Capability Model](./HOST_CAPABILITY_MODEL.md)
@@ -115,6 +121,9 @@ include:
 - publishers
 - responders
 - infrastructure plugins
+
+Examples of infrastructure plugins include FlatSQL storage, `hd-wallet-wasm`
+sign/encrypt nodes, and DA FlatBuffers schema/field transform nodes.
 
 All of them enter the runtime through the same manifest + method contract.
 

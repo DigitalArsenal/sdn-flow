@@ -1,0 +1,134 @@
+{
+  "pluginId": "com.digitalarsenal.infrastructure.da-flatbuffers",
+  "name": "DA FlatBuffers Codec",
+  "version": "1.0.0",
+  "pluginFamily": "infrastructure",
+  "capabilities": [],
+  "externalInterfaces": [],
+  "methods": [
+    {
+      "methodId": "extract_fields",
+      "displayName": "Extract Fields",
+      "inputPorts": [
+        {
+          "portId": "request",
+          "acceptedTypeSets": [
+            {
+              "setId": "field-protection-request",
+              "allowedTypes": [
+                {
+                  "schemaName": "FieldProtectionRequest.fbs",
+                  "fileIdentifier": "FPRQ"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 1,
+          "required": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portId": "public_fields",
+          "acceptedTypeSets": [
+            {
+              "setId": "field-selection-bundle",
+              "allowedTypes": [
+                {
+                  "schemaName": "FieldSelectionBundle.fbs",
+                  "fileIdentifier": "FSLB"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 1,
+          "required": true
+        },
+        {
+          "portId": "protected_fields",
+          "acceptedTypeSets": [
+            {
+              "setId": "field-selection-bundle",
+              "allowedTypes": [
+                {
+                  "schemaName": "FieldSelectionBundle.fbs",
+                  "fileIdentifier": "FSLB"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 1,
+          "required": true
+        }
+      ],
+      "maxBatch": 64,
+      "drainPolicy": "drain-until-yield",
+      "description": "Uses DA FlatBuffers accessors to split protected and public fields without collapsing the deploy path into JSON helpers."
+    },
+    {
+      "methodId": "pack_protected_record",
+      "displayName": "Pack Protected Record",
+      "inputPorts": [
+        {
+          "portId": "public_fields",
+          "acceptedTypeSets": [
+            {
+              "setId": "field-selection-bundle",
+              "allowedTypes": [
+                {
+                  "schemaName": "FieldSelectionBundle.fbs",
+                  "fileIdentifier": "FSLB"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 1,
+          "required": true
+        },
+        {
+          "portId": "encrypted_fields",
+          "acceptedTypeSets": [
+            {
+              "setId": "encrypted-field-set",
+              "allowedTypes": [
+                {
+                  "schemaName": "EncryptedFieldSet.fbs",
+                  "fileIdentifier": "EFLD"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 1,
+          "required": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portId": "protected_record",
+          "acceptedTypeSets": [
+            {
+              "setId": "protected-catalog-entry",
+              "allowedTypes": [
+                {
+                  "schemaName": "ProtectedCatalogEntry.fbs",
+                  "fileIdentifier": "PRTC"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 1,
+          "required": true
+        }
+      ],
+      "maxBatch": 64,
+      "drainPolicy": "drain-until-yield",
+      "description": "Re-emits a typed FlatBuffer record with encrypted field payloads attached to the canonical runtime stream."
+    }
+  ]
+}
