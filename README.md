@@ -53,6 +53,7 @@ The project is built around a small set of hard rules:
 - `deploy`: compiled artifact normalization and local/remote deployment client
 - `compiler`: signed-artifact catalog, native-WASM source generator, generated
   C++ source, and `emception` compiler adapter
+- `compliance`: shared plugin manifest / ABI compliance checks for SDN repos
 
 ## What The Package Does Not Do
 
@@ -179,6 +180,7 @@ Default export names:
 - `@digitalarsenal/sdn-flow/transport`
 - `@digitalarsenal/sdn-flow/deploy`
 - `@digitalarsenal/sdn-flow/compiler`
+- `@digitalarsenal/sdn-flow/compliance`
 
 ## Documentation
 
@@ -187,6 +189,7 @@ Default export names:
 - [Plugin Architecture](./docs/PLUGIN_ARCHITECTURE.md)
 - [Plugin Manifest](./docs/PLUGIN_MANIFEST.md)
 - [Compatibility Model](./docs/PLUGIN_COMPATIBILITY.md)
+- [Plugin Compliance Checks](./docs/PLUGIN_COMPLIANCE_CHECKS.md)
 
 ## Examples
 

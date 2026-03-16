@@ -12,6 +12,7 @@
     "./transport": "./src/transport/index.js",
     "./deploy": "./src/deploy/index.js",
     "./compiler": "./src/compiler/index.js",
+    "./compliance": "./src/compliance/index.js",
     "./schemas/*": "./schemas/*"
   },
   "files": [
@@ -19,12 +20,15 @@
     "native/",
     "schemas/",
     "docs/",
+    ".claude/",
+    "tools/",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
     "build:runtime-abi": "node scripts/build-runtime-abi.mjs",
-    "test": "node --test"
+    "test": "node --test",
+    "check:plugin-compliance": "node tools/run-plugin-compliance-check.mjs --repo-root ."
   },
   "keywords": [
     "flow",

@@ -5,3 +5,4 @@ export * from "./host/index.js";
 export * from "./transport/index.js";
 export * from "./deploy/index.js";
 export * from "./compiler/index.js";
+export * from "./compliance/index.js";
