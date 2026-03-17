@@ -40,8 +40,10 @@ export {
   startInstalledFlowAppHost,
 } from "./appHost.js";
 export {
+  createBunServeHttpAdapter,
   createDenoServeHttpAdapter,
   createNodeServeHttpAdapter,
+  startInstalledFlowBunHttpHost,
   startInstalledFlowDenoHttpHost,
   startInstalledFlowNodeHttpHost,
 } from "./httpHostAdapters.js";

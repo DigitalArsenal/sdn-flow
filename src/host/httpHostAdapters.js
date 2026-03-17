@@ -76,6 +76,9 @@ function closeHandle(handle) {
   if (typeof handle === "function") {
     return handle();
   }
+  if (typeof handle?.stop === "function") {
+    return handle.stop();
+  }
   if (typeof handle?.shutdown === "function") {
     return handle.shutdown();
   }
@@ -112,6 +115,39 @@ export function createDenoServeHttpAdapter(options = {}) {
     );
     return {
       platform: "deno",
+      url: url.href,
+      hostname: url.hostname,
+      port,
+      server: result ?? null,
+      async close() {
+        await closeHandle(result);
+      },
+    };
+  };
+}
+
+export function createBunServeHttpAdapter(options = {}) {
+  const serve =
+    options.serve ??
+    (globalThis.Bun && typeof globalThis.Bun.serve === "function"
+      ? globalThis.Bun.serve.bind(globalThis.Bun)
+      : null);
+  if (typeof serve !== "function") {
+    throw new Error(
+      "createBunServeHttpAdapter requires a Bun.serve-compatible function.",
+    );
+  }
+
+  return async function serveHttp({ binding, handler }) {
+    const url = resolveBindingUrl(binding);
+    const port = url.port ? Number(url.port) : 80;
+    const result = await serve({
+      hostname: url.hostname,
+      port,
+      fetch: handler,
+    });
+    return {
+      platform: "bun",
       url: url.href,
       hostname: url.hostname,
       port,
@@ -218,6 +254,14 @@ export async function startInstalledFlowDenoHttpHost(options = {}) {
   });
 }
 
+export async function startInstalledFlowBunHttpHost(options = {}) {
+  return startInstalledFlowAppHost({
+    ...options,
+    serveHttp:
+      options.serveHttp ?? createBunServeHttpAdapter(options),
+  });
+}
+
 export async function startInstalledFlowNodeHttpHost(options = {}) {
   return startInstalledFlowAppHost({
     ...options,
@@ -227,8 +271,10 @@ export async function startInstalledFlowNodeHttpHost(options = {}) {
 }
 
 export default {
+  createBunServeHttpAdapter,
   createDenoServeHttpAdapter,
   createNodeServeHttpAdapter,
+  startInstalledFlowBunHttpHost,
   startInstalledFlowDenoHttpHost,
   startInstalledFlowNodeHttpHost,
 };

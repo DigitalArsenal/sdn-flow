@@ -2,7 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  createBunServeHttpAdapter,
   createDenoServeHttpAdapter,
+  startInstalledFlowBunHttpHost,
   startInstalledFlowDenoHttpHost,
   startInstalledFlowNodeHttpHost,
 } from "../src/index.js";
@@ -156,6 +158,57 @@ test("createDenoServeHttpAdapter binds host-plan URLs through a Deno.serve-compa
   assert.equal(serveCalls[1].type, "shutdown");
 });
 
+test("createBunServeHttpAdapter binds host-plan URLs through a Bun.serve-compatible function", async () => {
+  const serveCalls = [];
+  const adapter = createBunServeHttpAdapter({
+    serve(options) {
+      serveCalls.push(options);
+      return {
+        stop() {
+          serveCalls.push({
+            type: "stop",
+          });
+        },
+      };
+    },
+  });
+
+  const handle = await adapter({
+    binding: {
+      url: "http://127.0.0.1:9081/download",
+    },
+    handler(request) {
+      return new Response(request.method, {
+        status: 200,
+      });
+    },
+  });
+  const response = await serveCalls[0].fetch(
+    new Request("http://127.0.0.1:9081/download", {
+      method: "PUT",
+    }),
+  );
+
+  assert.deepEqual(
+    {
+      hostname: serveCalls[0].hostname,
+      port: serveCalls[0].port,
+    },
+    {
+      hostname: "127.0.0.1",
+      port: 9081,
+    },
+  );
+  assert.equal(typeof serveCalls[0].fetch, "function");
+  assert.equal(handle.platform, "bun");
+  assert.equal(handle.url, "http://127.0.0.1:9081/download");
+  assert.equal(await response.text(), "PUT");
+
+  await handle.close();
+
+  assert.equal(serveCalls[1].type, "stop");
+});
+
 test("startInstalledFlowDenoHttpHost uses the Deno adapter with an injected serve function", async () => {
   const serveCalls = [];
   const host = await startInstalledFlowDenoHttpHost({
@@ -190,6 +243,39 @@ test("startInstalledFlowDenoHttpHost uses the Deno adapter with an injected serv
   await host.stop();
 
   assert.equal(serveCalls[1].type, "shutdown");
+});
+
+test("startInstalledFlowBunHttpHost uses the Bun adapter with an injected serve function", async () => {
+  const serveCalls = [];
+  const host = await startInstalledFlowBunHttpHost({
+    workspace: buildHttpWorkspace(),
+    serve(options) {
+      serveCalls.push(options);
+      return {
+        stop() {
+          serveCalls.push({
+            type: "stop",
+          });
+        },
+      };
+    },
+  });
+
+  assert.equal(host.listeners.length, 1);
+  assert.equal(serveCalls[0].port, 9080);
+
+  const response = await serveCalls[0].fetch(
+    new Request("http://127.0.0.1:9080/download", {
+      method: "GET",
+    }),
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("x-runtime"), "flow");
+
+  await host.stop();
+
+  assert.equal(serveCalls[1].type, "stop");
 });
 
 test("startInstalledFlowNodeHttpHost starts a real Node HTTP listener from the host plan", async () => {

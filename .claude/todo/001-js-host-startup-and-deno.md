@@ -41,3 +41,5 @@
 15. Add concrete Deno- and Node-oriented HTTP host adapters on top of the installed-flow launcher surface. (done)
 
 16. Add concrete browser/worker fetch-host adapters on top of the installed-flow launcher surface. (done)
+
+17. Add concrete Bun HTTP host adapters on top of the installed-flow launcher surface. (done)

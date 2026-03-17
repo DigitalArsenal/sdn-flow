@@ -185,11 +185,13 @@ program, and start draining frames through one bootstrap surface.
 import {
   createInstalledFlowBrowserFetchEventListener,
   createInstalledFlowApp,
+  createBunServeHttpAdapter,
   createDenoServeHttpAdapter,
   createInstalledFlowHost,
   createInstalledFlowFetchHandler,
   createInstalledFlowService,
   startInstalledFlowBrowserFetchHost,
+  startInstalledFlowBunHttpHost,
   startInstalledFlowDenoHttpHost,
   startInstalledFlowNodeHttpHost,
   startInstalledFlowAppHost,
@@ -288,6 +290,8 @@ checked-in startup profile.
 
 For concrete JS-host entrypoints, `createDenoServeHttpAdapter(...)` and
 `startInstalledFlowDenoHttpHost(...)` provide the Deno path, while
+`createBunServeHttpAdapter(...)` and `startInstalledFlowBunHttpHost(...)`
+provide the Bun path, and
 `startInstalledFlowNodeHttpHost(...)` provides a Node HTTP server path that
 converts Node requests into web-standard `Request` objects and writes flow
 responses back to the socket.
