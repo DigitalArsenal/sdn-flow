@@ -55,10 +55,13 @@ export {
 export {
   createInstalledFlowApp,
   installWorkspacePluginPackage,
+  installWorkspacePackageReference,
   normalizeInstalledFlowWorkspace,
+  removeWorkspacePackageReference,
   readInstalledFlowWorkspace,
   resolveInstalledFlowWorkspace,
   uninstallWorkspacePluginPackage,
+  updateWorkspacePackageReference,
   writeInstalledFlowWorkspace,
 } from "./workspace.js";
 export {
@@ -71,6 +74,11 @@ export {
   registerInstalledPluginPackage,
   registerInstalledPluginPackages,
 } from "./installedFlowHost.js";
+export {
+  createCommandPackageManager,
+  createNodeCommandRunner,
+  createNpmPackageManager,
+} from "./packageManagers.js";
 export {
   normalizeHostedBinding,
   normalizeHostedRuntime,

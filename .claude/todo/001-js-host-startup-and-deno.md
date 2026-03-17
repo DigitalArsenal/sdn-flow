@@ -8,7 +8,7 @@
 
 5. Add a bootstrap API that discovers/registers installed plugins and loads a flow program into a runtime. (done)
 
-6. Make the bootstrap API usable for Node-RED-style “install nodes and startup” flows. (partial)
+6. Make the bootstrap API usable for Node-RED-style “install nodes and startup” flows. (done)
    Done:
    - `createInstalledFlowHost(...)`
    - package discovery and registration
@@ -18,9 +18,8 @@
    - portable HTTP request trigger dispatch
    - `host.refreshPlugins(...)`
    - `service.refresh(...)`
-   Next:
-   - external package-manager and persistence integration beyond the local workspace catalog
    - runnable top-level bootstrap examples and scripts for each concrete host adapter
+   - persisted package catalog plus package-manager-driven install/update/remove flows
 
 7. Add Deno-oriented host-plan support so `sdn-js` deployments can declare `engine: "deno"` and document single-file deployment intent. (done)
 
@@ -50,8 +49,11 @@
    - direct use of `workspace.json` plus the new host adapter surfaces
    - clear examples of how a host actually boots and stays up in each environment
 
-19. Add external package-manager and persistence integration beyond the local workspace catalog. (pending)
-   Goal:
-   - track installed package sources, versions, and updates instead of only local package roots
-   - integrate workspace mutation with a real install/update/remove flow
-   - keep the runtime refresh path aligned with that persisted package state
+19. Add external package-manager and persistence integration beyond the local workspace catalog. (done)
+   Done:
+   - persisted `packageCatalog` / `installedPackages` normalization in workspace state
+   - `installWorkspacePackageReference(...)`, `updateWorkspacePackageReference(...)`, and `removeWorkspacePackageReference(...)`
+   - `app.installPackageReference(...)`, `app.updatePackageReference(...)`, and `app.removePackageReference(...)`
+   - generic `createCommandPackageManager(...)` adapter
+   - concrete `createNpmPackageManager(...)` adapter
+   - workspace tests for package-reference persistence and runtime refresh alignment

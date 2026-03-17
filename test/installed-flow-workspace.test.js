@@ -7,8 +7,11 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import {
   createInstalledFlowApp,
   installWorkspacePluginPackage,
+  installWorkspacePackageReference,
   readInstalledFlowWorkspace,
+  removeWorkspacePackageReference,
   uninstallWorkspacePluginPackage,
+  updateWorkspacePackageReference,
   writeInstalledFlowWorkspace,
 } from "../src/index.js";
 
@@ -30,6 +33,33 @@ const SdnJsCatalogGatewayHostPlanPath = new URL(
   "../examples/environments/sdn-js-catalog-gateway/host-plan.json",
   import.meta.url,
 ).pathname;
+
+function createFakePackageManager() {
+  return {
+    async install(packageReference) {
+      return {
+        packageId:
+          packageReference.packageId ?? "basic-propagator-package",
+        pluginId: "com.digitalarsenal.examples.basic-propagator",
+        version: packageReference.version ?? "1.0.0",
+        sourceType: packageReference.sourceType ?? "filesystem",
+        sourceRef: packageReference.sourceRef ?? "file:basic-propagator",
+        installPath: BasicPropagatorPackageRoot,
+        metadata: {
+          channel: "local-test",
+        },
+      };
+    },
+    async update(existingReference) {
+      return {
+        ...existingReference,
+        version: "2.0.0",
+        installPath: BasicPropagatorPackageRoot,
+      };
+    },
+    async remove() {},
+  };
+}
 
 test("readInstalledFlowWorkspace resolves relative flow, host-plan, and plugin roots", async () => {
   const workspaceDirectory = await mkdtemp(
@@ -146,6 +176,7 @@ test("createInstalledFlowApp boots a persisted workspace and runs the installed 
     adapter: null,
     engine: null,
     pluginRootDirectories: [path.resolve(ExamplePluginsDirectory)],
+    packageCatalogCount: 0,
     hostId: null,
   });
 });
@@ -232,4 +263,112 @@ test("createInstalledFlowApp can install and uninstall explicit plugin packages 
     false,
   );
   assert.equal(uninstalledWorkspace.pluginPackages.length, 0);
+});
+
+test("workspace package-reference helpers persist install source and version metadata", async () => {
+  const packageManager = createFakePackageManager();
+  let workspace = await readInstalledFlowWorkspace(
+    await (async () => {
+      const workspaceDirectory = await mkdtemp(
+        path.join(os.tmpdir(), "sdn-flow-package-reference-"),
+      );
+      const workspacePath = path.join(workspaceDirectory, "workspace.json");
+      await writeInstalledFlowWorkspace(workspacePath, {
+        workspaceId: "package-reference-workspace",
+        flowPath: SinglePluginFlowPath,
+        discover: false,
+      });
+      return workspacePath;
+    })(),
+  );
+
+  workspace = await installWorkspacePackageReference(
+    workspace,
+    {
+      packageId: "basic-propagator-package",
+      version: "1.0.0",
+      sourceType: "filesystem",
+      sourceRef: "file:basic-propagator",
+    },
+    {
+      packageManager,
+    },
+  );
+
+  assert.equal(workspace.packageCatalog.length, 1);
+  assert.equal(workspace.packageCatalog[0].version, "1.0.0");
+  assert.equal(workspace.packageCatalog[0].sourceRef, "file:basic-propagator");
+  assert.equal(workspace.pluginPackages.length, 1);
+
+  workspace = await updateWorkspacePackageReference(
+    workspace,
+    "basic-propagator-package",
+    {
+      packageManager,
+    },
+  );
+
+  assert.equal(workspace.packageCatalog[0].version, "2.0.0");
+
+  workspace = await removeWorkspacePackageReference(
+    workspace,
+    "basic-propagator-package",
+    {
+      packageManager,
+    },
+  );
+
+  assert.equal(workspace.packageCatalog.length, 0);
+  assert.equal(workspace.pluginPackages.length, 0);
+});
+
+test("installed flow app can persist package-reference install, update, and remove flows", async () => {
+  const workspaceDirectory = await mkdtemp(
+    path.join(os.tmpdir(), "sdn-flow-package-reference-app-"),
+  );
+  const workspacePath = path.join(workspaceDirectory, "workspace.json");
+  const packageManager = createFakePackageManager();
+
+  await writeInstalledFlowWorkspace(workspacePath, {
+    workspaceId: "package-reference-app",
+    flowPath: path.relative(workspaceDirectory, SinglePluginFlowPath),
+    discover: false,
+  });
+
+  const app = await createInstalledFlowApp({
+    workspacePath,
+  });
+
+  await app.installPackageReference(
+    {
+      packageId: "basic-propagator-package",
+      version: "1.0.0",
+      sourceType: "filesystem",
+      sourceRef: "file:basic-propagator",
+    },
+    {
+      packageManager,
+    },
+  );
+
+  let workspace = await readInstalledFlowWorkspace(workspacePath);
+  assert.equal(workspace.packageCatalog.length, 1);
+  assert.equal(workspace.packageCatalog[0].version, "1.0.0");
+  assert.equal(app.getSummary().packageCatalogCount, 1);
+
+  await app.updatePackageReference("basic-propagator-package", {
+    packageManager,
+  });
+
+  workspace = await readInstalledFlowWorkspace(workspacePath);
+  assert.equal(workspace.packageCatalog[0].version, "2.0.0");
+
+  await app.removePackageReference("basic-propagator-package", {
+    packageManager,
+  });
+
+  workspace = await readInstalledFlowWorkspace(workspacePath);
+  assert.equal(workspace.packageCatalog.length, 0);
+  assert.equal(workspace.pluginPackages.length, 0);
+  assert.equal(app.getSummary().packageCatalogCount, 0);
 });

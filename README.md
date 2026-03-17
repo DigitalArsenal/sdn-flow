@@ -81,7 +81,8 @@ The project is built around a small set of hard rules:
 
 - It does not define your host-specific schemas.
 - It does not assume a specific host application or server runtime.
-- It does not ship host adapters for installation, persistence, or execution.
+- It does not force one package registry, package-manager policy, or persistence backend.
+- It does not ship a full host application or editor.
 
 Those pieces are intentionally left to the host that consumes this package.
 What `sdn-flow` does provide is a portable way to describe those runtime
@@ -282,6 +283,48 @@ That workspace layer also supports explicit package catalog mutation through
 `app.installPluginPackage(...)`, and `app.uninstallPluginPackage(...)`, which
 lets hosts persist installed-node changes and then refresh the live runtime
 against the updated workspace state.
+
+For package-manager-driven installs, the same workspace layer also supports
+persisted package references through
+`installWorkspacePackageReference(...)`,
+`updateWorkspacePackageReference(...)`,
+`removeWorkspacePackageReference(...)`,
+`app.installPackageReference(...)`,
+`app.updatePackageReference(...)`, and
+`app.removePackageReference(...)`.
+Those operations accept a `packageManager` adapter so hosts can tie workspace
+state to a real install/update/remove flow instead of only storing local
+package roots.
+
+`createCommandPackageManager(...)` is the generic adapter for that path, and
+`createNpmPackageManager(...)` is the first concrete implementation. Hosts can
+use the built-in Node subprocess runner or inject their own command runner for
+Deno/Bun-compatible environments:
+
+```js
+import {
+  createInstalledFlowApp,
+  createNpmPackageManager,
+} from "@digitalarsenal/sdn-flow";
+
+const app = await createInstalledFlowApp({
+  workspacePath: "./workspace.json",
+});
+const packageManager = createNpmPackageManager({
+  cwd: "./.sdn-workspace",
+});
+
+await app.installPackageReference(
+  {
+    packageId: "@digitalarsenal/basic-propagator",
+    version: "1.0.0",
+    sourceType: "npm",
+  },
+  {
+    packageManager,
+  },
+);
+```
 
 `startInstalledFlowAppHost(...)` is the next layer up: it reads the workspace
 host plan, starts the app, and binds HTTP `listen` entries through an injected
