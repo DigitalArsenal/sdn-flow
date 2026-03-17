@@ -278,6 +278,18 @@ concrete bindings. It uses the explicit engine in the workspace/host plan when
 present and otherwise falls back to the current JS runtime so one startup path
 can dispatch to the browser, Deno, Bun, or Node host adapter.
 
+For Node-based startup, the package also exposes a small `sdn-flow-host` CLI:
+
+```sh
+sdn-flow-host --workspace ./workspace.json
+sdn-flow-host --workspace ./workspace.json --engine node
+```
+
+That command is a thin wrapper over `startInstalledFlowAutoHost(...)`. It is
+meant for straightforward workspace boot and signal-managed shutdown, while
+Deno/Bun/browser hosts can keep using the checked-in bootstrap scripts or the
+underlying host APIs directly.
+
 Installed hosts can also rescan and rebind their managed plugin set in place
 through `host.refreshPlugins(...)` or `service.refresh(...)`, which is the
 current package-level equivalent of updating installed nodes and reloading the

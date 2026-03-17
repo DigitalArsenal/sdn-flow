@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "description": "Isomorphic flow authoring, runtime, authorization, and deployment tooling for schema-driven WASM systems.",
   "type": "module",
+  "bin": {
+    "sdn-flow-host": "./bin/sdn-flow-host.js"
+  },
   "exports": {
     ".": "./src/index.js",
     "./runtime": "./src/runtime/index.js",

@@ -70,3 +70,10 @@
    - `examples/bootstrap/start-auto-host.mjs`
    - direct startup from the checked-in `sdn-js-catalog-gateway/workspace.json`
    - bootstrap coverage proving the example dispatches through `startInstalledFlowAutoHost(...)`
+
+22. Add a simple host CLI that boots one workspace through the auto-host surface. (done)
+   Done:
+   - `bin/sdn-flow-host.js`
+   - `--workspace` and optional `--engine` override support
+   - startup summary plus `SIGINT`/`SIGTERM` shutdown hooks
+   - CLI coverage for parsing, help text, and startup dispatch
