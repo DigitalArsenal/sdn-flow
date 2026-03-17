@@ -183,11 +183,13 @@ program, and start draining frames through one bootstrap surface.
 
 ```js
 import {
+  createInstalledFlowBrowserFetchEventListener,
   createInstalledFlowApp,
   createDenoServeHttpAdapter,
   createInstalledFlowHost,
   createInstalledFlowFetchHandler,
   createInstalledFlowService,
+  startInstalledFlowBrowserFetchHost,
   startInstalledFlowDenoHttpHost,
   startInstalledFlowNodeHttpHost,
   startInstalledFlowAppHost,
@@ -238,6 +240,10 @@ await startInstalledFlowAppHost({
 await startInstalledFlowDenoHttpHost({
   workspacePath: "./workspace.json",
 });
+
+await startInstalledFlowBrowserFetchHost({
+  workspace,
+});
 ```
 
 Filesystem discovery is optional. Browser or embedded hosts can pass in-memory
@@ -285,6 +291,11 @@ For concrete JS-host entrypoints, `createDenoServeHttpAdapter(...)` and
 `startInstalledFlowNodeHttpHost(...)` provides a Node HTTP server path that
 converts Node requests into web-standard `Request` objects and writes flow
 responses back to the socket.
+
+For service-worker-style browser hosts, `startInstalledFlowBrowserFetchHost(...)`
+registers a `fetch` listener against the installed-flow app, and
+`createInstalledFlowBrowserFetchEventListener(...)` exposes the raw listener
+function when the host wants to manage registration itself.
 
 ## Deployment Flow
 

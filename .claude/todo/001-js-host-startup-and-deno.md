@@ -39,3 +39,5 @@
 14. Add a host-plan launcher that can auto-bind installed-flow HTTP listeners through an injected serve adapter. (done)
 
 15. Add concrete Deno- and Node-oriented HTTP host adapters on top of the installed-flow launcher surface. (done)
+
+16. Add concrete browser/worker fetch-host adapters on top of the installed-flow launcher surface. (done)

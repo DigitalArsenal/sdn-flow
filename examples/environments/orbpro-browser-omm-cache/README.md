@@ -11,3 +11,7 @@ It uses:
 - same-app runtime inspection binding
 
 The host profile is OrbPro browser with the `sdn-js` adapter family.
+The intended browser-runtime binding path is
+`startInstalledFlowBrowserFetchHost(...)` or a manual
+`createInstalledFlowBrowserFetchEventListener(...)` registration in a worker
+context.

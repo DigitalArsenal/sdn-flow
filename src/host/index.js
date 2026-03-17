@@ -31,6 +31,11 @@ export {
   normalizeHostedRuntimeEngine,
 } from "./profile.js";
 export {
+  createInstalledFlowBrowserFetchEventListener,
+  matchesInstalledFlowHttpBindingRequest,
+  startInstalledFlowBrowserFetchHost,
+} from "./browserHostAdapters.js";
+export {
   listInstalledFlowHttpBindings,
   startInstalledFlowAppHost,
 } from "./appHost.js";
