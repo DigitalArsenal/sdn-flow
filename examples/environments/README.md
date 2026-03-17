@@ -13,5 +13,6 @@ Available demos:
 
 - `orbpro-browser-omm-cache`
 - `sdn-js-catalog-gateway`
+  Preferred `sdn-js` engine: `deno` for single-file host deployment.
 - `go-sdn-omm-service`
 - `wasmedge-udp-spooler`

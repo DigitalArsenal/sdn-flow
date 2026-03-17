@@ -1,9 +1,11 @@
-export { canonicalBytes, hashCanonicalValue, stableStringify } from "./canonicalize.js";
 export {
+  canonicalBytes,
+  hashCanonicalValue,
+  stableStringify,
   assertDeploymentAuthorization,
   createDeploymentAuthorization,
   createHdWalletSigner,
   createHdWalletVerifier,
   signAuthorization,
   verifyAuthorization,
-} from "./permissions.js";
+} from "space-data-module-sdk/auth";

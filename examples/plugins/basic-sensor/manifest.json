@@ -3,6 +3,8 @@
   "name": "Basic Sensor",
   "version": "0.1.0",
   "pluginFamily": "sensor",
+  "capabilities": [],
+  "externalInterfaces": [],
   "methods": [
     {
       "methodId": "detect",

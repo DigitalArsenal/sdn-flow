@@ -194,11 +194,15 @@ test("environment host plans summarize the intended host adapters and bindings",
   const wasmedgeSummary = summarizeHostedRuntimePlan(wasmedgePlan);
 
   assert.equal(browserSummary.adapter, "sdn-js");
+  assert.equal(browserSummary.engine, "browser");
   assert.equal(browserSummary.transports.includes("same-app"), true);
+  assert.equal(jsSummary.engine, "deno");
   assert.equal(jsSummary.transports.includes("http"), true);
+  assert.equal(goSummary.engine, "go");
   assert.equal(goSummary.transports.includes("http"), true);
   assert.equal(goSummary.transports.includes("sdn-protocol"), true);
   assert.equal(wasmedgeSummary.adapter, "host-internal");
+  assert.equal(wasmedgeSummary.engine, "wasi");
   assert.equal(wasmedgeSummary.transports.includes("direct"), true);
   assert.equal(
     wasmedgeSummary.bindings.some(

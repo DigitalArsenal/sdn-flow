@@ -35,8 +35,18 @@ export const HostedRuntimeAdapter = Object.freeze({
   GO_SDN: "go-sdn",
 });
 
+export const HostedRuntimeEngine = Object.freeze({
+  NODE: "node",
+  DENO: "deno",
+  BUN: "bun",
+  BROWSER: "browser",
+  WASI: "wasi",
+  GO: "go",
+});
+
 export default {
   HostedRuntimeAdapter,
+  HostedRuntimeEngine,
   HostedRuntimeAuthority,
   HostedRuntimeBindingDirection,
   HostedRuntimeKind,

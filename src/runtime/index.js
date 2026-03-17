@@ -5,6 +5,7 @@ export {
   ExternalInterfaceDirection,
   ExternalInterfaceKind,
   NodeKind,
+  RuntimeTarget,
   TriggerKind,
 } from "./constants.js";
 export {

@@ -2,6 +2,7 @@
   "hostId": "sdn-js-local",
   "hostKind": "sdn-js",
   "adapter": "sdn-js",
+  "engine": "deno",
   "description": "JS-hosted catalog gateway flow for Node, Deno, or Bun environments.",
   "disconnectedCapable": true,
   "runtimes": [

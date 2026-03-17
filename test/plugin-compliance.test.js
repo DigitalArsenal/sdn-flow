@@ -85,8 +85,7 @@ test("validatePluginManifest accepts canonical example manifests", async () => {
 
   assert.equal(report.ok, true);
   assert.equal(report.errors.length, 0);
-  assert.equal(report.warnings.length, 2);
-  assert.match(report.warnings[0].code, /missing-capabilities-array|missing-external-interfaces-array/);
+  assert.equal(report.warnings.length, 0);
 });
 
 test("validatePluginManifest rejects malformed manifests", () => {

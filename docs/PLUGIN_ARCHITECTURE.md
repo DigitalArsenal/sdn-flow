@@ -2,8 +2,8 @@
 
 ## Scope
 
-This document defines the standalone plugin architecture consumed by
-`sdn-flow`.
+This document defines how `sdn-flow` consumes the standalone plugin
+architecture sourced from `space-data-module-sdk`.
 
 It covers:
 

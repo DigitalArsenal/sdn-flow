@@ -6,6 +6,7 @@ import {
   HostedRuntimeStartupPhase,
   HostedRuntimeTransport,
 } from "./constants.js";
+import { evaluateHostedCapabilitySupport, normalizeHostedRuntimeEngine } from "./profile.js";
 
 const STARTUP_PHASE_ORDER = Object.freeze({
   [HostedRuntimeStartupPhase.BOOTSTRAP]: 0,
@@ -100,6 +101,7 @@ export function normalizeHostedBinding(binding = {}) {
 }
 
 export function normalizeHostedRuntime(runtime = {}) {
+  const defaultEngine = normalizeHostedRuntimeEngine(runtime.defaultEngine, null);
   const kind = normalizeEnum(
     runtime.kind,
     HostedRuntimeKind,
@@ -155,6 +157,11 @@ export function normalizeHostedRuntime(runtime = {}) {
       HostedRuntimeAdapter,
       null,
     ),
+    engine:
+      normalizeHostedRuntimeEngine(
+        runtime.engine ?? runtime.runtimeEngine ?? runtime.runtime_engine,
+        null,
+      ) ?? defaultEngine,
     startupPhase,
     autoStart,
     dependsOn: normalizeStringArray(runtime.dependsOn ?? runtime.depends_on),
@@ -168,8 +175,17 @@ export function normalizeHostedRuntime(runtime = {}) {
 }
 
 export function normalizeHostedRuntimePlan(plan = {}) {
+  const planEngine = normalizeHostedRuntimeEngine(
+    plan.engine ?? plan.runtimeEngine ?? plan.runtime_engine,
+    null,
+  );
   const runtimes = Array.isArray(plan.runtimes)
-    ? plan.runtimes.map((runtime) => normalizeHostedRuntime(runtime))
+    ? plan.runtimes.map((runtime) =>
+        normalizeHostedRuntime({
+          ...runtime,
+          defaultEngine: planEngine,
+        }),
+      )
     : [];
   return {
     hostId: normalizeString(plan.hostId ?? plan.host_id, "host"),
@@ -180,6 +196,7 @@ export function normalizeHostedRuntimePlan(plan = {}) {
       HostedRuntimeAdapter,
       null,
     ),
+    engine: planEngine,
     disconnectedCapable: normalizeBoolean(
       plan.disconnectedCapable ?? plan.disconnected_capable,
       false,
@@ -292,6 +309,7 @@ export function summarizeHostedRuntimePlan(planInput = {}) {
     hostId: plan.hostId,
     hostKind: plan.hostKind,
     adapter: plan.adapter,
+    engine: plan.engine,
     adapters: Array.from(adapters).sort(),
     transports: Array.from(transports).sort(),
     disconnectedCapable,
@@ -304,6 +322,7 @@ export function summarizeHostedRuntimePlan(planInput = {}) {
       autoStart: runtime.autoStart,
       authority: runtime.authority,
       adapter: runtime.adapter ?? plan.adapter,
+      engine: runtime.engine ?? plan.engine,
       dependsOn: runtime.dependsOn,
     })),
     earlyStartRuntimes: startupOrder
@@ -324,6 +343,18 @@ export function summarizeHostedRuntimePlan(planInput = {}) {
         runtimeId: runtime.runtimeId,
         startupPhase: runtime.startupPhase,
         adapter: runtime.adapter ?? plan.adapter,
+        engine: runtime.engine ?? plan.engine,
+      })),
+    runtimeCompatibility: startupOrder.map((runtime) =>
+      ({
+        runtimeId: runtime.runtimeId,
+        adapter: runtime.adapter ?? plan.adapter,
+        engine: runtime.engine ?? plan.engine,
+        ...evaluateHostedCapabilitySupport({
+          adapter: runtime.adapter ?? plan.adapter,
+          engine: runtime.engine ?? plan.engine,
+          requiredCapabilities: runtime.requiredCapabilities,
+        }),
       })),
     bindings: bindings.sort((left, right) =>
       `${left.ownerRuntimeId}:${left.direction}:${left.transport}:${left.protocolId ?? ""}`.localeCompare(

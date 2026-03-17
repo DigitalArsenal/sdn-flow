@@ -3,6 +3,8 @@
   "name": "OEM Generator",
   "version": "1.0.0",
   "pluginFamily": "analysis",
+  "capabilities": [],
+  "externalInterfaces": [],
   "methods": [
     {
       "methodId": "generate_oem",

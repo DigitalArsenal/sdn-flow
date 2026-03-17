@@ -3,6 +3,8 @@
   "name": "SGP4 Proximity Propagator",
   "version": "1.0.0",
   "pluginFamily": "propagator",
+  "capabilities": [],
+  "externalInterfaces": [],
   "methods": [
     {
       "methodId": "propagate_one_orbit_samples",

@@ -1,7 +1,10 @@
 # Plugin Compliance Checks
 
-`sdn-flow` owns the canonical plugin API/ABI compliance checks for Space Data
-Network repositories.
+`space-data-module-sdk` owns the canonical plugin/module API and ABI
+compliance checks for Space Data Network repositories.
+
+`sdn-flow` consumes those checks and may provide thin wrappers so flow repos can
+run the same canonical validation without forking the rules.
 
 Use this tooling when a repo touches:
 
@@ -13,7 +16,8 @@ Use this tooling when a repo touches:
 
 ## Canonical Rules
 
-The compliance checker enforces the portable `sdn-flow` rules:
+The compliance checker enforces the portable module/plugin rules defined in
+`space-data-module-sdk`:
 
 - plugins are manifest-defined deployable units
 - plugins embed a FlatBuffer manifest
@@ -71,8 +75,8 @@ Other Space Data Network repositories should not fork this checker.
 
 They should:
 
-1. load the shared skill from `sdn-flow`
-2. call the shared checker from `sdn-flow`
+1. load the shared checker from `space-data-module-sdk`
+2. optionally call it through thin wrappers in `sdn-flow`
 3. keep only thin repo-local wrapper scripts if they want shorter commands
 
 That preserves one plugin ABI and one compliance implementation.

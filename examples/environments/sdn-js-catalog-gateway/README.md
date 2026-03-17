@@ -2,6 +2,11 @@
 
 This demo is the shared JS-host profile example for Node, Deno, and Bun.
 
+The checked-in `host-plan.json` uses `engine: "deno"` as the preferred
+single-file deployment target for the `sdn-js` host family. The same flow can
+still be evaluated against `node`, `bun`, or `browser` with explicit
+capability-compatibility reporting.
+
 It uses:
 
 - timer trigger

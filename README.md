@@ -19,6 +19,28 @@ It provides the portable pieces needed to:
 - authorize deployment with HD-wallet signatures
 - encrypt deployment payloads in transit with PKI
 
+## Module Contract Source Of Truth
+
+`sdn-flow` does not define the canonical module/plugin artifact contract.
+It consumes that contract from `space-data-module-sdk`.
+
+Source-of-truth module concerns live there:
+
+- plugin/module manifest schema and embedded manifest exports
+- module capability vocabulary
+- module-facing compliance checks
+- module signing and transport envelopes
+- single-file module bundle rules such as `sds.bundle`
+- module-facing hostcall/import ABI and conformance vectors
+
+`sdn-flow` owns flow-specific composition on top of those module contracts:
+
+- flow graph/program structure
+- compiled flow runtime descriptor and invocation ABI
+- flow scheduling and dispatch
+- dependency composition for multi-module runtimes
+- flow deployment clients and hosted runtime planning
+
 ## Core Model
 
 The project is built around a small set of hard rules:
@@ -46,14 +68,14 @@ The project is built around a small set of hard rules:
 - `designer`: UI-facing flow session, single-plugin flow creation helpers, and
   external-requirement summaries
 - `host`: portable hosted-runtime planning for startup order, local services,
-  and same-app/WebRTC/SDN transport bindings
-- `auth`: canonical deployment authorization payloads and HD-wallet signature
-  helpers
-- `transport`: PKI-based encrypted transport envelopes
+  and same-app/WebRTC/SDN transport bindings, plus installed-plugin startup
+  helpers for JS-family hosts
+- `auth`: flow-facing wrappers over the canonical module authorization helpers
+- `transport`: flow-facing wrappers over the canonical module transport helpers
 - `deploy`: compiled artifact normalization and local/remote deployment client
 - `compiler`: signed-artifact catalog, native-WASM source generator, generated
   C++ source, and `emception` compiler adapter
-- `compliance`: shared plugin manifest / ABI compliance checks for SDN repos
+- `compliance`: wrappers around the canonical plugin/module compliance checks
 
 ## What The Package Does Not Do
 
@@ -128,6 +150,7 @@ const summary = summarizeHostedRuntimePlan({
   hostId: "orbpro-browser",
   hostKind: "orbpro",
   adapter: "sdn-js",
+  engine: "browser",
   runtimes: [
     {
       runtimeId: "license-service",
@@ -146,6 +169,34 @@ const summary = summarizeHostedRuntimePlan({
   ],
 });
 ```
+
+For the shared JS host family, keep one adapter (`sdn-js`) and vary the engine
+explicitly per environment such as `browser`, `deno`, `node`, or `bun`.
+This lets the same flow stay portable while compatibility reporting makes
+unsupported capabilities explicit for each engine.
+
+## Installed Plugin Startup
+
+JS-family hosts can now boot like a Node-RED-style installed-node runtime:
+discover installed plugin packages, register their handlers, load a flow
+program, and start draining frames through one bootstrap surface.
+
+```js
+import { createInstalledFlowHost } from "@digitalarsenal/sdn-flow";
+
+const host = createInstalledFlowHost({
+  program,
+  pluginRootDirectories: ["./examples/plugins"],
+});
+
+await host.start();
+```
+
+Filesystem discovery is optional. Browser or embedded hosts can pass in-memory
+plugin package descriptors instead of scanning directories. For Deno
+deployments, keep the host in the `sdn-js` adapter family with `engine: "deno"`
+so the same flow model can be compiled into a single-file host executable while
+still reporting capability gaps against browser or other engines.
 
 ## Deployment Flow
 
@@ -208,4 +259,5 @@ Default export names:
 The current repo contains the portable graph/manifest contracts, designer
 controller, authorization helpers, transport encryption helpers, deployment
 client, a native-WASM C++ source generator, and a portable `emception`
-compiler adapter for single-bundle C++ runtime builds.
+compiler adapter for single-bundle C++ runtime builds. Canonical module/plugin
+artifact rules are sourced from `space-data-module-sdk`.

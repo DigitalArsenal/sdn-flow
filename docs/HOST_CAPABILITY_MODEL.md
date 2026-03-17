@@ -2,18 +2,24 @@
 
 ## Purpose
 
-This document defines how compiled `sdn-flow` and OrbPro runtime artifacts ask
-for host functionality such as timers, clock, randomness, network access,
-filesystem access, pipes, protocol bindings, storage, and pubsub.
+This document defines how compiled `sdn-flow` runtimes consume the canonical
+module-level host capability model from `space-data-module-sdk` and project it
+onto flow-level runtime artifacts.
+
+The canonical module-facing capability vocabulary, module-facing hostcall ABI,
+and single-module conformance rules live in `space-data-module-sdk`.
+This document focuses on how `sdn-flow` composes those module contracts into
+compiled flow runtimes.
 
 The goal is to keep one runtime model across OrbPro, `sdn-js`, Go SDN, and
-WASI-style hosts without creating a different plugin ABI or a different deploy
-shape for each environment.
+WASI-style hosts without creating a different flow runtime model or a different
+deploy shape for each environment.
 
 ## Hard Rules
 
 1. Every deployable unit is one compiled WASM runtime artifact.
-2. Every module is a flow. A "single plugin" is a degenerate one-node flow.
+2. Every module is a flow. A "single plugin" is a degenerate one-node flow,
+   but its standalone artifact contract still comes from `space-data-module-sdk`.
 3. Hosts provide capabilities and placement, not business logic.
 4. Capability requirements must be explicit in manifests, flow programs,
    hosted-runtime plans, or deployment envelopes. Do not hide them in ad hoc

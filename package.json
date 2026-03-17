@@ -27,8 +27,8 @@
   ],
   "scripts": {
     "build:runtime-abi": "node scripts/build-runtime-abi.mjs",
-    "test": "node --test",
-    "check:plugin-compliance": "node tools/run-plugin-compliance-check.mjs --repo-root ."
+    "test": "npm run check:plugin-compliance && node --test",
+    "check:plugin-compliance": "node scripts/check-shared-module-compliance.mjs"
   },
   "keywords": [
     "flow",
@@ -49,7 +49,8 @@
   },
   "homepage": "https://github.com/DigitalArsenal/sdn-flow",
   "dependencies": {
-    "hd-wallet-wasm": "^1.5.4"
+    "hd-wallet-wasm": "^1.5.4",
+    "space-data-module-sdk": "file:../space-data-module-sdk"
   },
   "devDependencies": {
     "flatbuffers": "^25.9.23"

@@ -2,6 +2,7 @@
   "hostId": "wasmedge-edge-node",
   "hostKind": "wasmedge",
   "adapter": "host-internal",
+  "engine": "wasi",
   "description": "Extension-backed UDP ingest flow for a WasmEdge-style host profile.",
   "disconnectedCapable": true,
   "runtimes": [

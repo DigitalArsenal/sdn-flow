@@ -6,6 +6,8 @@ export {
   loadComplianceConfig,
   RecommendedCapabilityIds,
   resolveManifestFiles,
+  validateArtifactWithStandards,
+  validateManifestWithStandards,
   validatePluginArtifact,
   validatePluginManifest,
-} from "./pluginCompliance.js";
+} from "space-data-module-sdk/compliance";

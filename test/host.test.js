@@ -13,6 +13,7 @@ import {
   HostedRuntimeAdapter,
   HostedRuntimeAuthority,
   HostedRuntimeBindingDirection,
+  HostedRuntimeEngine,
   HostedRuntimeKind,
   HostedRuntimeStartupPhase,
   HostedRuntimeTransport,
@@ -39,6 +40,7 @@ test("host plan models an early-start local licensing runtime for disconnected O
     hostId: "orbpro-browser",
     hostKind: "orbpro",
     adapter: HostedRuntimeAdapter.SDN_JS,
+    engine: HostedRuntimeEngine.BROWSER,
     runtimes: [
       {
         runtimeId: "license-service",
@@ -96,6 +98,7 @@ test("host plan models an early-start local licensing runtime for disconnected O
       runtimeId: "license-service",
       startupPhase: HostedRuntimeStartupPhase.EARLY,
       adapter: HostedRuntimeAdapter.SDN_JS,
+      engine: HostedRuntimeEngine.BROWSER,
     },
   ]);
   assert.equal(summary.adapters.includes(HostedRuntimeAdapter.SDN_JS), true);
@@ -108,6 +111,27 @@ test("host plan models an early-start local licensing runtime for disconnected O
     true,
   );
   assert.equal(summary.disconnectedCapable, true);
+  assert.equal(summary.engine, HostedRuntimeEngine.BROWSER);
+  assert.deepEqual(summary.runtimeCompatibility, [
+    {
+      runtimeId: "license-service",
+      adapter: HostedRuntimeAdapter.SDN_JS,
+      engine: HostedRuntimeEngine.BROWSER,
+      supportedCapabilities: summary.runtimeCompatibility[0].supportedCapabilities,
+      requiredCapabilities: [],
+      unsupportedCapabilities: [],
+      ok: true,
+    },
+    {
+      runtimeId: "orbpro-session",
+      adapter: HostedRuntimeAdapter.SDN_JS,
+      engine: HostedRuntimeEngine.BROWSER,
+      supportedCapabilities: summary.runtimeCompatibility[1].supportedCapabilities,
+      requiredCapabilities: [],
+      unsupportedCapabilities: [],
+      ok: true,
+    },
+  ]);
 });
 
 test("plugin hosted runtimes default to compiled-wasm execution", () => {

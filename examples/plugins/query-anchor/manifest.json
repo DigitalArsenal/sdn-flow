@@ -3,6 +3,8 @@
   "name": "ISS Radius Query Builder",
   "version": "1.0.0",
   "pluginFamily": "analysis",
+  "capabilities": [],
+  "externalInterfaces": [],
   "methods": [
     {
       "methodId": "build_radius_query",

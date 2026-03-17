@@ -2,14 +2,16 @@
 
 ## Goal
 
-`sdn-flow` is the canonical plugin/flow runtime model. Compatibility layers
-exist only to bridge older hosts and older metadata formats into that model.
+`space-data-module-sdk` is the canonical module/plugin artifact model, and
+`sdn-flow` is the canonical flow-composition model built on top of it.
+Compatibility layers exist only to bridge older hosts and older metadata
+formats into those models.
 
 ## What Stays Canonical
 
 These remain canonical:
 
-- typed manifest-driven methods
+- typed manifest-driven methods from the shared module contract
 - schema-tagged frame streams
 - embedded FlatBuffer manifests
 - compiled single-WASM flow deployment artifacts

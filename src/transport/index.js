@@ -4,4 +4,4 @@ export {
   encryptBytesForRecipient,
   encryptJsonForRecipient,
   generateX25519Keypair,
-} from "./pki.js";
+} from "space-data-module-sdk/transport";

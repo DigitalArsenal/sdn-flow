@@ -3,6 +3,9 @@
 ## Purpose
 
 The manifest is the canonical description of a plugin's runtime contract.
+Its schema and canonical validation rules are sourced from
+`space-data-module-sdk`; this document explains how `sdn-flow` consumes that
+module contract.
 
 It should be treated as:
 

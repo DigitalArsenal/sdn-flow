@@ -2,6 +2,7 @@
   "hostId": "orbpro-browser",
   "hostKind": "orbpro",
   "adapter": "sdn-js",
+  "engine": "browser",
   "description": "Browser-hosted compiled OMM cache flow.",
   "disconnectedCapable": false,
   "runtimes": [

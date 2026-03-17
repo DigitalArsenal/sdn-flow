@@ -3,6 +3,8 @@
   "name": "Basic Propagator",
   "version": "0.1.0",
   "pluginFamily": "propagator",
+  "capabilities": [],
+  "externalInterfaces": [],
   "methods": [
     {
       "methodId": "propagate",

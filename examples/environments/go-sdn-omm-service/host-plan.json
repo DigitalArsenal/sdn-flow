@@ -2,6 +2,7 @@
   "hostId": "sdn-go-node",
   "hostKind": "go-sdn",
   "adapter": "go-sdn",
+  "engine": "go",
   "description": "Go-hosted OMM service flow with persistent storage and outbound SDN notifications.",
   "disconnectedCapable": true,
   "runtimes": [
