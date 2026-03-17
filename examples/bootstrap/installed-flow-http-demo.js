@@ -133,6 +133,7 @@ export function createBootstrapDemoWorkspace(options = {}) {
     fetch: {
       baseUrl: url.origin,
     },
+    engine: options.engine ?? null,
   };
 }
 

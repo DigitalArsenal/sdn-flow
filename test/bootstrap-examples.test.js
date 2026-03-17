@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import path from "node:path";
 
 import { createBootstrapDemoWorkspace } from "../examples/bootstrap/installed-flow-http-demo.js";
+import {
+  AutoBootstrapWorkspacePath,
+  startAutoBootstrapExample,
+} from "../examples/bootstrap/start-auto-host.mjs";
 import {
   createBrowserBootstrapWorkspace,
   startBrowserBootstrapExample,
@@ -112,6 +117,32 @@ test("Node and browser bootstrap scripts can start with injected host hooks", as
     {
       eventType: "fetch",
       listener: addEventListenerCalls[0].listener,
+    },
+  ]);
+});
+
+test("auto-host bootstrap script dispatches through the environment-neutral starter", async () => {
+  const calls = [];
+  const host = await startAutoBootstrapExample({
+    startDenoHost: async (options) => {
+      calls.push({
+        platform: "deno",
+        workspacePath: options.workspacePath,
+        engine: options.engine,
+      });
+      return {
+        platform: "deno",
+      };
+    },
+  });
+
+  assert.match(AutoBootstrapWorkspacePath, /sdn-js-catalog-gateway\/workspace\.json$/);
+  assert.equal(host.platform, "deno");
+  assert.deepEqual(calls, [
+    {
+      platform: "deno",
+      workspacePath: path.resolve(AutoBootstrapWorkspacePath),
+      engine: "deno",
     },
   ]);
 });

@@ -1,7 +1,7 @@
 # Bootstrap Examples
 
 These are minimal runnable host-entrypoint examples for the concrete
-installed-flow adapters.
+installed-flow adapters, plus one environment-neutral auto-host launcher.
 
 They intentionally use one in-memory HTTP responder plugin instead of the
 larger environment demos, so every script here is actually runnable without a
@@ -19,9 +19,11 @@ Files:
   Minimal Bun HTTP host bootstrap using `startInstalledFlowBunHttpHost(...)`.
 - `start-browser-worker.mjs`
   Minimal browser/worker bootstrap using `startInstalledFlowBrowserFetchHost(...)`.
+- `start-auto-host.mjs`
+  Environment-neutral bootstrap using `startInstalledFlowAutoHost(...)` and a checked-in `workspace.json`.
 
 These examples are meant to show the host startup shape directly:
 
 1. define or load one workspace
-2. hand it to the concrete host adapter
-3. let the adapter own listener registration for that environment
+2. hand it to the concrete host adapter, or the auto-host dispatcher
+3. let the selected adapter own listener registration for that environment

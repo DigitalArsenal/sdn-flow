@@ -64,3 +64,9 @@
    - `startInstalledFlowAutoHost(...)`
    - dispatch to browser, Deno, Bun, and Node startup surfaces
    - explicit starter injection hooks for tests and embedded hosts
+
+21. Add a checked-in auto-host bootstrap script that starts from `workspace.json` through the environment-neutral startup surface. (done)
+   Done:
+   - `examples/bootstrap/start-auto-host.mjs`
+   - direct startup from the checked-in `sdn-js-catalog-gateway/workspace.json`
+   - bootstrap coverage proving the example dispatches through `startInstalledFlowAutoHost(...)`
