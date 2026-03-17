@@ -470,14 +470,14 @@ export function createInstalledFlowHost(options = {}) {
     return Array.from(packagesByPluginId.values());
   }
 
-  function collectRequiredPluginIds() {
-    if (!program) {
+  function collectRequiredPluginIds(programValue = program) {
+    if (!programValue) {
       return null;
     }
     const requiredPluginIds = new Set(
-      normalizeStringArray(program.requiredPlugins),
+      normalizeStringArray(programValue.requiredPlugins),
     );
-    for (const node of program.nodes ?? []) {
+    for (const node of programValue.nodes ?? []) {
       if (node.pluginId) {
         requiredPluginIds.add(node.pluginId);
       }
@@ -494,48 +494,134 @@ export function createInstalledFlowHost(options = {}) {
     );
   }
 
-  async function start() {
-    if (!started) {
-      const explicitPackages = Array.isArray(options.pluginPackages)
-        ? options.pluginPackages
-        : [];
-      discoveredPackages =
-        options.discover === false
-          ? []
-          : await discoverInstalledPluginPackages({
-              rootDirectories:
-                options.pluginRootDirectories ?? options.rootDirectories ?? [],
-              moduleCandidates: options.moduleCandidates,
-            });
-      const allPackages = dedupePackages([
-        ...discoveredPackages,
-        ...explicitPackages,
-      ]);
-      const requiredPluginIds = collectRequiredPluginIds();
-      const selectedPackages = allPackages.filter((pluginPackage) => {
-        if (requiredPluginIds && requiredPluginIds.size > 0) {
-          return requiredPluginIds.has(pluginPackage.pluginId);
-        }
-        return isLoadablePluginPackage(pluginPackage);
-      });
-      loadedPackages = await registerInstalledPluginPackages({
-        registry,
-        pluginPackages: selectedPackages,
-        importModule: options.importModule,
-        context: options.context ?? null,
-      });
-      if (program) {
-        runtime.loadProgram(program);
-      }
-      started = true;
-    }
-
+  function buildStartupSummary() {
     return {
       started,
       programId: runtime.getProgram()?.programId ?? program?.programId ?? null,
       discoveredPackages: discoveredPackages.map((item) => item.pluginId),
       registeredPluginIds: registry.listPlugins().map((item) => item.pluginId),
     };
+  }
+
+  async function resolveSelectedPluginPackages(refreshOptions = {}) {
+    const nextProgram =
+      refreshOptions.program !== undefined && refreshOptions.program !== null
+        ? normalizeProgram(refreshOptions.program)
+        : program;
+    const explicitPackages = Array.isArray(refreshOptions.pluginPackages)
+      ? refreshOptions.pluginPackages
+      : Array.isArray(options.pluginPackages)
+        ? options.pluginPackages
+        : [];
+    const shouldDiscover =
+      refreshOptions.discover ?? options.discover ?? true;
+    const nextDiscoveredPackages =
+      shouldDiscover === false
+        ? []
+        : await discoverInstalledPluginPackages({
+            rootDirectories:
+              refreshOptions.pluginRootDirectories ??
+              refreshOptions.rootDirectories ??
+              options.pluginRootDirectories ??
+              options.rootDirectories ??
+              [],
+            moduleCandidates:
+              refreshOptions.moduleCandidates ?? options.moduleCandidates,
+          });
+    const allPackages = dedupePackages([
+      ...nextDiscoveredPackages,
+      ...explicitPackages,
+    ]);
+    const requiredPluginIds = collectRequiredPluginIds(nextProgram);
+    const selectedPackages = allPackages.filter((pluginPackage) => {
+      if (requiredPluginIds && requiredPluginIds.size > 0) {
+        return requiredPluginIds.has(pluginPackage.pluginId);
+      }
+      return isLoadablePluginPackage(pluginPackage);
+    });
+
+    return {
+      nextProgram,
+      nextDiscoveredPackages,
+      selectedPackages,
+    };
+  }
+
+  async function refreshPlugins(refreshOptions = {}) {
+    const {
+      nextProgram,
+      nextDiscoveredPackages,
+      selectedPackages,
+    } = await resolveSelectedPluginPackages(refreshOptions);
+    const importModule = refreshOptions.importModule ?? options.importModule;
+    const context =
+      refreshOptions.context !== undefined
+        ? refreshOptions.context
+        : options.context ?? null;
+    const nextLoadedPackages = [];
+
+    for (const pluginPackage of selectedPackages) {
+      nextLoadedPackages.push(
+        await loadInstalledPluginPackage(pluginPackage, {
+          importModule,
+          context,
+        }),
+      );
+    }
+
+    const managedPluginIds = new Set(
+      loadedPackages.map(
+        (item) => item.manifest?.pluginId ?? item.pluginPackage?.pluginId,
+      ),
+    );
+    for (const loaded of nextLoadedPackages) {
+      const pluginId = loaded.manifest.pluginId;
+      if (!managedPluginIds.has(pluginId) && registry.getPlugin(pluginId)) {
+        throw new Error(
+          `Installed flow host cannot refresh plugin "${pluginId}" because the registry already contains an externally managed plugin with the same id.`,
+        );
+      }
+    }
+
+    const validationRegistry = new MethodRegistry();
+    for (const loaded of nextLoadedPackages) {
+      validationRegistry.registerPlugin({
+        manifest: loaded.manifest,
+        handlers: loaded.handlers,
+        plugin: loaded.module ?? loaded.pluginPackage,
+      });
+    }
+
+    for (const pluginId of managedPluginIds) {
+      registry.unregisterPlugin(pluginId);
+    }
+    for (const loaded of nextLoadedPackages) {
+      registry.registerPlugin({
+        manifest: loaded.manifest,
+        handlers: loaded.handlers,
+        plugin: loaded.module ?? loaded.pluginPackage,
+      });
+    }
+
+    discoveredPackages = nextDiscoveredPackages;
+    loadedPackages = nextLoadedPackages;
+    program = nextProgram;
+    if (program) {
+      runtime.loadProgram(program);
+    }
+    if (refreshOptions.clearSinkOutputs === true) {
+      sinkEvents.splice(0, sinkEvents.length);
+    }
+    started = true;
+
+    return buildStartupSummary();
+  }
+
+  async function start() {
+    if (!started) {
+      await refreshPlugins();
+    }
+    return buildStartupSummary();
   }
 
   return {
@@ -558,6 +644,9 @@ export function createInstalledFlowHost(options = {}) {
     },
     async start() {
       return start();
+    },
+    async refreshPlugins(refreshOptions = {}) {
+      return refreshPlugins(refreshOptions);
     },
     loadProgram(nextProgram) {
       program = normalizeProgram(nextProgram);
@@ -748,6 +837,19 @@ export function createInstalledFlowService(options = {}) {
       }
       return {
         ...startup,
+        timerTriggers: listTimerTriggers(),
+        httpRoutes: listHttpRoutes(),
+      };
+    },
+    async refresh(refreshOptions = {}) {
+      const restartTimers = started && options.autoStartTimers !== false;
+      stopTimerServices();
+      const refreshResult = await host.refreshPlugins(refreshOptions);
+      if (restartTimers) {
+        startTimerServices();
+      }
+      return {
+        ...refreshResult,
         timerTriggers: listTimerTriggers(),
         httpRoutes: listHttpRoutes(),
       };

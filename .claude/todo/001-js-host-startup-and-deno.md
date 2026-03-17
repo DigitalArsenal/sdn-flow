@@ -16,9 +16,11 @@
    - `createInstalledFlowService(...)`
    - portable timer trigger scheduling
    - portable HTTP request trigger dispatch
+   - `host.refreshPlugins(...)`
+   - `service.refresh(...)`
    Next:
-   - package install/update lifecycle beyond local discovery
-   - host adapters that bind the portable service surface to real Deno/Node/browser listeners
+   - external package-manager and persistence integration beyond local discovery/refresh
+   - host adapters beyond fetch-style `Request`/`Response` bindings
 
 7. Add Deno-oriented host-plan support so `sdn-js` deployments can declare `engine: "deno"` and document single-file deployment intent. (done)
 

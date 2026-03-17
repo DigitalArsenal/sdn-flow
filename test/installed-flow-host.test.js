@@ -462,3 +462,119 @@ test("installed flow service maps HTTP requests into portable trigger dispatch",
     /No HTTP trigger matches/,
   );
 });
+
+test("installed flow service can refresh installed packages and timer bindings", async () => {
+  const scheduledIntervals = [];
+  const clearedHandles = [];
+  const buildProgram = (triggerId, intervalMs) => ({
+    programId: `com.digitalarsenal.examples.refresh-service.${triggerId}`,
+    nodes: [
+      {
+        nodeId: "ticker",
+        pluginId: "com.digitalarsenal.examples.memory.refreshable",
+        methodId: "emit_tick",
+      },
+    ],
+    edges: [],
+    triggers: [
+      {
+        triggerId,
+        kind: "timer",
+        defaultIntervalMs: intervalMs,
+        acceptedTypes: [
+          {
+            schemaName: "TimerTick.fbs",
+            fileIdentifier: "TICK",
+          },
+        ],
+      },
+    ],
+    triggerBindings: [
+      {
+        triggerId,
+        targetNodeId: "ticker",
+        targetPortId: "tick",
+      },
+    ],
+    requiredPlugins: ["com.digitalarsenal.examples.memory.refreshable"],
+  });
+  const buildPluginPackage = (versionByte) => ({
+    manifest: {
+      pluginId: "com.digitalarsenal.examples.memory.refreshable",
+      name: "Refreshable In-Memory Timer",
+      version: "1.0.0",
+      pluginFamily: "analysis",
+      methods: [
+        {
+          methodId: "emit_tick",
+          inputPorts: [{ portId: "tick", required: true }],
+          outputPorts: [{ portId: "out" }],
+          maxBatch: 8,
+          drainPolicy: "drain-to-empty",
+        },
+      ],
+    },
+    handlers: {
+      emit_tick({ inputs }) {
+        return {
+          outputs: inputs.map((frame) => ({
+            ...frame,
+            portId: "out",
+            payload: Uint8Array.of(versionByte),
+          })),
+          backlogRemaining: 0,
+          yielded: false,
+        };
+      },
+    },
+  });
+
+  const service = createInstalledFlowService({
+    program: buildProgram("tick", 100),
+    discover: false,
+    pluginPackages: [buildPluginPackage(1)],
+    nowFn() {
+      return 1700000000100;
+    },
+    setIntervalFn(callback, intervalMs) {
+      const handle = { callback, intervalMs };
+      scheduledIntervals.push(handle);
+      return handle;
+    },
+    clearIntervalFn(handle) {
+      clearedHandles.push(handle);
+    },
+  });
+
+  await service.start();
+
+  assert.equal(scheduledIntervals.length, 1);
+  assert.equal(scheduledIntervals[0].intervalMs, 100);
+
+  const refreshResult = await service.refresh({
+    program: buildProgram("tock", 500),
+    pluginPackages: [buildPluginPackage(2)],
+    clearSinkOutputs: true,
+  });
+
+  assert.equal(clearedHandles.length, 1);
+  assert.equal(scheduledIntervals.length, 2);
+  assert.equal(scheduledIntervals[1].intervalMs, 500);
+  assert.deepEqual(refreshResult.timerTriggers, [
+    {
+      triggerId: "tock",
+      source: null,
+      defaultIntervalMs: 500,
+      description: null,
+      active: true,
+    },
+  ]);
+
+  scheduledIntervals[1].callback();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const outputs = service.host.getSinkOutputsSince(0);
+  assert.equal(outputs.length, 1);
+  assert.deepEqual(Array.from(outputs[0].frame.payload), [2]);
+  assert.equal(outputs[0].frame.metadata.triggerId, "tock");
+});

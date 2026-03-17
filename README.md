@@ -233,6 +233,11 @@ HTTP trigger input, runs the flow, and returns a web-standard `Response`, which
 lets Deno, browser workers, Bun, and modern Node share the same host entrypoint
 shape.
 
+Installed hosts can also rescan and rebind their managed plugin set in place
+through `host.refreshPlugins(...)` or `service.refresh(...)`, which is the
+current package-level equivalent of updating installed nodes and reloading the
+runtime without changing the flow ABI.
+
 ## Deployment Flow
 
 The package uses one deployment model for both local and remote targets:
