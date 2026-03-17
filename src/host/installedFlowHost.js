@@ -4,7 +4,14 @@ import { pathToFileURL } from "node:url";
 
 import { summarizeProgramRequirements } from "../designer/requirements.js";
 import { findManifestFiles } from "../compliance/index.js";
-import { FlowRuntime, MethodRegistry, normalizeManifest, normalizeProgram } from "../runtime/index.js";
+import {
+  FlowRuntime,
+  MethodRegistry,
+  TriggerKind,
+  normalizeFrame,
+  normalizeManifest,
+  normalizeProgram,
+} from "../runtime/index.js";
 import {
   HostedRuntimeAdapter,
   HostedRuntimeAuthority,
@@ -54,6 +61,67 @@ function toSortedUniqueStrings(values) {
 
 function normalizeMetadata(value) {
   return isObject(value) ? { ...value } : {};
+}
+
+function firstAcceptedTypeForTrigger(trigger) {
+  return Array.isArray(trigger?.acceptedTypes) && trigger.acceptedTypes.length > 0
+    ? trigger.acceptedTypes[0]
+    : null;
+}
+
+function buildBaseTriggerFrame(trigger, input = {}) {
+  const normalizedMetadata = normalizeMetadata(input.metadata);
+  return normalizeFrame({
+    typeRef: input.typeRef ?? firstAcceptedTypeForTrigger(trigger) ?? {},
+    traceId: input.traceId ?? null,
+    streamId: Number(input.streamId ?? 0),
+    sequence: Number(input.sequence ?? 0),
+    payload: input.payload ?? null,
+    metadata: {
+      triggerId: trigger.triggerId,
+      triggerKind: trigger.kind,
+      triggerSource: trigger.source ?? null,
+      ...normalizedMetadata,
+    },
+  });
+}
+
+function buildTimerTriggerFrame(trigger, input = {}) {
+  const firedAt = Number(input.firedAt ?? Date.now());
+  return buildBaseTriggerFrame(trigger, {
+    ...input,
+    traceId: input.traceId ?? `timer:${trigger.triggerId}:${firedAt}`,
+    sequence: input.sequence ?? firedAt,
+    metadata: {
+      firedAt,
+      description: trigger.description ?? null,
+      ...(input.metadata ?? {}),
+    },
+  });
+}
+
+function buildHttpRequestTriggerFrame(trigger, request = {}) {
+  const method = normalizeString(request.method, "GET");
+  const pathName =
+    normalizeString(request.path, null) ?? trigger.source ?? "/";
+  const requestId =
+    normalizeString(request.requestId, null) ??
+    `http:${method}:${pathName}:${Date.now()}`;
+  return buildBaseTriggerFrame(trigger, {
+    ...request,
+    traceId: request.traceId ?? requestId,
+    sequence: request.sequence ?? 1,
+    payload: request.payload ?? request.body ?? null,
+    metadata: {
+      requestId,
+      method,
+      path: pathName,
+      headers: isObject(request.headers) ? { ...request.headers } : {},
+      query: isObject(request.query) ? { ...request.query } : {},
+      description: trigger.description ?? null,
+      ...(request.metadata ?? {}),
+    },
+  });
 }
 
 function resolveHandlerRecord(moduleExports, manifest, pluginPackage, options = {}) {
@@ -361,13 +429,24 @@ export function createInstalledFlowHostedRuntimePlan(options = {}) {
 
 export function createInstalledFlowHost(options = {}) {
   const registry = options.registry ?? new MethodRegistry();
+  const sinkEvents = [];
+  const userOnSinkOutput =
+    options.onSinkOutput ?? options.runtimeOptions?.onSinkOutput ?? null;
   const runtime =
     options.runtime ??
     new FlowRuntime({
       registry,
       ...(options.runtimeOptions ?? {}),
-      onSinkOutput:
-        options.onSinkOutput ?? options.runtimeOptions?.onSinkOutput ?? null,
+      onSinkOutput(event) {
+        const sinkEvent = {
+          index: sinkEvents.length,
+          ...event,
+        };
+        sinkEvents.push(sinkEvent);
+        if (typeof userOnSinkOutput === "function") {
+          userOnSinkOutput(sinkEvent);
+        }
+      },
     });
 
   let started = false;
@@ -468,6 +547,15 @@ export function createInstalledFlowHost(options = {}) {
     getLoadedPackages() {
       return loadedPackages.map((item) => item.pluginPackage);
     },
+    getSinkEventCount() {
+      return sinkEvents.length;
+    },
+    getSinkOutputsSince(index = 0) {
+      return sinkEvents.slice(Math.max(0, Number(index) || 0));
+    },
+    clearSinkOutputs() {
+      sinkEvents.splice(0, sinkEvents.length);
+    },
     async start() {
       return start();
     },
@@ -502,8 +590,190 @@ export function createInstalledFlowHost(options = {}) {
   };
 }
 
+export function createInstalledFlowService(options = {}) {
+  const host = options.host ?? createInstalledFlowHost(options);
+  const timerHandles = new Map();
+  const setIntervalFn =
+    options.setIntervalFn ??
+    globalThis.setInterval?.bind(globalThis) ??
+    null;
+  const clearIntervalFn =
+    options.clearIntervalFn ??
+    globalThis.clearInterval?.bind(globalThis) ??
+    null;
+  const nowFn = options.nowFn ?? Date.now;
+  const onError = options.onError ?? null;
+  let started = false;
+
+  function getProgram() {
+    const program = host.getProgram();
+    if (!program) {
+      throw new Error("Installed flow service has no loaded program.");
+    }
+    return program;
+  }
+
+  function listTriggersByKind(kind) {
+    return getProgram().triggers.filter((trigger) => trigger.kind === kind);
+  }
+
+  function resolveHttpTrigger(request = {}) {
+    const program = getProgram();
+    const requestedTriggerId = normalizeString(request.triggerId, null);
+    const requestedPath = normalizeString(request.path, null);
+    const trigger = program.triggers.find((candidate) => {
+      if (candidate.kind !== TriggerKind.HTTP_REQUEST) {
+        return false;
+      }
+      if (requestedTriggerId) {
+        return candidate.triggerId === requestedTriggerId;
+      }
+      return normalizeString(candidate.source, null) === requestedPath;
+    });
+    if (!trigger) {
+      throw new Error(
+        `No HTTP trigger matches ${requestedTriggerId ?? requestedPath ?? "<unknown>"}.`,
+      );
+    }
+    return trigger;
+  }
+
+  async function dispatchTriggerFrames(triggerId, frames) {
+    await host.start();
+    const startIndex = host.getSinkEventCount();
+    host.enqueueTriggerFrames(triggerId, frames);
+    const drainResult = await host.drain(options.drainOptions);
+    return {
+      triggerId,
+      outputs: host.getSinkOutputsSince(startIndex),
+      ...drainResult,
+    };
+  }
+
+  async function dispatchTimerTrigger(triggerId, input = {}) {
+    const trigger = listTriggersByKind(TriggerKind.TIMER).find(
+      (candidate) => candidate.triggerId === triggerId,
+    );
+    if (!trigger) {
+      throw new Error(`Unknown timer trigger "${triggerId}".`);
+    }
+    return dispatchTriggerFrames(triggerId, [
+      buildTimerTriggerFrame(trigger, {
+        ...input,
+        firedAt: input.firedAt ?? nowFn(),
+      }),
+    ]);
+  }
+
+  async function handleHttpRequest(request = {}) {
+    const trigger = resolveHttpTrigger(request);
+    const response = await dispatchTriggerFrames(trigger.triggerId, [
+      buildHttpRequestTriggerFrame(trigger, request),
+    ]);
+    return {
+      triggerId: trigger.triggerId,
+      route: trigger.source ?? null,
+      ...response,
+    };
+  }
+
+  function listTimerTriggers() {
+    return listTriggersByKind(TriggerKind.TIMER).map((trigger) => ({
+      triggerId: trigger.triggerId,
+      source: trigger.source,
+      defaultIntervalMs: trigger.defaultIntervalMs,
+      description: trigger.description,
+      active: timerHandles.has(trigger.triggerId),
+    }));
+  }
+
+  function listHttpRoutes() {
+    return listTriggersByKind(TriggerKind.HTTP_REQUEST).map((trigger) => ({
+      triggerId: trigger.triggerId,
+      path: trigger.source ?? null,
+      description: trigger.description,
+    }));
+  }
+
+  function startTimerServices() {
+    if (setIntervalFn === null || clearIntervalFn === null) {
+      return;
+    }
+    for (const trigger of listTriggersByKind(TriggerKind.TIMER)) {
+      if (timerHandles.has(trigger.triggerId)) {
+        continue;
+      }
+      const intervalMs = Number(trigger.defaultIntervalMs ?? 0);
+      if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
+        continue;
+      }
+      const normalizedIntervalMs = Math.max(1, Math.trunc(intervalMs));
+      const handle = setIntervalFn(() => {
+        void dispatchTimerTrigger(trigger.triggerId).catch((error) => {
+          if (typeof onError === "function") {
+            onError(error, {
+              source: "timer",
+              triggerId: trigger.triggerId,
+            });
+          }
+        });
+      }, normalizedIntervalMs);
+      timerHandles.set(trigger.triggerId, {
+        handle,
+        intervalMs: normalizedIntervalMs,
+      });
+    }
+  }
+
+  function stopTimerServices() {
+    if (clearIntervalFn === null) {
+      timerHandles.clear();
+      return;
+    }
+    for (const { handle } of timerHandles.values()) {
+      clearIntervalFn(handle);
+    }
+    timerHandles.clear();
+  }
+
+  return {
+    host,
+    async start() {
+      const startup = await host.start();
+      if (!started) {
+        if (options.autoStartTimers !== false) {
+          startTimerServices();
+        }
+        started = true;
+      }
+      return {
+        ...startup,
+        timerTriggers: listTimerTriggers(),
+        httpRoutes: listHttpRoutes(),
+      };
+    },
+    stop() {
+      stopTimerServices();
+      started = false;
+    },
+    dispatchTriggerFrames,
+    dispatchTimerTrigger,
+    handleHttpRequest,
+    listTimerTriggers,
+    listHttpRoutes,
+    getServiceSummary() {
+      return {
+        started,
+        timerTriggers: listTimerTriggers(),
+        httpRoutes: listHttpRoutes(),
+      };
+    },
+  };
+}
+
 export default {
   createInstalledFlowHost,
+  createInstalledFlowService,
   createInstalledFlowHostedRuntimePlan,
   discoverInstalledPluginPackages,
   loadInstalledPluginPackage,

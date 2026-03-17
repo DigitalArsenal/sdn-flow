@@ -13,9 +13,12 @@
    - `createInstalledFlowHost(...)`
    - package discovery and registration
    - flow program load + runtime drain bootstrap
+   - `createInstalledFlowService(...)`
+   - portable timer trigger scheduling
+   - portable HTTP request trigger dispatch
    Next:
-   - long-running timers / HTTP listeners / runtime services that remain active after startup
    - package install/update lifecycle beyond local discovery
+   - host adapters that bind the portable service surface to real Deno/Node/browser listeners
 
 7. Add Deno-oriented host-plan support so `sdn-js` deployments can declare `engine: "deno"` and document single-file deployment intent. (done)
 

@@ -175,14 +175,17 @@ explicitly per environment such as `browser`, `deno`, `node`, or `bun`.
 This lets the same flow stay portable while compatibility reporting makes
 unsupported capabilities explicit for each engine.
 
-## Installed Plugin Startup
+## Installed Plugin Startup And Services
 
 JS-family hosts can now boot like a Node-RED-style installed-node runtime:
 discover installed plugin packages, register their handlers, load a flow
 program, and start draining frames through one bootstrap surface.
 
 ```js
-import { createInstalledFlowHost } from "@digitalarsenal/sdn-flow";
+import {
+  createInstalledFlowHost,
+  createInstalledFlowService,
+} from "@digitalarsenal/sdn-flow";
 
 const host = createInstalledFlowHost({
   program,
@@ -190,6 +193,17 @@ const host = createInstalledFlowHost({
 });
 
 await host.start();
+
+const service = createInstalledFlowService({
+  program,
+  pluginPackages,
+});
+
+await service.start();
+await service.handleHttpRequest({
+  path: "/download",
+  method: "GET",
+});
 ```
 
 Filesystem discovery is optional. Browser or embedded hosts can pass in-memory
@@ -197,6 +211,13 @@ plugin package descriptors instead of scanning directories. For Deno
 deployments, keep the host in the `sdn-js` adapter family with `engine: "deno"`
 so the same flow model can be compiled into a single-file host executable while
 still reporting capability gaps against browser or other engines.
+
+`createInstalledFlowService(...)` is the portable long-running layer on top of
+that bootstrap surface. It turns timer triggers into scheduled callbacks and
+maps inbound HTTP events into flow trigger dispatch without changing the flow
+ABI. Real hosts can bind those service methods to Deno `serve`, browser
+`fetch`-style events, Node listeners, or embedded host shims while keeping the
+same flow program and plugin package contract.
 
 ## Deployment Flow
 

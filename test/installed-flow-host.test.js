@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 import {
   createInstalledFlowHost,
   createInstalledFlowHostedRuntimePlan,
+  createInstalledFlowService,
   discoverInstalledPluginPackages,
   HostedRuntimeAdapter,
   HostedRuntimeEngine,
@@ -203,4 +204,261 @@ test("installed flow hosted runtime plans default to the Deno engine for sdn-js 
   assert.equal(plan.engine, HostedRuntimeEngine.DENO);
   assert.equal(plan.runtimes[0].engine, HostedRuntimeEngine.DENO);
   assert.equal(plan.runtimes[0].autoStart, true);
+});
+
+test("installed flow service auto-starts timer triggers with positive intervals", async () => {
+  const scheduledIntervals = [];
+  const clearedHandles = [];
+  const service = createInstalledFlowService({
+    program: {
+      programId: "com.digitalarsenal.examples.timer-service",
+      nodes: [
+        {
+          nodeId: "ticker",
+          pluginId: "com.digitalarsenal.examples.memory.timer",
+          methodId: "emit_tick",
+        },
+      ],
+      edges: [],
+      triggers: [
+        {
+          triggerId: "tick",
+          kind: "timer",
+          defaultIntervalMs: 250,
+          acceptedTypes: [
+            {
+              schemaName: "TimerTick.fbs",
+              fileIdentifier: "TICK",
+            },
+          ],
+        },
+        {
+          triggerId: "disabled",
+          kind: "timer",
+          defaultIntervalMs: 0,
+          acceptedTypes: [
+            {
+              schemaName: "TimerTick.fbs",
+              fileIdentifier: "TICK",
+            },
+          ],
+        },
+      ],
+      triggerBindings: [
+        {
+          triggerId: "tick",
+          targetNodeId: "ticker",
+          targetPortId: "tick",
+        },
+        {
+          triggerId: "disabled",
+          targetNodeId: "ticker",
+          targetPortId: "tick",
+        },
+      ],
+      requiredPlugins: ["com.digitalarsenal.examples.memory.timer"],
+    },
+    discover: false,
+    pluginPackages: [
+      {
+        manifest: {
+          pluginId: "com.digitalarsenal.examples.memory.timer",
+          name: "In-Memory Timer",
+          version: "1.0.0",
+          pluginFamily: "analysis",
+          methods: [
+            {
+              methodId: "emit_tick",
+              inputPorts: [{ portId: "tick", required: true }],
+              outputPorts: [{ portId: "out" }],
+              maxBatch: 8,
+              drainPolicy: "drain-to-empty",
+            },
+          ],
+        },
+        handlers: {
+          emit_tick({ inputs }) {
+            return {
+              outputs: inputs.map((frame) => ({
+                ...frame,
+                portId: "out",
+              })),
+              backlogRemaining: 0,
+              yielded: false,
+            };
+          },
+        },
+      },
+    ],
+    nowFn() {
+      return 1700000000000;
+    },
+    setIntervalFn(callback, intervalMs) {
+      const handle = { callback, intervalMs };
+      scheduledIntervals.push(handle);
+      return handle;
+    },
+    clearIntervalFn(handle) {
+      clearedHandles.push(handle);
+    },
+  });
+
+  const startup = await service.start();
+
+  assert.equal(scheduledIntervals.length, 1);
+  assert.equal(scheduledIntervals[0].intervalMs, 250);
+  assert.deepEqual(startup.timerTriggers, [
+    {
+      triggerId: "tick",
+      source: null,
+      defaultIntervalMs: 250,
+      description: null,
+      active: true,
+    },
+    {
+      triggerId: "disabled",
+      source: null,
+      defaultIntervalMs: 0,
+      description: null,
+      active: false,
+    },
+  ]);
+
+  scheduledIntervals[0].callback();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const outputs = service.host.getSinkOutputsSince(0);
+  assert.equal(outputs.length, 1);
+  assert.equal(outputs[0].frame.portId, "out");
+  assert.equal(outputs[0].frame.metadata.triggerId, "tick");
+  assert.equal(outputs[0].frame.metadata.triggerKind, "timer");
+  assert.equal(outputs[0].frame.metadata.firedAt, 1700000000000);
+
+  service.stop();
+
+  assert.equal(clearedHandles.length, 1);
+  assert.equal(service.getServiceSummary().started, false);
+  assert.deepEqual(service.listTimerTriggers(), [
+    {
+      triggerId: "tick",
+      source: null,
+      defaultIntervalMs: 250,
+      description: null,
+      active: false,
+    },
+    {
+      triggerId: "disabled",
+      source: null,
+      defaultIntervalMs: 0,
+      description: null,
+      active: false,
+    },
+  ]);
+});
+
+test("installed flow service maps HTTP requests into portable trigger dispatch", async () => {
+  const service = createInstalledFlowService({
+    program: {
+      programId: "com.digitalarsenal.examples.http-service",
+      nodes: [
+        {
+          nodeId: "responder",
+          pluginId: "com.digitalarsenal.examples.memory.http",
+          methodId: "serve_http_request",
+        },
+      ],
+      edges: [],
+      triggers: [
+        {
+          triggerId: "download",
+          kind: "http-request",
+          source: "/download",
+          acceptedTypes: [
+            {
+              schemaName: "HttpRequest.fbs",
+              fileIdentifier: "HREQ",
+            },
+          ],
+        },
+      ],
+      triggerBindings: [
+        {
+          triggerId: "download",
+          targetNodeId: "responder",
+          targetPortId: "request",
+        },
+      ],
+      requiredPlugins: ["com.digitalarsenal.examples.memory.http"],
+    },
+    discover: false,
+    pluginPackages: [
+      {
+        manifest: {
+          pluginId: "com.digitalarsenal.examples.memory.http",
+          name: "In-Memory HTTP",
+          version: "1.0.0",
+          pluginFamily: "responder",
+          methods: [
+            {
+              methodId: "serve_http_request",
+              inputPorts: [{ portId: "request", required: true }],
+              outputPorts: [{ portId: "response" }],
+              maxBatch: 8,
+              drainPolicy: "drain-to-empty",
+            },
+          ],
+        },
+        handlers: {
+          serve_http_request({ inputs }) {
+            return {
+              outputs: inputs.map((frame) => ({
+                ...frame,
+                portId: "response",
+                metadata: {
+                  ...frame.metadata,
+                  statusCode: 200,
+                },
+              })),
+              backlogRemaining: 0,
+              yielded: false,
+            };
+          },
+        },
+      },
+    ],
+  });
+
+  const startup = await service.start();
+  const response = await service.handleHttpRequest({
+    path: "/download",
+    method: "POST",
+    headers: {
+      "content-type": "application/octet-stream",
+    },
+    body: new Uint8Array([7, 8, 9]),
+  });
+
+  assert.deepEqual(startup.httpRoutes, [
+    {
+      triggerId: "download",
+      path: "/download",
+      description: null,
+    },
+  ]);
+  assert.deepEqual(service.listHttpRoutes(), startup.httpRoutes);
+  assert.equal(response.triggerId, "download");
+  assert.equal(response.route, "/download");
+  assert.equal(response.outputs.length, 1);
+  assert.equal(response.outputs[0].frame.portId, "response");
+  assert.equal(response.outputs[0].frame.metadata.method, "POST");
+  assert.equal(response.outputs[0].frame.metadata.path, "/download");
+  assert.equal(response.outputs[0].frame.metadata.statusCode, 200);
+  assert.deepEqual(Array.from(response.outputs[0].frame.payload), [7, 8, 9]);
+
+  await assert.rejects(
+    service.handleHttpRequest({
+      path: "/missing",
+    }),
+    /No HTTP trigger matches/,
+  );
 });

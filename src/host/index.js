@@ -32,6 +32,7 @@ export {
 } from "./profile.js";
 export {
   createInstalledFlowHost,
+  createInstalledFlowService,
   createInstalledFlowHostedRuntimePlan,
   discoverInstalledPluginPackages,
   loadInstalledPluginPackage,
