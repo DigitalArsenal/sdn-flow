@@ -35,6 +35,12 @@ export {
   startInstalledFlowAppHost,
 } from "./appHost.js";
 export {
+  createDenoServeHttpAdapter,
+  createNodeServeHttpAdapter,
+  startInstalledFlowDenoHttpHost,
+  startInstalledFlowNodeHttpHost,
+} from "./httpHostAdapters.js";
+export {
   createFetchResponse,
   createInstalledFlowFetchHandler,
   normalizeFetchRequest,

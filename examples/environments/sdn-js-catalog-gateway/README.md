@@ -9,7 +9,8 @@ capability-compatibility reporting.
 
 The checked-in `workspace.json` shows the persisted installed-flow startup
 shape: flow path, host-plan path, plugin roots, and fetch/service defaults that
-`createInstalledFlowApp(...)` can boot directly.
+`createInstalledFlowApp(...)` can boot directly. For the Deno path, the
+intended launcher is `startInstalledFlowDenoHttpHost({ workspacePath })`.
 
 It uses:
 

@@ -184,9 +184,12 @@ program, and start draining frames through one bootstrap surface.
 ```js
 import {
   createInstalledFlowApp,
+  createDenoServeHttpAdapter,
   createInstalledFlowHost,
   createInstalledFlowFetchHandler,
   createInstalledFlowService,
+  startInstalledFlowDenoHttpHost,
+  startInstalledFlowNodeHttpHost,
   startInstalledFlowAppHost,
 } from "@digitalarsenal/sdn-flow";
 
@@ -231,6 +234,10 @@ await startInstalledFlowAppHost({
     }, handler);
   },
 });
+
+await startInstalledFlowDenoHttpHost({
+  workspacePath: "./workspace.json",
+});
 ```
 
 Filesystem discovery is optional. Browser or embedded hosts can pass in-memory
@@ -272,6 +279,12 @@ against the updated workspace state.
 host plan, starts the app, and binds HTTP `listen` entries through an injected
 `serveHttp(...)` adapter so real hosts can auto-attach their listeners from the
 checked-in startup profile.
+
+For concrete JS-host entrypoints, `createDenoServeHttpAdapter(...)` and
+`startInstalledFlowDenoHttpHost(...)` provide the Deno path, while
+`startInstalledFlowNodeHttpHost(...)` provides a Node HTTP server path that
+converts Node requests into web-standard `Request` objects and writes flow
+responses back to the socket.
 
 ## Deployment Flow
 

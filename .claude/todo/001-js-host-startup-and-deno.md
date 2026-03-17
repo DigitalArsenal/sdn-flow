@@ -37,3 +37,5 @@
 13. Add explicit workspace package-catalog mutation so hosts can persist install/uninstall operations and refresh the runtime against that state. (done)
 
 14. Add a host-plan launcher that can auto-bind installed-flow HTTP listeners through an injected serve adapter. (done)
+
+15. Add concrete Deno- and Node-oriented HTTP host adapters on top of the installed-flow launcher surface. (done)
