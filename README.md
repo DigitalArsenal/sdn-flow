@@ -184,6 +184,7 @@ program, and start draining frames through one bootstrap surface.
 ```js
 import {
   createInstalledFlowHost,
+  createInstalledFlowFetchHandler,
   createInstalledFlowService,
 } from "@digitalarsenal/sdn-flow";
 
@@ -204,6 +205,13 @@ await service.handleHttpRequest({
   path: "/download",
   method: "GET",
 });
+
+const handler = createInstalledFlowFetchHandler({
+  program,
+  pluginPackages,
+});
+
+Deno.serve(handler);
 ```
 
 Filesystem discovery is optional. Browser or embedded hosts can pass in-memory
@@ -218,6 +226,12 @@ maps inbound HTTP events into flow trigger dispatch without changing the flow
 ABI. Real hosts can bind those service methods to Deno `serve`, browser
 `fetch`-style events, Node listeners, or embedded host shims while keeping the
 same flow program and plugin package contract.
+
+`createInstalledFlowFetchHandler(...)` is the first concrete binding for that
+service surface. It accepts a web-standard `Request`, maps it into a portable
+HTTP trigger input, runs the flow, and returns a web-standard `Response`, which
+lets Deno, browser workers, Bun, and modern Node share the same host entrypoint
+shape.
 
 ## Deployment Flow
 

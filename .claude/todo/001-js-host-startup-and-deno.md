@@ -27,3 +27,5 @@
 9. Add tests for plugin discovery, installed-package registration, startup bootstrap, and browser/deno compatibility summaries. (done)
 
 10. Update README and environment examples once the bootstrap and engine model land. (done)
+
+11. Add a fetch-style host adapter so Deno/browser/Bun/modern Node can bind installed flows to a shared `Request`/`Response` entrypoint. (done)

@@ -31,6 +31,11 @@ export {
   normalizeHostedRuntimeEngine,
 } from "./profile.js";
 export {
+  createFetchResponse,
+  createInstalledFlowFetchHandler,
+  normalizeFetchRequest,
+} from "./fetchService.js";
+export {
   createInstalledFlowHost,
   createInstalledFlowService,
   createInstalledFlowHostedRuntimePlan,
