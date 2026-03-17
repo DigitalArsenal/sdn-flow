@@ -37,9 +37,11 @@ export {
 } from "./fetchService.js";
 export {
   createInstalledFlowApp,
+  installWorkspacePluginPackage,
   normalizeInstalledFlowWorkspace,
   readInstalledFlowWorkspace,
   resolveInstalledFlowWorkspace,
+  uninstallWorkspacePluginPackage,
   writeInstalledFlowWorkspace,
 } from "./workspace.js";
 export {

@@ -250,6 +250,12 @@ runtime helpers. A workspace file can point at `flow.json`, `host-plan.json`,
 plugin roots, and fetch/service defaults, which gives Deno- or Node-RED-style
 hosts a single startup record they can boot and refresh from disk.
 
+That workspace layer also supports explicit package catalog mutation through
+`installWorkspacePluginPackage(...)`, `uninstallWorkspacePluginPackage(...)`,
+`app.installPluginPackage(...)`, and `app.uninstallPluginPackage(...)`, which
+lets hosts persist installed-node changes and then refresh the live runtime
+against the updated workspace state.
+
 ## Deployment Flow
 
 The package uses one deployment model for both local and remote targets:

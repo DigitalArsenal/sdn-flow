@@ -7,6 +7,7 @@ import {
 } from "./fetchService.js";
 import {
   createInstalledFlowService,
+  discoverInstalledPluginPackages,
   normalizeInstalledPluginPackage,
 } from "./installedFlowHost.js";
 import { normalizeHostedRuntimePlan } from "./normalize.js";
@@ -88,6 +89,58 @@ function serializeWorkspacePluginPackage(pluginPackage, baseDirectory) {
     autoStart: pluginPackage.autoStart,
     metadata: pluginPackage.metadata,
   };
+}
+
+async function resolveWorkspacePluginPackageInput(
+  pluginPackage,
+  baseDirectory,
+) {
+  const normalizedPackage = normalizeWorkspacePluginPackage(
+    pluginPackage,
+    baseDirectory,
+  );
+  if (
+    normalizedPackage.manifestPath ||
+    normalizedPackage.modulePath ||
+    normalizedPackage.manifest ||
+    normalizedPackage.module ||
+    normalizedPackage.handlers
+  ) {
+    return normalizedPackage;
+  }
+  if (!normalizedPackage.packageRoot) {
+    return normalizedPackage;
+  }
+
+  const discoveredPackages = await discoverInstalledPluginPackages({
+    rootDirectories: [normalizedPackage.packageRoot],
+  });
+  const discoveredPackage =
+    discoveredPackages.find(
+      (item) =>
+        item.pluginId === normalizedPackage.pluginId ||
+        item.packageId === normalizedPackage.packageId,
+    ) ??
+    (discoveredPackages.length === 1 ? discoveredPackages[0] : null);
+
+  if (!discoveredPackage) {
+    throw new Error(
+      `Could not resolve an installed plugin package from "${normalizedPackage.packageRoot}".`,
+    );
+  }
+
+  return normalizeWorkspacePluginPackage(
+    {
+      ...discoveredPackage,
+      ...pluginPackage,
+      packageRoot:
+        pluginPackage.packageRoot ?? discoveredPackage.packageRoot,
+      manifestPath:
+        pluginPackage.manifestPath ?? discoveredPackage.manifestPath,
+      modulePath: pluginPackage.modulePath ?? discoveredPackage.modulePath,
+    },
+    baseDirectory,
+  );
 }
 
 async function readJsonFile(filePath) {
@@ -229,6 +282,100 @@ export async function writeInstalledFlowWorkspace(workspacePath, workspace, opti
   return resolvedWorkspacePath;
 }
 
+export async function installWorkspacePluginPackage(
+  workspace,
+  pluginPackage,
+  options = {},
+) {
+  const normalizedWorkspace = await resolveInstalledFlowWorkspace(
+    workspace,
+    options,
+  );
+  const resolvedPackage = await resolveWorkspacePluginPackageInput(
+    pluginPackage,
+    normalizedWorkspace.baseDirectory,
+  );
+  const packageKey =
+    resolvedPackage.pluginId ??
+    resolvedPackage.packageId ??
+    resolvedPackage.manifestPath ??
+    resolvedPackage.packageRoot;
+  const pluginPackages = normalizedWorkspace.pluginPackages.filter((item) => {
+    const itemKey =
+      item.pluginId ?? item.packageId ?? item.manifestPath ?? item.packageRoot;
+    return itemKey !== packageKey;
+  });
+  pluginPackages.push(resolvedPackage);
+  pluginPackages.sort((left, right) =>
+    `${left.packageName ?? ""}:${left.pluginId ?? left.packageId}`.localeCompare(
+      `${right.packageName ?? ""}:${right.pluginId ?? right.packageId}`,
+    ),
+  );
+
+  return {
+    ...normalizedWorkspace,
+    pluginPackages,
+  };
+}
+
+export async function uninstallWorkspacePluginPackage(
+  workspace,
+  selector,
+  options = {},
+) {
+  const normalizedWorkspace = await resolveInstalledFlowWorkspace(
+    workspace,
+    options,
+  );
+  const normalizedSelector = isObject(selector)
+    ? {
+        pluginId: normalizeString(selector.pluginId, null),
+        packageId: normalizeString(selector.packageId, null),
+        packageRoot: resolvePathLike(selector.packageRoot, normalizedWorkspace.baseDirectory),
+        manifestPath: resolvePathLike(selector.manifestPath, normalizedWorkspace.baseDirectory),
+        modulePath: resolvePathLike(selector.modulePath, normalizedWorkspace.baseDirectory),
+      }
+    : {
+        pluginId: normalizeString(selector, null),
+        packageId: normalizeString(selector, null),
+        packageRoot: null,
+        manifestPath: null,
+        modulePath: null,
+      };
+  const pluginPackages = normalizedWorkspace.pluginPackages.filter((item) => {
+    if (normalizedSelector.pluginId && item.pluginId === normalizedSelector.pluginId) {
+      return false;
+    }
+    if (normalizedSelector.packageId && item.packageId === normalizedSelector.packageId) {
+      return false;
+    }
+    if (
+      normalizedSelector.packageRoot &&
+      item.packageRoot === normalizedSelector.packageRoot
+    ) {
+      return false;
+    }
+    if (
+      normalizedSelector.manifestPath &&
+      item.manifestPath === normalizedSelector.manifestPath
+    ) {
+      return false;
+    }
+    if (
+      normalizedSelector.modulePath &&
+      item.modulePath === normalizedSelector.modulePath
+    ) {
+      return false;
+    }
+    return true;
+  });
+
+  return {
+    ...normalizedWorkspace,
+    pluginPackages,
+  };
+}
+
 export async function createInstalledFlowApp(options = {}) {
   const workspacePath = normalizeString(options.workspacePath, null)
     ? path.resolve(options.workspacePath)
@@ -336,13 +483,53 @@ export async function createInstalledFlowApp(options = {}) {
       }
       return writeInstalledFlowWorkspace(workspacePath, workspace, saveOptions);
     },
+    async installPluginPackage(pluginPackage, installOptions = {}) {
+      workspace = await installWorkspacePluginPackage(
+        workspace,
+        pluginPackage,
+        installOptions,
+      );
+      if (workspacePath && installOptions.save !== false) {
+        await writeInstalledFlowWorkspace(workspacePath, workspace, installOptions);
+      }
+      if (installOptions.refresh === false) {
+        return workspace;
+      }
+      return this.refresh({
+        ...installOptions,
+        reloadWorkspace: workspacePath ? installOptions.save !== false : false,
+      });
+    },
+    async uninstallPluginPackage(selector, uninstallOptions = {}) {
+      workspace = await uninstallWorkspacePluginPackage(
+        workspace,
+        selector,
+        uninstallOptions,
+      );
+      if (workspacePath && uninstallOptions.save !== false) {
+        await writeInstalledFlowWorkspace(
+          workspacePath,
+          workspace,
+          uninstallOptions,
+        );
+      }
+      if (uninstallOptions.refresh === false) {
+        return workspace;
+      }
+      return this.refresh({
+        ...uninstallOptions,
+        reloadWorkspace: workspacePath ? uninstallOptions.save !== false : false,
+      });
+    },
   };
 }
 
 export default {
   createInstalledFlowApp,
+  installWorkspacePluginPackage,
   normalizeInstalledFlowWorkspace,
   readInstalledFlowWorkspace,
   resolveInstalledFlowWorkspace,
+  uninstallWorkspacePluginPackage,
   writeInstalledFlowWorkspace,
 };

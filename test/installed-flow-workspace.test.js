@@ -6,12 +6,18 @@ import { mkdtemp, readFile } from "node:fs/promises";
 
 import {
   createInstalledFlowApp,
+  installWorkspacePluginPackage,
   readInstalledFlowWorkspace,
+  uninstallWorkspacePluginPackage,
   writeInstalledFlowWorkspace,
 } from "../src/index.js";
 
 const ExamplePluginsDirectory = new URL("../examples/plugins", import.meta.url)
   .pathname;
+const BasicPropagatorPackageRoot = new URL(
+  "../examples/plugins/basic-propagator",
+  import.meta.url,
+).pathname;
 const SinglePluginFlowPath = new URL(
   "../examples/flows/single-plugin-flow.json",
   import.meta.url,
@@ -142,4 +148,88 @@ test("createInstalledFlowApp boots a persisted workspace and runs the installed 
     pluginRootDirectories: [path.resolve(ExamplePluginsDirectory)],
     hostId: null,
   });
+});
+
+test("workspace package install and uninstall helpers maintain the explicit plugin catalog", async () => {
+  const workspaceDirectory = await mkdtemp(
+    path.join(os.tmpdir(), "sdn-flow-workspace-catalog-"),
+  );
+  let workspace = await readInstalledFlowWorkspace(
+    await (async () => {
+      const workspacePath = path.join(workspaceDirectory, "workspace.json");
+      await writeInstalledFlowWorkspace(workspacePath, {
+        workspaceId: "catalog-workspace",
+        flowPath: SinglePluginFlowPath,
+        discover: false,
+      });
+      return workspacePath;
+    })(),
+  );
+
+  workspace = await installWorkspacePluginPackage(workspace, {
+    packageRoot: BasicPropagatorPackageRoot,
+  });
+
+  assert.equal(workspace.pluginPackages.length, 1);
+  assert.equal(
+    workspace.pluginPackages[0].pluginId,
+    "com.digitalarsenal.examples.basic-propagator",
+  );
+  assert.match(
+    workspace.pluginPackages[0].modulePath ?? "",
+    /basic-propagator\/plugin\.js$/,
+  );
+
+  workspace = await uninstallWorkspacePluginPackage(
+    workspace,
+    "com.digitalarsenal.examples.basic-propagator",
+  );
+
+  assert.equal(workspace.pluginPackages.length, 0);
+});
+
+test("createInstalledFlowApp can install and uninstall explicit plugin packages through workspace state", async () => {
+  const workspaceDirectory = await mkdtemp(
+    path.join(os.tmpdir(), "sdn-flow-installed-app-catalog-"),
+  );
+  const workspacePath = path.join(workspaceDirectory, "workspace.json");
+
+  await writeInstalledFlowWorkspace(workspacePath, {
+    workspaceId: "catalog-app",
+    flowPath: path.relative(workspaceDirectory, SinglePluginFlowPath),
+    discover: false,
+  });
+
+  const app = await createInstalledFlowApp({
+    workspacePath,
+  });
+
+  await app.installPluginPackage({
+    packageRoot: BasicPropagatorPackageRoot,
+  });
+
+  const startup = await app.start();
+  const installedWorkspace = await readInstalledFlowWorkspace(workspacePath);
+
+  assert.equal(
+    startup.registeredPluginIds.includes(
+      "com.digitalarsenal.examples.basic-propagator",
+    ),
+    true,
+  );
+  assert.equal(installedWorkspace.pluginPackages.length, 1);
+
+  await app.uninstallPluginPackage(
+    "com.digitalarsenal.examples.basic-propagator",
+  );
+  const uninstalledWorkspace = await readInstalledFlowWorkspace(workspacePath);
+
+  assert.equal(
+    app.host.registry.listPlugins().some(
+      (plugin) =>
+        plugin.pluginId === "com.digitalarsenal.examples.basic-propagator",
+    ),
+    false,
+  );
+  assert.equal(uninstalledWorkspace.pluginPackages.length, 0);
 });
