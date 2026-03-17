@@ -19,8 +19,8 @@
    - `host.refreshPlugins(...)`
    - `service.refresh(...)`
    Next:
-   - external package-manager and persistence integration beyond local discovery/refresh
-   - host adapters beyond fetch-style `Request`/`Response` bindings
+   - external package-manager and persistence integration beyond the local workspace catalog
+   - runnable top-level bootstrap examples and scripts for each concrete host adapter
 
 7. Add Deno-oriented host-plan support so `sdn-js` deployments can declare `engine: "deno"` and document single-file deployment intent. (done)
 
@@ -43,3 +43,15 @@
 16. Add concrete browser/worker fetch-host adapters on top of the installed-flow launcher surface. (done)
 
 17. Add concrete Bun HTTP host adapters on top of the installed-flow launcher surface. (done)
+
+18. Add runnable top-level bootstrap examples/scripts for Deno, Node, Bun, and browser worker hosts. (pending)
+   Goal:
+   - one small checked-in startup entrypoint per concrete host adapter
+   - direct use of `workspace.json` plus the new host adapter surfaces
+   - clear examples of how a host actually boots and stays up in each environment
+
+19. Add external package-manager and persistence integration beyond the local workspace catalog. (pending)
+   Goal:
+   - track installed package sources, versions, and updates instead of only local package roots
+   - integrate workspace mutation with a real install/update/remove flow
+   - keep the runtime refresh path aligned with that persisted package state
