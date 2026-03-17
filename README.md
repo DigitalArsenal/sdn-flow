@@ -183,6 +183,7 @@ program, and start draining frames through one bootstrap surface.
 
 ```js
 import {
+  createInstalledFlowApp,
   createInstalledFlowHost,
   createInstalledFlowFetchHandler,
   createInstalledFlowService,
@@ -212,6 +213,12 @@ const handler = createInstalledFlowFetchHandler({
 });
 
 Deno.serve(handler);
+
+const app = await createInstalledFlowApp({
+  workspacePath: "./workspace.json",
+});
+
+await app.start();
 ```
 
 Filesystem discovery is optional. Browser or embedded hosts can pass in-memory
@@ -237,6 +244,11 @@ Installed hosts can also rescan and rebind their managed plugin set in place
 through `host.refreshPlugins(...)` or `service.refresh(...)`, which is the
 current package-level equivalent of updating installed nodes and reloading the
 runtime without changing the flow ABI.
+
+`createInstalledFlowApp(...)` adds a persisted workspace layer on top of those
+runtime helpers. A workspace file can point at `flow.json`, `host-plan.json`,
+plugin roots, and fetch/service defaults, which gives Deno- or Node-RED-style
+hosts a single startup record they can boot and refresh from disk.
 
 ## Deployment Flow
 

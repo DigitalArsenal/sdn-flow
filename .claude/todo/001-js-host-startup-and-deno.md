@@ -31,3 +31,5 @@
 10. Update README and environment examples once the bootstrap and engine model land. (done)
 
 11. Add a fetch-style host adapter so Deno/browser/Bun/modern Node can bind installed flows to a shared `Request`/`Response` entrypoint. (done)
+
+12. Add a persisted workspace/bootstrap layer so installed-flow hosts can boot from one workspace file with flow paths, plugin roots, and host defaults. (done)

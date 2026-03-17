@@ -1,0 +1,16 @@
+{
+  "workspaceId": "sdn-js-catalog-gateway",
+  "description": "Persisted workspace for the Deno-oriented JS catalog gateway host.",
+  "flowPath": "./flow.json",
+  "hostPlanPath": "./host-plan.json",
+  "pluginRootDirectories": [
+    "../../plugins"
+  ],
+  "discover": true,
+  "fetch": {
+    "baseUrl": "http://127.0.0.1:9080"
+  },
+  "service": {
+    "autoStartTimers": true
+  }
+}

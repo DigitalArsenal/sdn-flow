@@ -36,6 +36,13 @@ export {
   normalizeFetchRequest,
 } from "./fetchService.js";
 export {
+  createInstalledFlowApp,
+  normalizeInstalledFlowWorkspace,
+  readInstalledFlowWorkspace,
+  resolveInstalledFlowWorkspace,
+  writeInstalledFlowWorkspace,
+} from "./workspace.js";
+export {
   createInstalledFlowHost,
   createInstalledFlowService,
   createInstalledFlowHostedRuntimePlan,

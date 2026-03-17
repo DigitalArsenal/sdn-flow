@@ -7,6 +7,7 @@ Each demo includes:
 
 - `flow.json`: the canonical `sdn-flow` graph
 - `host-plan.json`: the runtime placement and binding profile
+- `workspace.json`: persisted startup config when the demo includes an installed-flow host workspace
 - `README.md`: the intended environment and capability notes
 
 Available demos:

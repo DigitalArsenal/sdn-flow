@@ -1,0 +1,145 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import os from "node:os";
+import path from "node:path";
+import { mkdtemp, readFile } from "node:fs/promises";
+
+import {
+  createInstalledFlowApp,
+  readInstalledFlowWorkspace,
+  writeInstalledFlowWorkspace,
+} from "../src/index.js";
+
+const ExamplePluginsDirectory = new URL("../examples/plugins", import.meta.url)
+  .pathname;
+const SinglePluginFlowPath = new URL(
+  "../examples/flows/single-plugin-flow.json",
+  import.meta.url,
+).pathname;
+const SdnJsCatalogGatewayFlowPath = new URL(
+  "../examples/environments/sdn-js-catalog-gateway/flow.json",
+  import.meta.url,
+).pathname;
+const SdnJsCatalogGatewayHostPlanPath = new URL(
+  "../examples/environments/sdn-js-catalog-gateway/host-plan.json",
+  import.meta.url,
+).pathname;
+
+test("readInstalledFlowWorkspace resolves relative flow, host-plan, and plugin roots", async () => {
+  const workspaceDirectory = await mkdtemp(
+    path.join(os.tmpdir(), "sdn-flow-workspace-"),
+  );
+  const workspacePath = path.join(workspaceDirectory, "workspace.json");
+
+  await writeInstalledFlowWorkspace(workspacePath, {
+    workspaceId: "catalog-gateway",
+    flowPath: path.relative(workspaceDirectory, SdnJsCatalogGatewayFlowPath),
+    hostPlanPath: path.relative(
+      workspaceDirectory,
+      SdnJsCatalogGatewayHostPlanPath,
+    ),
+    pluginRootDirectories: [
+      path.relative(workspaceDirectory, ExamplePluginsDirectory),
+    ],
+    fetch: {
+      baseUrl: "http://127.0.0.1:9080",
+    },
+  });
+
+  const workspace = await readInstalledFlowWorkspace(workspacePath);
+
+  assert.equal(workspace.workspaceId, "catalog-gateway");
+  assert.equal(
+    workspace.program?.programId,
+    "com.digitalarsenal.examples.sdn-js-catalog-gateway",
+  );
+  assert.equal(workspace.hostPlan?.hostId, "sdn-js-local");
+  assert.equal(workspace.engine, "deno");
+  assert.deepEqual(workspace.pluginRootDirectories, [
+    path.resolve(ExamplePluginsDirectory),
+  ]);
+});
+
+test("writeInstalledFlowWorkspace stores relative paths and round-trips back to absolute paths", async () => {
+  const workspaceDirectory = await mkdtemp(
+    path.join(os.tmpdir(), "sdn-flow-workspace-write-"),
+  );
+  const workspacePath = path.join(workspaceDirectory, "workspace.json");
+
+  await writeInstalledFlowWorkspace(workspacePath, {
+    workspaceId: "single-plugin",
+    description: "Single plugin workspace",
+    flowPath: SinglePluginFlowPath,
+    hostPlanPath: SdnJsCatalogGatewayHostPlanPath,
+    pluginRootDirectories: [ExamplePluginsDirectory],
+  });
+
+  const rawWorkspace = JSON.parse(await readFile(workspacePath, "utf8"));
+  const workspace = await readInstalledFlowWorkspace(workspacePath);
+
+  assert.equal(rawWorkspace.flowPath, path.relative(workspaceDirectory, SinglePluginFlowPath));
+  assert.equal(
+    rawWorkspace.hostPlanPath,
+    path.relative(workspaceDirectory, SdnJsCatalogGatewayHostPlanPath),
+  );
+  assert.equal(
+    rawWorkspace.pluginRootDirectories[0],
+    path.relative(workspaceDirectory, ExamplePluginsDirectory),
+  );
+  assert.equal(
+    workspace.program?.programId,
+    "com.digitalarsenal.examples.single-plugin-flow",
+  );
+  assert.deepEqual(workspace.pluginRootDirectories, [
+    path.resolve(ExamplePluginsDirectory),
+  ]);
+});
+
+test("createInstalledFlowApp boots a persisted workspace and runs the installed flow host", async () => {
+  const workspaceDirectory = await mkdtemp(
+    path.join(os.tmpdir(), "sdn-flow-installed-app-"),
+  );
+  const workspacePath = path.join(workspaceDirectory, "workspace.json");
+
+  await writeInstalledFlowWorkspace(workspacePath, {
+    workspaceId: "single-plugin-app",
+    flowPath: path.relative(workspaceDirectory, SinglePluginFlowPath),
+    pluginRootDirectories: [
+      path.relative(workspaceDirectory, ExamplePluginsDirectory),
+    ],
+  });
+
+  const app = await createInstalledFlowApp({
+    workspacePath,
+  });
+  const startup = await app.start();
+  const result = await app.service.dispatchTriggerFrames("manual-request", [
+    {
+      streamId: 1,
+      sequence: 1,
+      typeRef: {
+        schemaName: "StateRequest.fbs",
+        fileIdentifier: "SREQ",
+      },
+      payload: new Uint8Array([1, 2, 3]),
+    },
+  ]);
+
+  assert.equal(startup.workspace.workspaceId, "single-plugin-app");
+  assert.equal(
+    startup.registeredPluginIds.includes(
+      "com.digitalarsenal.examples.basic-propagator",
+    ),
+    true,
+  );
+  assert.equal(result.outputs.length, 1);
+  assert.equal(result.outputs[0].frame.portId, "state");
+  assert.deepEqual(app.getSummary(), {
+    workspaceId: "single-plugin-app",
+    programId: "com.digitalarsenal.examples.single-plugin-flow",
+    adapter: null,
+    engine: null,
+    pluginRootDirectories: [path.resolve(ExamplePluginsDirectory)],
+    hostId: null,
+  });
+});
