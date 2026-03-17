@@ -187,6 +187,7 @@ import {
   createInstalledFlowHost,
   createInstalledFlowFetchHandler,
   createInstalledFlowService,
+  startInstalledFlowAppHost,
 } from "@digitalarsenal/sdn-flow";
 
 const host = createInstalledFlowHost({
@@ -219,6 +220,17 @@ const app = await createInstalledFlowApp({
 });
 
 await app.start();
+
+await startInstalledFlowAppHost({
+  app,
+  serveHttp({ binding, handler }) {
+    const url = new URL(binding.url);
+    return Deno.serve({
+      hostname: url.hostname,
+      port: Number(url.port || 80),
+    }, handler);
+  },
+});
 ```
 
 Filesystem discovery is optional. Browser or embedded hosts can pass in-memory
@@ -255,6 +267,11 @@ That workspace layer also supports explicit package catalog mutation through
 `app.installPluginPackage(...)`, and `app.uninstallPluginPackage(...)`, which
 lets hosts persist installed-node changes and then refresh the live runtime
 against the updated workspace state.
+
+`startInstalledFlowAppHost(...)` is the next layer up: it reads the workspace
+host plan, starts the app, and binds HTTP `listen` entries through an injected
+`serveHttp(...)` adapter so real hosts can auto-attach their listeners from the
+checked-in startup profile.
 
 ## Deployment Flow
 

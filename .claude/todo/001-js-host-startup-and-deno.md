@@ -35,3 +35,5 @@
 12. Add a persisted workspace/bootstrap layer so installed-flow hosts can boot from one workspace file with flow paths, plugin roots, and host defaults. (done)
 
 13. Add explicit workspace package-catalog mutation so hosts can persist install/uninstall operations and refresh the runtime against that state. (done)
+
+14. Add a host-plan launcher that can auto-bind installed-flow HTTP listeners through an injected serve adapter. (done)

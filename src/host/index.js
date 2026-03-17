@@ -31,6 +31,10 @@ export {
   normalizeHostedRuntimeEngine,
 } from "./profile.js";
 export {
+  listInstalledFlowHttpBindings,
+  startInstalledFlowAppHost,
+} from "./appHost.js";
+export {
   createFetchResponse,
   createInstalledFlowFetchHandler,
   normalizeFetchRequest,
