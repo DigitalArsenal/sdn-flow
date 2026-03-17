@@ -3,6 +3,9 @@
 These examples make the host profiles explicit instead of assuming that
 "WASI" or "JavaScript" is enough detail.
 
+For minimal runnable startup entrypoints against the concrete JS-host adapters,
+see [../bootstrap/README.md](../bootstrap/README.md).
+
 Each demo includes:
 
 - `flow.json`: the canonical `sdn-flow` graph

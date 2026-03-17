@@ -44,7 +44,7 @@
 
 17. Add concrete Bun HTTP host adapters on top of the installed-flow launcher surface. (done)
 
-18. Add runnable top-level bootstrap examples/scripts for Deno, Node, Bun, and browser worker hosts. (pending)
+18. Add runnable top-level bootstrap examples/scripts for Deno, Node, Bun, and browser worker hosts. (done)
    Goal:
    - one small checked-in startup entrypoint per concrete host adapter
    - direct use of `workspace.json` plus the new host adapter surfaces

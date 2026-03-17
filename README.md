@@ -347,6 +347,7 @@ Default export names:
 
 ## Examples
 
+- [Bootstrap Examples](./examples/bootstrap/README.md)
 - [Environment Demos](./examples/environments/README.md)
 - [Basic Propagator Plugin](./examples/plugins/basic-propagator/README.md)
 - [Basic Sensor Plugin](./examples/plugins/basic-sensor/README.md)
