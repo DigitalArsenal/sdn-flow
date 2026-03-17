@@ -36,6 +36,10 @@ export {
   startInstalledFlowBrowserFetchHost,
 } from "./browserHostAdapters.js";
 export {
+  resolveInstalledFlowAutoHostEngine,
+  startInstalledFlowAutoHost,
+} from "./autoHost.js";
+export {
   listInstalledFlowHttpBindings,
   startInstalledFlowAppHost,
 } from "./appHost.js";

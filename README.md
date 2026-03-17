@@ -191,6 +191,7 @@ import {
   createInstalledFlowHost,
   createInstalledFlowFetchHandler,
   createInstalledFlowService,
+  startInstalledFlowAutoHost,
   startInstalledFlowBrowserFetchHost,
   startInstalledFlowBunHttpHost,
   startInstalledFlowDenoHttpHost,
@@ -244,6 +245,10 @@ await startInstalledFlowDenoHttpHost({
   workspacePath: "./workspace.json",
 });
 
+await startInstalledFlowAutoHost({
+  workspacePath: "./workspace.json",
+});
+
 await startInstalledFlowBrowserFetchHost({
   workspace,
 });
@@ -267,6 +272,11 @@ service surface. It accepts a web-standard `Request`, maps it into a portable
 HTTP trigger input, runs the flow, and returns a web-standard `Response`, which
 lets Deno, browser workers, Bun, and modern Node share the same host entrypoint
 shape.
+
+`startInstalledFlowAutoHost(...)` is the environment-neutral wrapper above those
+concrete bindings. It uses the explicit engine in the workspace/host plan when
+present and otherwise falls back to the current JS runtime so one startup path
+can dispatch to the browser, Deno, Bun, or Node host adapter.
 
 Installed hosts can also rescan and rebind their managed plugin set in place
 through `host.refreshPlugins(...)` or `service.refresh(...)`, which is the

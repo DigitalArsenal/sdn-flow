@@ -57,3 +57,10 @@
    - generic `createCommandPackageManager(...)` adapter
    - concrete `createNpmPackageManager(...)` adapter
    - workspace tests for package-reference persistence and runtime refresh alignment
+
+20. Add one environment-neutral installed-flow startup entrypoint that can select the concrete host adapter from workspace/runtime metadata. (done)
+   Done:
+   - `resolveInstalledFlowAutoHostEngine(...)`
+   - `startInstalledFlowAutoHost(...)`
+   - dispatch to browser, Deno, Bun, and Node startup surfaces
+   - explicit starter injection hooks for tests and embedded hosts
