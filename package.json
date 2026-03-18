@@ -4,12 +4,14 @@
   "description": "Isomorphic flow authoring, runtime, authorization, and deployment tooling for schema-driven WASM systems.",
   "type": "module",
   "bin": {
-    "sdn-flow-host": "./bin/sdn-flow-host.js"
+    "sdn-flow-host": "./bin/sdn-flow-host.js",
+    "sdn-flow-editor": "./bin/sdn-flow-editor.js"
   },
   "exports": {
     ".": "./src/index.js",
     "./runtime": "./src/runtime/index.js",
     "./designer": "./src/designer/index.js",
+    "./editor": "./src/editor/index.js",
     "./auth": "./src/auth/index.js",
     "./host": "./src/host/index.js",
     "./transport": "./src/transport/index.js",
@@ -29,6 +31,7 @@
     "LICENSE"
   ],
   "scripts": {
+    "build:editor-assets": "node scripts/build-editor-assets.mjs",
     "build:runtime-abi": "node scripts/build-runtime-abi.mjs",
     "test": "npm run check:plugin-compliance && node --test",
     "check:plugin-compliance": "node scripts/check-shared-module-compliance.mjs"

@@ -1,7 +1,8 @@
 # Bootstrap Examples
 
 These are minimal runnable host-entrypoint examples for the concrete
-installed-flow adapters, plus one environment-neutral auto-host launcher.
+installed-flow adapters, the packaged editor runtime, plus one
+environment-neutral auto-host launcher.
 
 They intentionally use one in-memory HTTP responder plugin instead of the
 larger environment demos, so every script here is actually runnable without a
@@ -21,6 +22,8 @@ Files:
   Minimal browser/worker bootstrap using `startInstalledFlowBrowserFetchHost(...)`.
 - `start-auto-host.mjs`
   Environment-neutral bootstrap using `startInstalledFlowAutoHost(...)` and a checked-in `workspace.json`.
+- `start-node-editor-host.mjs`
+  Minimal Node bootstrap for the hosted editor runtime using `startSdnFlowEditorNodeHost(...)`.
 
 These examples are meant to show the host startup shape directly:
 

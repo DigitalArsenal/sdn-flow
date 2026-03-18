@@ -3,187 +3,182 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>sdn-flow IDE</title>
+  <title>sdn-flow Editor</title>
   <link rel="stylesheet" href="css/style.css">
-  <script type="importmap">
-  {
-    "imports": {
-      "hd-wallet-wasm": "https://cdn.jsdelivr.net/npm/hd-wallet-wasm@1.6.0/src/index.mjs",
-      "hd-wallet-wasm/": "https://cdn.jsdelivr.net/npm/hd-wallet-wasm@1.6.0/"
-    }
-  }
-  </script>
 </head>
 <body>
-  <!-- ─── Header / Toolbar ─── -->
   <header id="toolbar">
-    <div class="toolbar-left">
-      <div class="brand">
-        <svg class="brand-icon" viewBox="0 0 24 24" width="20" height="20">
-          <circle cx="6" cy="12" r="3" fill="#569cd6"/>
-          <circle cx="18" cy="6" r="3" fill="#4ec9b0"/>
-          <circle cx="18" cy="18" r="3" fill="#ce9178"/>
-          <line x1="9" y1="12" x2="15" y2="6" stroke="#569cd6" stroke-width="1.5"/>
-          <line x1="9" y1="12" x2="15" y2="18" stroke="#569cd6" stroke-width="1.5"/>
+    <div class="toolbar-brand">
+      <div class="brand-lockup">
+        <svg class="brand-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <circle cx="6" cy="12" r="3" fill="#d6523c"></circle>
+          <circle cx="18" cy="6" r="3" fill="#2b7de9"></circle>
+          <circle cx="18" cy="18" r="3" fill="#31a06f"></circle>
+          <path d="M9 12l6-6M9 12l6 6" stroke="#f4f5f6" stroke-width="1.6" stroke-linecap="round"></path>
         </svg>
-        <span class="brand-name">sdn-flow</span>
+        <div>
+          <div class="brand-name">sdn-flow</div>
+          <div class="brand-subtitle">Hosted flow editor</div>
+        </div>
+      </div>
+      <div class="workspace-meta">
+        <span class="meta-chip meta-chip-workspace" id="workspace-name">Untitled Flow</span>
+        <span class="meta-chip" id="workspace-program-id">No program ID</span>
       </div>
     </div>
-    <div class="toolbar-center">
-      <button id="btn-import" class="tb-btn" title="Import flow JSON">
-        <svg viewBox="0 0 16 16" width="14" height="14"><path d="M3 1h7l3 3v9a1 1 0 01-1 1H3a1 1 0 01-1-1V2a1 1 0 011-1z" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M8 6v5M6 9l2 2 2-2" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
-        Import
-      </button>
-      <button id="btn-export" class="tb-btn" title="Export flow JSON">
-        <svg viewBox="0 0 16 16" width="14" height="14"><path d="M3 1h7l3 3v9a1 1 0 01-1 1H3a1 1 0 01-1-1V2a1 1 0 011-1z" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M8 11V6M6 8l2-2 2 2" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
-        Export
-      </button>
-      <div class="tb-sep"></div>
-      <button id="btn-crc" class="tb-btn" title="Compute CRC-32 integrity check">
-        <svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 1a7 7 0 110 14A7 7 0 018 1z" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M5 8l2 2 4-4" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
-        CRC
-      </button>
-      <button id="btn-compile" class="tb-btn tb-btn-accent" title="Compile flow to WASM">
-        <svg viewBox="0 0 16 16" width="14" height="14"><path d="M2 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="9" y1="13" x2="14" y2="13" stroke="currentColor" stroke-width="1.5"/></svg>
-        Compile
-      </button>
-      <button id="btn-deploy" class="tb-btn tb-btn-deploy" title="Compile, sign, and deploy">
-        <svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 1v10M4 7l4 4 4-4M2 13h12" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
-        Deploy
-      </button>
-    </div>
-    <div class="toolbar-right">
+
+    <div class="toolbar-actions">
+      <button id="btn-import" class="tb-btn" title="Import flow JSON">Import</button>
+      <button id="btn-export" class="tb-btn" title="Export flow JSON">Export</button>
+      <button id="btn-crc" class="tb-btn" title="Compute CRC-32 integrity check">CRC</button>
+      <button id="btn-compile" class="tb-btn tb-btn-accent" title="Compile flow to WASM">Compile</button>
+      <button id="btn-deploy" class="tb-btn tb-btn-deploy" title="Compile, sign, and deploy">Deploy</button>
       <span id="crc-badge" class="crc-badge" title="Flow CRC-32">--</span>
-      <button id="btn-wallet" class="tb-btn" title="Wallet / signing key">
-        <svg viewBox="0 0 16 16" width="14" height="14"><rect x="1" y="4" width="14" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M4 4V3a4 4 0 018 0v1" fill="none" stroke="currentColor" stroke-width="1.2"/><circle cx="8" cy="9" r="1.5" fill="currentColor"/></svg>
-      </button>
+      <button id="btn-wallet" class="tb-btn" title="Wallet / signing key">Wallet</button>
     </div>
   </header>
 
-  <!-- ─── Main Layout ─── -->
   <div id="main">
-    <!-- ─── Left: Node Palette ─── -->
     <aside id="palette">
-      <div class="palette-header">Nodes</div>
-      <div class="palette-list">
-        <div class="palette-item" data-kind="trigger" draggable="true">
-          <span class="kind-dot" style="background:#c586c0"></span>Trigger
+      <div class="palette-top">
+        <div class="palette-title-row">
+          <div>
+            <div class="palette-title">Palette</div>
+            <div class="palette-subtitle">Drag blocks into the workspace.</div>
+          </div>
         </div>
-        <div class="palette-item" data-kind="transform" draggable="true">
-          <span class="kind-dot" style="background:#569cd6"></span>Transform
-        </div>
-        <div class="palette-item" data-kind="analyzer" draggable="true">
-          <span class="kind-dot" style="background:#4ec9b0"></span>Analyzer
-        </div>
-        <div class="palette-item" data-kind="publisher" draggable="true">
-          <span class="kind-dot" style="background:#ce9178"></span>Publisher
-        </div>
-        <div class="palette-item" data-kind="responder" draggable="true">
-          <span class="kind-dot" style="background:#dcdcaa"></span>Responder
-        </div>
-        <div class="palette-item" data-kind="renderer" draggable="true">
-          <span class="kind-dot" style="background:#d16969"></span>Renderer
-        </div>
-        <div class="palette-item" data-kind="sink" draggable="true">
-          <span class="kind-dot" style="background:#d7ba7d"></span>Sink
-        </div>
+        <label class="palette-search-shell">
+          <span>Filter</span>
+          <input id="palette-search" type="search" placeholder="Search nodes, modules, templates">
+        </label>
       </div>
-      <div class="palette-header">Languages</div>
-      <div class="palette-list">
-        <div class="palette-item" data-kind="transform" data-lang="cpp" draggable="true">
-          <span class="kind-dot" style="background:#569cd6"></span>C++ Module
+
+      <section class="palette-section">
+        <div class="palette-header">Flow Blocks</div>
+        <div class="palette-list">
+          <div class="palette-item" data-kind="trigger" draggable="true"><span class="kind-dot kind-trigger"></span><span>Trigger</span></div>
+          <div class="palette-item" data-kind="transform" draggable="true"><span class="kind-dot kind-transform"></span><span>Transform</span></div>
+          <div class="palette-item" data-kind="analyzer" draggable="true"><span class="kind-dot kind-analyzer"></span><span>Analyzer</span></div>
+          <div class="palette-item" data-kind="responder" draggable="true"><span class="kind-dot kind-responder"></span><span>Responder</span></div>
+          <div class="palette-item" data-kind="publisher" draggable="true"><span class="kind-dot kind-publisher"></span><span>Publisher</span></div>
+          <div class="palette-item" data-kind="renderer" draggable="true"><span class="kind-dot kind-renderer"></span><span>Renderer</span></div>
+          <div class="palette-item" data-kind="sink" draggable="true"><span class="kind-dot kind-sink"></span><span>Sink</span></div>
+          <div class="palette-item" data-kind="debug" draggable="true"><span class="kind-dot kind-debug"></span><span>Debug</span></div>
         </div>
-        <div class="palette-item" data-kind="transform" data-lang="python" draggable="true">
-          <span class="kind-dot" style="background:#4ec9b0"></span>Python Module
+      </section>
+
+      <section class="palette-section">
+        <div class="palette-header">Module Starters</div>
+        <div class="palette-list">
+          <div class="palette-item" data-kind="transform" data-lang="cpp" draggable="true"><span class="kind-dot kind-transform"></span><span>C++ Module</span></div>
+          <div class="palette-item" data-kind="transform" data-lang="python" draggable="true"><span class="kind-dot kind-analyzer"></span><span>Python Module</span></div>
+          <div class="palette-item" data-kind="transform" data-lang="rust" draggable="true"><span class="kind-dot kind-publisher"></span><span>Rust Module</span></div>
+          <div class="palette-item" data-kind="transform" data-lang="typescript" draggable="true"><span class="kind-dot kind-responder"></span><span>TypeScript Module</span></div>
         </div>
-        <div class="palette-item" data-kind="transform" data-lang="rust" draggable="true">
-          <span class="kind-dot" style="background:#ce9178"></span>Rust Module
+      </section>
+
+      <section class="palette-section">
+        <div class="palette-header">Templates</div>
+        <div class="palette-list palette-list-buttons">
+          <button class="palette-btn" id="btn-load-iss">ISS Proximity OEM</button>
         </div>
-        <div class="palette-item" data-kind="transform" data-lang="typescript" draggable="true">
-          <span class="kind-dot" style="background:#dcdcaa"></span>TypeScript Module
-        </div>
-      </div>
-      <div class="palette-header">Templates</div>
-      <div class="palette-list">
-        <button class="palette-btn" id="btn-load-iss">ISS Proximity OEM</button>
-      </div>
+      </section>
     </aside>
 
-    <!-- ─── Center: Flow Canvas ─── -->
-    <div id="canvas-wrap">
-      <svg id="flow-canvas" xmlns="http://www.w3.org/2000/svg">
-        <defs>
-          <pattern id="grid-small" width="20" height="20" patternUnits="userSpaceOnUse">
-            <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#2a2d2e" stroke-width="0.5"/>
-          </pattern>
-          <pattern id="grid-large" width="100" height="100" patternUnits="userSpaceOnUse">
-            <rect width="100" height="100" fill="url(#grid-small)"/>
-            <path d="M 100 0 L 0 0 0 100" fill="none" stroke="#333639" stroke-width="1"/>
-          </pattern>
-          <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5"
-                  markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-            <path d="M0 0 L10 5 L0 10 z" fill="#858585"/>
-          </marker>
-        </defs>
-        <rect class="canvas-bg" width="100%" height="100%" fill="url(#grid-large)"/>
-        <g id="canvas-viewport">
-          <g id="layer-wires"></g>
-          <g id="layer-nodes"></g>
-        </g>
-        <!-- Temporary wire being drawn -->
-        <path id="temp-wire" class="wire temp" d="" style="display:none"/>
-      </svg>
-      <!-- Selection rectangle -->
-      <div id="select-rect" style="display:none"></div>
-    </div>
+    <section id="workspace-shell">
+      <div id="workspace-tabs">
+        <button class="workspace-tab active" type="button">Flow 1</button>
+        <div class="workspace-tab-meta">
+          <span id="workspace-engine-badge" class="workspace-chip">Portable runtime</span>
+          <span class="workspace-chip" id="workspace-debug-summary">0 debug entries</span>
+        </div>
+      </div>
 
-    <!-- ─── Right: Properties + Editor + Terminal ─── -->
+      <div id="canvas-wrap">
+        <svg id="flow-canvas" xmlns="http://www.w3.org/2000/svg" aria-label="Flow canvas">
+          <defs>
+            <pattern id="grid-small" width="20" height="20" patternUnits="userSpaceOnUse">
+              <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#2a2d2e" stroke-width="0.5"></path>
+            </pattern>
+            <pattern id="grid-large" width="100" height="100" patternUnits="userSpaceOnUse">
+              <rect width="100" height="100" fill="url(#grid-small)"></rect>
+              <path d="M 100 0 L 0 0 0 100" fill="none" stroke="#34363c" stroke-width="1"></path>
+            </pattern>
+            <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="#858585"></path>
+            </marker>
+          </defs>
+          <rect class="canvas-bg" width="100%" height="100%" fill="url(#grid-large)"></rect>
+          <g id="canvas-viewport">
+            <g id="layer-wires"></g>
+            <g id="layer-nodes"></g>
+          </g>
+          <path id="temp-wire" class="wire temp" d="" style="display:none"></path>
+        </svg>
+        <div id="select-rect" style="display:none"></div>
+      </div>
+    </section>
+
     <aside id="right-panel">
-      <!-- Resize handle -->
       <div id="right-resize" class="resize-handle-v"></div>
 
-      <!-- Properties -->
-      <div id="props-panel" class="panel-section">
-        <div class="panel-header">
-          <span>Properties</span>
-          <button id="btn-delete-node" class="icon-btn" title="Delete selected">
-            <svg viewBox="0 0 16 16" width="14" height="14"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5"/></svg>
-          </button>
-        </div>
-        <div id="props-body" class="panel-body">
-          <div class="empty-state">Select a node to edit</div>
-        </div>
+      <div id="sidebar-tabs" role="tablist" aria-label="Editor sidebar">
+        <button class="sidebar-tab active" data-sidebar-view="inspector" type="button">Inspector</button>
+        <button class="sidebar-tab" data-sidebar-view="debug" type="button">Debug</button>
+        <button class="sidebar-tab" data-sidebar-view="generated" type="button">Generated</button>
       </div>
 
-      <!-- Editor resize -->
-      <div class="resize-handle-h" id="editor-resize"></div>
-
-      <!-- Monaco Editor -->
-      <div id="editor-panel" class="panel-section">
-        <div class="panel-header">
-          <span>Generated Source</span>
-          <span class="panel-tag">read-only</span>
+      <section class="sidebar-view active" data-sidebar-view="inspector">
+        <div id="props-panel" class="panel-section">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">Inspector</div>
+              <div class="panel-subtitle">Selection, ports, and module details</div>
+            </div>
+            <button id="btn-delete-node" class="icon-btn" title="Delete selected" type="button">Delete</button>
+          </div>
+          <div id="props-body" class="panel-body">
+            <div class="empty-state">Select a node or wire to inspect.</div>
+          </div>
         </div>
-        <div id="editor-container"></div>
-      </div>
+      </section>
 
-      <!-- Terminal resize -->
-      <div class="resize-handle-h" id="terminal-resize"></div>
-
-      <!-- Terminal -->
-      <div id="terminal-panel" class="panel-section">
-        <div class="panel-header">
-          <span>Output</span>
-          <button id="btn-clear-term" class="icon-btn" title="Clear">
-            <svg viewBox="0 0 16 16" width="14" height="14"><path d="M2 2h12M5 5h6M3 8h10M6 11h4M7 14h2" stroke="currentColor" stroke-width="1" opacity="0.7"/></svg>
-          </button>
+      <section class="sidebar-view" data-sidebar-view="debug">
+        <div class="panel-section debug-panel">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">Debug</div>
+              <div class="panel-subtitle">Runtime-style event stream and debug node output</div>
+            </div>
+            <div class="panel-actions">
+              <span id="debug-count" class="panel-tag">0 entries</span>
+              <button id="btn-clear-debug" class="icon-btn" title="Clear debug output" type="button">Clear</button>
+            </div>
+          </div>
+          <div class="debug-layout">
+            <div id="debug-list" class="debug-list" aria-live="polite"></div>
+            <div id="debug-detail" class="debug-detail">
+              <div class="empty-state">Select a debug entry to inspect its payload.</div>
+            </div>
+          </div>
         </div>
-        <div id="terminal" class="terminal"></div>
-      </div>
+      </section>
+
+      <section class="sidebar-view" data-sidebar-view="generated">
+        <div id="editor-panel" class="panel-section">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">Generated Runtime</div>
+              <div class="panel-subtitle">Compiled flow preview from the current graph</div>
+            </div>
+            <span id="editor-lang" class="panel-tag">C++</span>
+          </div>
+          <div id="editor-container"></div>
+        </div>
+      </section>
     </aside>
   </div>
 
-  <!-- ─── Status Bar ─── -->
   <footer id="statusbar">
     <span id="status-msg">Ready</span>
     <span id="status-right">
@@ -193,26 +188,18 @@
     </span>
   </footer>
 
-  <!-- ─── Wallet Modal (HD-Wallet-UI integration point) ─── -->
   <dialog id="wallet-dialog">
     <div class="dialog-header">
       <span>Signing Wallet</span>
-      <button id="btn-close-wallet" class="icon-btn">
-        <svg viewBox="0 0 16 16" width="14" height="14"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5"/></svg>
-      </button>
+      <button id="btn-close-wallet" class="icon-btn" type="button">Close</button>
     </div>
-    <div id="wallet-mount"></div>
+    <div id="wallet-mount">
+      <p class="dialog-copy">
+        Connect a signing surface here when embedding the editor or wiring a deployment host.
+      </p>
+    </div>
   </dialog>
 
-  <!-- ─── Scripts ─── -->
-  <script>
-    // Monaco Editor AMD loader
-    window.MonacoEnvironment = { getWorkerUrl: () => URL.createObjectURL(new Blob([`
-      self.MonacoEnvironment = { baseUrl: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/' };
-      importScripts('https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs/base/worker/workerMain.js');
-    `], { type: 'text/javascript' })) };
-  </script>
-  <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs/loader.js"></script>
   <script type="module" src="js/app.mjs"></script>
 </body>
 </html>

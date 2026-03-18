@@ -5,18 +5,6 @@
  * externalInterfaces, artifactDependencies, and editor layout metadata.
  */
 
-let walletPromise = null;
-
-async function getWallet() {
-  if (!walletPromise) {
-    walletPromise = import("hd-wallet-wasm").then(async (module) => {
-      const init = module.default ?? module.createHDWallet;
-      return init();
-    });
-  }
-  return walletPromise;
-}
-
 // ── CRC-32 (ISO 3309 / ITU-T V.42) ──
 
 const CRC_TABLE = new Uint32Array(256);
@@ -41,15 +29,11 @@ export function crc32Hex(bytes) {
 
 export async function sha256(bytes) {
   if (typeof bytes === "string") bytes = new TextEncoder().encode(bytes);
-  try {
-    const wallet = await getWallet();
-    const digest = wallet.utils.sha256(bytes);
-    return Array.from(digest).map(b => b.toString(16).padStart(2, "0")).join("");
-  } catch {
-    // Fallback to Web Crypto if hd-wallet-wasm is unavailable
-    const digest = await crypto.subtle.digest("SHA-256", bytes);
-    return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, "0")).join("");
+  if (!globalThis.crypto?.subtle) {
+    throw new Error("Web Crypto is not available in this runtime.");
   }
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
 // ── Canonical JSON ──
@@ -80,6 +64,7 @@ export const KIND_COLORS = {
   responder: "#dcdcaa",
   renderer:  "#d16969",
   sink:      "#d7ba7d",
+  debug:     "#f07178",
 };
 
 // ── Default ports per kind ──
@@ -92,6 +77,15 @@ const DEFAULT_PORTS = {
   responder: { inputs: [{ id: "req", label: "req" }], outputs: [{ id: "res", label: "res" }] },
   renderer:  { inputs: [{ id: "in", label: "in" }], outputs: [] },
   sink:      { inputs: [{ id: "in", label: "in" }], outputs: [] },
+  debug:     { inputs: [{ id: "in", label: "msg" }], outputs: [] },
+};
+
+const DEFAULT_CONFIGS = {
+  debug: {
+    target: "sidebar",
+    path: "payload",
+    includeCompleteMessage: false,
+  },
 };
 
 // ── ID generation ──
@@ -122,7 +116,7 @@ export class FlowModel extends EventTarget {
 
   // ── Nodes ──
 
-  addNode({ kind, pluginId, methodId, label, lang, x, y, source, ports }) {
+  addNode({ kind, pluginId, methodId, label, lang, x, y, source, ports, config }) {
     const nodeId = genId("node");
     const defaultPorts = DEFAULT_PORTS[kind] || DEFAULT_PORTS.transform;
     const node = {
@@ -138,6 +132,7 @@ export class FlowModel extends EventTarget {
         inputs: defaultPorts.inputs.map(p => ({ ...p })),
         outputs: defaultPorts.outputs.map(p => ({ ...p })),
       },
+      config: this._createDefaultConfig(kind, config),
     };
     this.nodes.set(nodeId, node);
     this.editorMeta.nodes[nodeId] = { x: x || 200, y: y || 200 };
@@ -249,6 +244,7 @@ export class FlowModel extends EventTarget {
         lang: n.lang,
         source: n.source,
         ports: n.ports,
+        config: n.config,
       })),
       edges: [...this.edges.values()].map(e => ({
         edgeId: e.edgeId,
@@ -288,6 +284,7 @@ export class FlowModel extends EventTarget {
         lang: n.lang || null,
         source: n.source || "",
         ports: n.ports || (DEFAULT_PORTS[n.kind] || DEFAULT_PORTS.transform),
+        config: this._createDefaultConfig(n.kind || "transform", n.config),
       };
       this.nodes.set(node.nodeId, node);
       if (!this.editorMeta.nodes[node.nodeId]) {
@@ -380,6 +377,14 @@ export function process(input: Uint8Array): Uint8Array {
 `,
     };
     return templates[lang] || "";
+  }
+
+  _createDefaultConfig(kind, config) {
+    const defaultConfig = DEFAULT_CONFIGS[kind] || {};
+    return {
+      ...JSON.parse(JSON.stringify(defaultConfig)),
+      ...(config && typeof config === "object" ? JSON.parse(JSON.stringify(config)) : {}),
+    };
   }
 
   // ── Events ──

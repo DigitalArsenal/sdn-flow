@@ -15,6 +15,7 @@ This repo covers the full flow path:
 
 - normalized flow programs and runtime descriptors
 - designer-facing graph inspection and requirement summaries
+- a hosted flow editor runtime with embeddable fetch/HTTP surfaces
 - compilation from flow graph to one generated C++ translation unit
 - `emception`-backed compilation to one deployable `.wasm` runtime artifact
 - deployment packaging built on canonical module auth and transport records
@@ -88,6 +89,61 @@ invocation, and descriptor ABIs exposed from `src/host`.
 npm install sdn-flow
 ```
 
+The editor runtime is also available through the dedicated export surface:
+
+```js
+import { createSdnFlowEditorFetchHandler } from "sdn-flow/editor";
+```
+
+## Hosted Editor
+
+`sdn-flow` includes a packaged editor runtime that serves the flow canvas,
+inspector, generated-runtime preview, and debug sidebar from embedded assets.
+That runtime has two intended deployment modes:
+
+- embed it behind any fetch-compatible host with
+  `createSdnFlowEditorFetchHandler(...)`
+- launch it directly with a host wrapper such as `sdn-flow-editor` or the
+  Deno single-file entrypoint in `tools/sdn-flow-editor.ts`
+
+Example embed:
+
+```js
+import { createSdnFlowEditorFetchHandler } from "sdn-flow/editor";
+
+const handler = createSdnFlowEditorFetchHandler({
+  basePath: "/editor",
+  title: "Mission Control",
+  engineLabel: "Embedded runtime",
+  initialFlow: flowJson,
+  async onExport(flow) {
+    await saveFlow(flow);
+    return { saved: true };
+  },
+  async onDeploy(deployment) {
+    await queueDeployment(deployment);
+    return { queued: true };
+  },
+});
+```
+
+Node-oriented local startup:
+
+```bash
+sdn-flow-editor --flow ./examples/flows/single-plugin-flow.json
+sdn-flow-editor --port 9090 --base-path /editor
+```
+
+Deno single-file build:
+
+```bash
+deno compile --allow-net --allow-read --output sdn-flow-editor ./tools/sdn-flow-editor.ts
+./sdn-flow-editor --flow ./examples/flows/single-plugin-flow.json
+```
+
+The Deno launcher compiles into one executable while serving the same embedded
+editor asset set used by the embeddable fetch handler and the Node host.
+
 ## Compile A Flow
 
 ```js
@@ -136,6 +192,12 @@ sdn-flow-host --workspace ./workspace.json --engine node
 That CLI is a thin wrapper over `startInstalledFlowAutoHost(...)` with startup
 summary output and `SIGINT` / `SIGTERM` shutdown handling.
 
+The editor runtime has its own CLI alongside it:
+
+```bash
+sdn-flow-editor --flow ./examples/flows/single-plugin-flow.json
+```
+
 ## Host Surfaces
 
 The host package is organized around a few layers:
@@ -172,6 +234,7 @@ across the broader runtime set above.
 ## Examples
 
 - [Bootstrap Examples](./examples/bootstrap/README.md)
+- [Editor Bootstrap Example](./examples/bootstrap/start-node-editor-host.mjs)
 - [Environment Demos](./examples/environments/README.md)
 - [Single-Plugin Flow](./examples/flows/single-plugin-flow.json)
 - [Field-Protected Catalog Entry Flow](./examples/flows/field-protected-catalog-entry/README.md)
@@ -190,6 +253,7 @@ Notable environment profiles:
 ## Package Surface
 
 - `sdn-flow`
+- `sdn-flow/editor`
 - `sdn-flow/runtime`
 - `sdn-flow/designer`
 - `sdn-flow/host`

@@ -23,6 +23,10 @@ import {
   createNodeBootstrapWorkspace,
   startNodeBootstrapExample,
 } from "../examples/bootstrap/start-node-http-host.mjs";
+import {
+  createEditorBootstrapFlow,
+  startNodeEditorBootstrapExample,
+} from "../examples/bootstrap/start-node-editor-host.mjs";
 
 test("bootstrap demo workspace factory produces a runnable HTTP host workspace", () => {
   const workspace = createBootstrapDemoWorkspace({
@@ -145,4 +149,22 @@ test("auto-host bootstrap script dispatches through the environment-neutral star
       engine: "deno",
     },
   ]);
+});
+
+test("editor bootstrap example can start through an injected editor host", async () => {
+  const calls = [];
+  const host = await startNodeEditorBootstrapExample({
+    startEditorHost: async (options) => {
+      calls.push(options);
+      return {
+        url: "http://127.0.0.1:9082/editor",
+      };
+    },
+  });
+
+  assert.equal(createEditorBootstrapFlow().name, "Editor Bootstrap Flow");
+  assert.equal(host.url, "http://127.0.0.1:9082/editor");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].basePath, "/editor");
+  assert.equal(calls[0].initialFlow.name, "Editor Bootstrap Flow");
 });
