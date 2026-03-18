@@ -1,5 +1,5 @@
 {
-  "name": "@digitalarsenal/sdn-flow",
+  "name": "sdn-flow",
   "version": "0.2.0",
   "description": "Isomorphic flow authoring, runtime, authorization, and deployment tooling for schema-driven WASM systems.",
   "type": "module",

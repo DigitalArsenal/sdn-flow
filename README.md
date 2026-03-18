@@ -1,6 +1,6 @@
 # sdn-flow
 
-`@digitalarsenal/sdn-flow` composes signed modules into typed flow graphs,
+`sdn-flow` composes signed modules into typed flow graphs,
 compiles those graphs into deployable WebAssembly runtimes, and provides host
 surfaces for loading, starting, and serving those flows.
 
@@ -85,7 +85,7 @@ invocation, and descriptor ABIs exposed from `src/host`.
 ## Install
 
 ```bash
-npm install @digitalarsenal/sdn-flow
+npm install sdn-flow
 ```
 
 ## Compile A Flow
@@ -95,7 +95,7 @@ import {
   EmceptionCompilerAdapter,
   SignedArtifactCatalog,
   normalizeProgram,
-} from "@digitalarsenal/sdn-flow";
+} from "sdn-flow";
 
 const program = normalizeProgram(flowJson);
 
@@ -119,7 +119,7 @@ For JS-family hosts, the quickest path is a workspace file plus the
 environment-neutral auto-host entrypoint:
 
 ```js
-import { startInstalledFlowAutoHost } from "@digitalarsenal/sdn-flow";
+import { startInstalledFlowAutoHost } from "sdn-flow";
 
 await startInstalledFlowAutoHost({
   workspacePath: "./workspace.json",
@@ -189,15 +189,15 @@ Notable environment profiles:
 
 ## Package Surface
 
-- `@digitalarsenal/sdn-flow`
-- `@digitalarsenal/sdn-flow/runtime`
-- `@digitalarsenal/sdn-flow/designer`
-- `@digitalarsenal/sdn-flow/host`
-- `@digitalarsenal/sdn-flow/auth`
-- `@digitalarsenal/sdn-flow/transport`
-- `@digitalarsenal/sdn-flow/deploy`
-- `@digitalarsenal/sdn-flow/compiler`
-- `@digitalarsenal/sdn-flow/compliance`
+- `sdn-flow`
+- `sdn-flow/runtime`
+- `sdn-flow/designer`
+- `sdn-flow/host`
+- `sdn-flow/auth`
+- `sdn-flow/transport`
+- `sdn-flow/deploy`
+- `sdn-flow/compiler`
+- `sdn-flow/compliance`
 
 ## Documentation
 
