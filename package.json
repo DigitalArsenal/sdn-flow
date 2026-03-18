@@ -62,7 +62,8 @@
     "space-data-module-sdk": "file:../space-data-module-sdk"
   },
   "devDependencies": {
-    "flatbuffers": "^25.9.23"
+    "flatbuffers": "^25.9.23",
+    "flatsql": "^0.4.0"
   },
   "engines": {
     "node": ">=20.0.0"

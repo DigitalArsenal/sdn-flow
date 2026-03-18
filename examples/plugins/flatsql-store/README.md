@@ -19,6 +19,8 @@ Supported backing modes:
 ## Files
 
 - `manifest.json` defines the canonical storage plugin contract
+- `plugin.js` provides a local FlatSQL-backed host implementation for tests and
+  local runtime development
 
 ## Runtime Notes
 
