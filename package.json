@@ -51,6 +51,9 @@
     "url": "https://github.com/DigitalArsenal/sdn-flow.git"
   },
   "homepage": "https://github.com/DigitalArsenal/sdn-flow",
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
     "hd-wallet-wasm": "^1.5.4",
     "space-data-module-sdk": "file:../space-data-module-sdk"
