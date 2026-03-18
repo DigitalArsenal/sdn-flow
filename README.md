@@ -134,7 +134,18 @@ sdn-flow-editor --flow ./examples/flows/single-plugin-flow.json
 sdn-flow-editor --port 9090 --base-path /editor
 ```
 
-Deno single-file build:
+Executable app startup from the repo:
+
+```bash
+npm run start -- --flow ./examples/flows/single-plugin-flow.json
+```
+
+That command builds one Deno executable into `generated-tools/sdn-flow-editor`,
+launches it, and opens the editor URL in your browser. Use
+`npm run build:editor-executable` when you want the standalone binary without
+launching it.
+
+Direct Deno single-file build:
 
 ```bash
 deno compile --allow-net --allow-read --output sdn-flow-editor ./tools/sdn-flow-editor.ts

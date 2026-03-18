@@ -32,7 +32,9 @@
   ],
   "scripts": {
     "build:editor-assets": "node scripts/build-editor-assets.mjs",
+    "build:editor-executable": "node scripts/editor-executable.mjs build",
     "build:runtime-abi": "node scripts/build-runtime-abi.mjs",
+    "start": "node scripts/editor-executable.mjs start",
     "test": "npm run check:plugin-compliance && node --test",
     "check:plugin-compliance": "node scripts/check-shared-module-compliance.mjs"
   },
@@ -62,6 +64,7 @@
     "space-data-module-sdk": "file:../space-data-module-sdk"
   },
   "devDependencies": {
+    "deno": "^2.7.5",
     "flatbuffers": "^25.9.23",
     "flatsql": "^0.4.0"
   },

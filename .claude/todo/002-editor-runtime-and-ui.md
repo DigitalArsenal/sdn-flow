@@ -45,3 +45,11 @@
    - README editor runtime section with embed, CLI, and Deno single-file usage
    - `examples/bootstrap/start-node-editor-host.mjs`
    - updated bootstrap examples README
+
+9. Make `npm run start` build a real single-file executable and launch it like an app host instead of relying on a script-only editor entrypoint. (done)
+   Done:
+   - added `scripts/editor-executable.mjs` for build and launch orchestration
+   - added `npm run build:editor-executable` and `npm run start`
+   - executable builds to `generated-tools/sdn-flow-editor`
+   - startup opens the served editor URL in the browser by default
+   - added focused test coverage for the executable wrapper flow
