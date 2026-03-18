@@ -77,3 +77,9 @@
    - `--workspace` and optional `--engine` override support
    - startup summary plus `SIGINT`/`SIGTERM` shutdown hooks
    - CLI coverage for parsing, help text, and startup dispatch
+
+23. Publish root AGENTS guidance for module and flow builders. (done)
+   Done:
+   - root `AGENTS.md` in `space-data-module-sdk` for compliant module authors
+   - rewritten root `AGENTS.md` in `sdn-flow` for compliant flow and host authors
+   - explicit integration-test lists for module, bundle, compiler, startup, and environment changes
