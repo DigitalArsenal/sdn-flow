@@ -1,5 +1,7 @@
 export {
+  decodeCompiledArtifactManifest,
   deserializeCompiledArtifact,
+  listCompiledArtifactRuntimeTargets,
   normalizeCompiledArtifact,
   resolveCompiledArtifactEnvelope,
   resolveCompiledArtifactInput,

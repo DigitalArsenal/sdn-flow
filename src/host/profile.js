@@ -1,4 +1,5 @@
 import { RecommendedCapabilityIds } from "../compliance/index.js";
+import { RuntimeTarget } from "../runtime/index.js";
 import { HostedRuntimeAdapter, HostedRuntimeEngine } from "./constants.js";
 
 function normalizeString(value, fallback = null) {
@@ -16,6 +17,29 @@ function normalizeStringArray(values) {
   return values
     .map((value) => normalizeString(value, null))
     .filter((value) => value !== null);
+}
+
+function normalizeRuntimeTarget(value, fallback = null) {
+  const normalized = normalizeString(value, null);
+  if (!normalized) {
+    return fallback;
+  }
+  return Object.values(RuntimeTarget).includes(normalized)
+    ? normalized
+    : fallback;
+}
+
+function normalizeRuntimeTargetArray(values) {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  return Array.from(
+    new Set(
+      values
+        .map((value) => normalizeRuntimeTarget(value, null))
+        .filter((value) => value !== null),
+    ),
+  ).sort();
 }
 
 const AllKnownCapabilities = Object.freeze(
@@ -76,6 +100,62 @@ export function normalizeHostedRuntimeEngine(value, fallback = null) {
     : fallback;
 }
 
+export function listHostedRuntimeTargets({
+  hostKind = null,
+  adapter = null,
+  engine = null,
+} = {}) {
+  const normalizedHostKind = normalizeString(hostKind, null);
+  const normalizedAdapter = normalizeString(adapter, null);
+  const normalizedEngine = normalizeHostedRuntimeEngine(engine, null);
+  const targets = new Set();
+
+  if (normalizedHostKind === "wasmedge") {
+    targets.add(RuntimeTarget.WASMEDGE);
+    targets.add(RuntimeTarget.WASI);
+    targets.add(RuntimeTarget.SERVER);
+    targets.add(RuntimeTarget.EDGE);
+  }
+
+  switch (normalizedEngine) {
+    case HostedRuntimeEngine.BROWSER:
+      targets.add(RuntimeTarget.BROWSER);
+      break;
+    case HostedRuntimeEngine.NODE:
+      targets.add(RuntimeTarget.NODE);
+      targets.add(RuntimeTarget.SERVER);
+      break;
+    case HostedRuntimeEngine.DENO:
+    case HostedRuntimeEngine.BUN:
+    case HostedRuntimeEngine.GO:
+      targets.add(RuntimeTarget.SERVER);
+      break;
+    case HostedRuntimeEngine.WASI:
+      targets.add(RuntimeTarget.WASI);
+      break;
+    default:
+      break;
+  }
+
+  if (normalizedAdapter === HostedRuntimeAdapter.GO_SDN) {
+    targets.add(RuntimeTarget.SERVER);
+  }
+  if (
+    normalizedAdapter === HostedRuntimeAdapter.SDN_JS &&
+    normalizedEngine === HostedRuntimeEngine.BROWSER
+  ) {
+    targets.add(RuntimeTarget.BROWSER);
+  }
+  if (
+    normalizedAdapter === HostedRuntimeAdapter.HOST_INTERNAL &&
+    normalizedEngine === HostedRuntimeEngine.WASI
+  ) {
+    targets.add(RuntimeTarget.WASI);
+  }
+
+  return Array.from(targets).sort();
+}
+
 export function listHostedRuntimeCapabilities({ adapter = null, engine = null } = {}) {
   const normalizedAdapter = normalizeString(adapter, null);
   const normalizedEngine = normalizeHostedRuntimeEngine(engine, null);
@@ -127,8 +207,38 @@ export function evaluateHostedCapabilitySupport({
   };
 }
 
+export function evaluateHostedRuntimeTargetSupport({
+  hostKind = null,
+  adapter = null,
+  engine = null,
+  runtimeTargets = [],
+} = {}) {
+  const supportedTargets = listHostedRuntimeTargets({
+    hostKind,
+    adapter,
+    engine,
+  });
+  const supportedSet = new Set(supportedTargets);
+  const normalizedTargets = normalizeRuntimeTargetArray(runtimeTargets);
+  const unsupportedTargets = normalizedTargets.filter(
+    (runtimeTarget) => !supportedSet.has(runtimeTarget),
+  );
+
+  return {
+    hostKind: normalizeString(hostKind, null),
+    adapter: normalizeString(adapter, null),
+    engine: normalizeHostedRuntimeEngine(engine, null),
+    runtimeTargets: normalizedTargets,
+    supportedTargets,
+    unsupportedTargets,
+    ok: unsupportedTargets.length === 0,
+  };
+}
+
 export default {
   evaluateHostedCapabilitySupport,
+  evaluateHostedRuntimeTargetSupport,
   listHostedRuntimeCapabilities,
+  listHostedRuntimeTargets,
   normalizeHostedRuntimeEngine,
 };

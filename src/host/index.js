@@ -27,7 +27,9 @@ export { instantiateEmbeddedDependencies } from "./dependencyRuntime.js";
 export { bindCompiledFlowRuntimeHost } from "./compiledFlowRuntimeHost.js";
 export {
   evaluateHostedCapabilitySupport,
+  evaluateHostedRuntimeTargetSupport,
   listHostedRuntimeCapabilities,
+  listHostedRuntimeTargets,
   normalizeHostedRuntimeEngine,
 } from "./profile.js";
 export {

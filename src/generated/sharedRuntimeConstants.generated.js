@@ -40,6 +40,7 @@ export const RuntimeTarget = Object.freeze({
   "NODE": "node",
   "BROWSER": "browser",
   "WASI": "wasi",
+  "WASMEDGE": "wasmedge",
   "SERVER": "server",
   "DESKTOP": "desktop",
   "EDGE": "edge"

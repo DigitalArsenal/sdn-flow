@@ -1,0 +1,80 @@
+# Node-RED Default Node Parity
+
+Status: active
+
+## Goal
+
+- [ ] Reach practical parity for the default shipped node families while keeping
+      maximum WASI compatibility.
+- [ ] Classify every shipped node as one of:
+  - standalone `wasi`
+  - `wasmedge`
+  - delegated/wrapper
+
+## Standalone `wasi` Bucket
+
+- [ ] `change`
+- [ ] `switch`
+- [ ] `range`
+- [ ] `template`
+- [ ] `json`
+- [ ] `csv`
+- [ ] `yaml`
+- [ ] `xml`
+- [ ] `html`
+- [ ] `split`
+- [ ] `join`
+- [ ] `batch`
+- [ ] `sort`
+- [ ] `rbe`
+- [ ] `link in`
+- [ ] `link out`
+- [ ] `link call`
+- [ ] `debug`
+- [ ] immediate/manual `inject`
+- [ ] `read file` and `write file` on preopened roots
+
+## `wasmedge` Bucket
+
+- [ ] `http request`
+- [ ] `http in`
+- [ ] `http response`
+- [ ] TCP request/listener nodes
+- [ ] UDP in/out nodes
+- [ ] TLS-backed client/server nodes
+- [ ] WebSocket in/out nodes via guest libraries
+- [ ] MQTT in/out nodes via guest libraries
+- [ ] protocol handle/dial nodes for SDN/IPFS-facing services
+
+## Delegated/Wrapper Bucket
+
+- [ ] `watch`
+- [ ] cron-style `inject`
+- [ ] wall-clock `delay`
+- [ ] wall-clock `trigger`
+- [ ] `exec`
+- [ ] `catch`
+- [ ] `status`
+- [ ] `complete`
+- [ ] browser-local inbound listener behavior
+- [ ] browser-only or OS-only watch/process semantics
+
+## Required Work
+
+1. Inventory
+   - [ ] Build a checked-in parity matrix covering every shipped node.
+   - [ ] Mark current implementation state:
+         editor-only, JS runtime, compiled runtime, delegated.
+
+2. Compiled implementations
+   - [ ] Move remaining deterministic node semantics into compiled C++/WASM.
+   - [ ] Implement guest-owned network node families against the `wasmedge`
+         target.
+   - [ ] Keep the delegated bucket explicitly small and documented.
+
+3. Tests
+   - [ ] Add end-to-end flows for every shipped node family.
+   - [ ] Run the same flow artifacts against:
+         standalone `wasi`, `wasmedge`, and delegated/browser profiles where
+         applicable.
+   - [ ] Keep parity regressions in CI before expanding the default node set.

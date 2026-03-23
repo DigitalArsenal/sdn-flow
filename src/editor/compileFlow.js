@@ -6,14 +6,12 @@ import { fileURLToPath } from "node:url";
 import { existsSync, realpathSync } from "node:fs";
 
 import { EmceptionCompilerAdapter } from "../compiler/index.js";
+import { buildDefaultFlowManifestBuffer } from "../compiler/flowManifest.js";
 import { createSdkEmceptionSession } from "../compiler/sdkEmceptionSession.js";
 import { createFlowDeploymentPlan } from "../deploy/deploymentPlan.js";
 import { serializeCompiledArtifact } from "../deploy/compiledArtifact.js";
 import { convertNodeRedFlowsToSdnProgram } from "./flowLowering.js";
-import {
-  SDN_FLOW_EDITOR_ARTIFACT_OUTPUT_NAME,
-  SDN_FLOW_EDITOR_MANIFEST_BUFFER,
-} from "./compileConfig.js";
+import { SDN_FLOW_EDITOR_ARTIFACT_OUTPUT_NAME } from "./compileConfig.js";
 
 const PACKAGE_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
@@ -73,7 +71,16 @@ function createEditorCompiler(options = {}) {
         },
       },
     manifestBuilder:
-      options.manifestBuilder ?? (async () => SDN_FLOW_EDITOR_MANIFEST_BUFFER),
+      options.manifestBuilder ??
+      (({ program, metadata }) =>
+        buildDefaultFlowManifestBuffer({
+          program,
+          deploymentPlan: metadata?.deploymentPlan ?? null,
+          hostPlan: metadata?.hostPlan ?? null,
+          runtimeTargets: metadata?.runtimeTargets ?? null,
+          pluginId: metadata?.pluginId ?? null,
+          version: metadata?.version ?? null,
+        })),
     outputName: options.outputName ?? SDN_FLOW_EDITOR_ARTIFACT_OUTPUT_NAME,
     sourceGenerator: options.sourceGenerator,
   });
@@ -194,6 +201,11 @@ export async function compileNodeRedFlows(flows = [], options = {}) {
       program,
       metadata: {
         outputName,
+        deploymentPlan,
+        hostPlan: options.hostPlan ?? null,
+        pluginId: options.pluginId ?? null,
+        runtimeTargets: options.runtimeTargets ?? null,
+        version: options.version ?? null,
       },
     });
     return {
@@ -214,6 +226,11 @@ export async function compileNodeRedFlows(flows = [], options = {}) {
   let cleanupWorkingDirectory = null;
   const metadata = {
     outputName,
+    deploymentPlan,
+    hostPlan: options.hostPlan ?? null,
+    pluginId: options.pluginId ?? null,
+    runtimeTargets: options.runtimeTargets ?? null,
+    version: options.version ?? null,
   };
   let compiler = options.compiler ?? null;
 

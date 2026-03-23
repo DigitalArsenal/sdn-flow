@@ -6,7 +6,11 @@ import {
   HostedRuntimeStartupPhase,
   HostedRuntimeTransport,
 } from "./constants.js";
-import { evaluateHostedCapabilitySupport, normalizeHostedRuntimeEngine } from "./profile.js";
+import {
+  evaluateHostedCapabilitySupport,
+  evaluateHostedRuntimeTargetSupport,
+  normalizeHostedRuntimeEngine,
+} from "./profile.js";
 
 const STARTUP_PHASE_ORDER = Object.freeze({
   [HostedRuntimeStartupPhase.BOOTSTRAP]: 0,
@@ -212,6 +216,9 @@ export function normalizeHostedRuntime(runtime = {}) {
     requiredCapabilities: normalizeStringArray(
       runtime.requiredCapabilities ?? runtime.required_capabilities,
     ),
+    runtimeTargets: normalizeStringArray(
+      runtime.runtimeTargets ?? runtime.runtime_targets,
+    ),
     bindings: Array.isArray(runtime.bindings)
       ? runtime.bindings.map((binding) => normalizeHostedBinding(binding))
       : [],
@@ -368,6 +375,7 @@ export function summarizeHostedRuntimePlan(planInput = {}) {
       adapter: runtime.adapter ?? plan.adapter,
       engine: runtime.engine ?? plan.engine,
       dependsOn: runtime.dependsOn,
+      runtimeTargets: runtime.runtimeTargets,
     })),
     earlyStartRuntimes: startupOrder
       .filter(
@@ -398,6 +406,16 @@ export function summarizeHostedRuntimePlan(planInput = {}) {
           adapter: runtime.adapter ?? plan.adapter,
           engine: runtime.engine ?? plan.engine,
           requiredCapabilities: runtime.requiredCapabilities,
+        }),
+      })),
+    runtimeTargetCompatibility: startupOrder.map((runtime) =>
+      ({
+        runtimeId: runtime.runtimeId,
+        ...evaluateHostedRuntimeTargetSupport({
+          hostKind: plan.hostKind,
+          adapter: runtime.adapter ?? plan.adapter,
+          engine: runtime.engine ?? plan.engine,
+          runtimeTargets: runtime.runtimeTargets,
         }),
       })),
     bindings: bindings.sort((left, right) =>

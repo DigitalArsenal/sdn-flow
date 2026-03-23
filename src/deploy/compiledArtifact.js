@@ -1,3 +1,6 @@
+import { decodePluginManifest } from "space-data-module-sdk";
+
+import { normalizeManifest } from "../runtime/index.js";
 import { DefaultManifestExports } from "../runtime/constants.js";
 import {
   base64ToBytes,
@@ -308,6 +311,25 @@ export async function deserializeCompiledArtifact(serializedArtifact = {}) {
   return normalizeCompiledArtifact(serializedArtifact);
 }
 
+export function decodeCompiledArtifactManifest(artifact = {}) {
+  const manifestBuffer =
+    artifact?.manifestBuffer ??
+    artifact?.manifest_buffer ??
+    null;
+  if (!(manifestBuffer instanceof Uint8Array) && !ArrayBuffer.isView(manifestBuffer) && !(manifestBuffer instanceof ArrayBuffer)) {
+    return null;
+  }
+  try {
+    return normalizeManifest(decodePluginManifest(manifestBuffer));
+  } catch {
+    return null;
+  }
+}
+
+export function listCompiledArtifactRuntimeTargets(artifact = {}) {
+  return decodeCompiledArtifactManifest(artifact)?.runtimeTargets ?? [];
+}
+
 export async function resolveCompiledArtifactEnvelope(
   input = {},
   options = {},
@@ -368,7 +390,9 @@ export async function resolveCompiledArtifactInput(input = {}, options = {}) {
 }
 
 export default {
+  decodeCompiledArtifactManifest,
   deserializeCompiledArtifact,
+  listCompiledArtifactRuntimeTargets,
   normalizeCompiledArtifact,
   resolveCompiledArtifactEnvelope,
   resolveCompiledArtifactInput,

@@ -313,6 +313,17 @@ export function normalizeManifest(manifest = {}) {
     buildArtifacts: normalizeArray(
       manifest.buildArtifacts ?? manifest.build_artifacts,
     ),
+    abiVersion: Number(manifest.abiVersion ?? manifest.abi_version ?? 1),
+    invokeSurfaces: normalizeArray(
+      manifest.invokeSurfaces ?? manifest.invoke_surfaces,
+    )
+      .map((surface) => normalizeInvokeSurface(surface, null))
+      .filter(Boolean),
+    runtimeTargets: normalizeArray(
+      manifest.runtimeTargets ?? manifest.runtime_targets,
+    )
+      .map((target) => normalizeString(target, null))
+      .filter(Boolean),
     manifestBuffer: manifest.manifestBuffer ?? manifest.manifest_buffer ?? null,
     manifestExports: {
       bytesSymbol:
@@ -412,6 +423,11 @@ export function normalizeProgram(program = {}) {
     programId: normalizeString(program.programId ?? program.program_id, ""),
     name: normalizeString(program.name, null),
     version: normalizeString(program.version, null),
+    runtimeTargets: normalizeArray(
+      program.runtimeTargets ?? program.runtime_targets,
+    )
+      .map((target) => normalizeString(target, null))
+      .filter(Boolean),
     nodes: normalizeArray(program.nodes).map(normalizeNode),
     edges: normalizeArray(program.edges).map(normalizeEdge),
     triggers: normalizeArray(program.triggers).map(normalizeTrigger),
