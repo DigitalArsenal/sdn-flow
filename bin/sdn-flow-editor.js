@@ -2,8 +2,24 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
 import { startSdnFlowEditorNodeHost } from "../src/editor/index.js";
+import { normalizeSdnFlowEditorInitialFlows } from "../src/editor/flowFormat.js";
+import {
+  getSdnFlowEditorRuntimePaths,
+  isLegacyDefaultSdnFlowEditorStartup,
+  migrateLegacyDefaultSdnFlowEditorStartup,
+  readSdnFlowEditorSettingsFile,
+  readSdnFlowEditorSessionFile,
+  writeSdnFlowEditorSettingsFile,
+  writeSdnFlowEditorSessionFile,
+} from "../src/editor/runtimeManager.js";
+
+const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const DEFAULT_HOSTNAME = "127.0.0.1";
+const DEFAULT_PORT = 1990;
+const DEFAULT_BASE_PATH = "/";
 
 function normalizeString(value, fallback = null) {
   if (typeof value !== "string") {
@@ -13,20 +29,21 @@ function normalizeString(value, fallback = null) {
   return normalized.length > 0 ? normalized : fallback;
 }
 
-function normalizePort(value, fallback = 8080) {
+function normalizePort(value, fallback = 1990) {
   const port = Number.parseInt(String(value ?? fallback), 10);
   return Number.isFinite(port) && port >= 0 ? port : fallback;
 }
 
 export function formatSdnFlowEditorUsage() {
   return [
-    "Usage: sdn-flow-editor [--host <hostname>] [--port <port>] [--base-path <path>] [--flow <flow.json>]",
+    "Usage: sdn-flow-editor [--host <hostname>] [--port <port>] [--base-path <path>] [--flow <flow.json>] [--session-file <session.json>]",
     "",
     "Options:",
     "  --host <hostname>      Hostname to bind. Default: 127.0.0.1",
-    "  --port <port>          Port to bind. Default: 8080",
+    "  --port <port>          Port to bind. Default: 1990",
     "  --base-path <path>     Optional mount path, such as /editor.",
     "  --flow <flow.json>     Optional initial flow JSON to load in the editor.",
+    "  --session-file <path>  Restart session file written by the Compile workflow.",
     "  --title <title>        Optional window title shown in the editor.",
     "  -h, --help             Show this help text.",
   ].join("\n");
@@ -36,9 +53,10 @@ export function parseSdnFlowEditorCliArgs(argv = []) {
   const args = Array.isArray(argv) ? [...argv] : [];
   const parsed = {
     hostname: "127.0.0.1",
-    port: 8080,
-    basePath: "/",
+    port: DEFAULT_PORT,
+    basePath: DEFAULT_BASE_PATH,
     flowPath: null,
+    sessionFile: null,
     title: null,
     help: false,
   };
@@ -66,6 +84,10 @@ export function parseSdnFlowEditorCliArgs(argv = []) {
         parsed.flowPath = normalizeString(args[index + 1], null);
         index += 1;
         break;
+      case "--session-file":
+        parsed.sessionFile = normalizeString(args[index + 1], null);
+        index += 1;
+        break;
       case "--title":
         parsed.title = normalizeString(args[index + 1], null);
         index += 1;
@@ -86,8 +108,50 @@ async function readInitialFlow(flowPath) {
   const json = JSON.parse(await fs.readFile(resolvedPath, "utf8"));
   return {
     resolvedPath,
-    json,
+    json: normalizeSdnFlowEditorInitialFlows(json),
   };
+}
+
+async function readSessionFile(sessionFile) {
+  if (!sessionFile) {
+    return null;
+  }
+  const resolvedPath = path.resolve(sessionFile);
+  return {
+    resolvedPath,
+    session: await readSdnFlowEditorSessionFile(resolvedPath),
+  };
+}
+
+async function readRuntimeSettingsFile(projectRoot) {
+  const { settingsFilePath } = getSdnFlowEditorRuntimePaths({ projectRoot });
+  try {
+    return {
+      resolvedPath: settingsFilePath,
+      settings: await readSdnFlowEditorSettingsFile(settingsFilePath),
+    };
+  } catch (error) {
+    const code = error && typeof error === "object" ? error.code : null;
+    const name = error && typeof error === "object" ? error.name : null;
+    const message =
+      error && typeof error === "object" && typeof error.message === "string"
+        ? error.message
+        : String(error ?? "");
+    if (code === "ENOENT" || name === "NotFound" || /ENOENT|NotFound/i.test(message)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+function resolveStartupValue(parsedValue, defaultValue, sessionValue, persistedValue) {
+  if (sessionValue !== undefined && sessionValue !== null) {
+    return parsedValue === defaultValue ? sessionValue : parsedValue;
+  }
+  if (persistedValue !== undefined && persistedValue !== null) {
+    return parsedValue === defaultValue ? persistedValue : parsedValue;
+  }
+  return parsedValue;
 }
 
 function installShutdownHooks(host, options = {}) {
@@ -122,6 +186,7 @@ function installShutdownHooks(host, options = {}) {
 export async function runSdnFlowEditorCli(argv = process.argv.slice(2), options = {}) {
   const parsed = parseSdnFlowEditorCliArgs(argv);
   const log = options.log ?? console.log.bind(console);
+  const projectRoot = path.resolve(options.projectRoot ?? PROJECT_ROOT);
 
   if (parsed.help) {
     log(formatSdnFlowEditorUsage());
@@ -131,15 +196,72 @@ export async function runSdnFlowEditorCli(argv = process.argv.slice(2), options 
     };
   }
 
+  const sessionFile = await readSessionFile(parsed.sessionFile);
+  const runtimeSettingsFile = sessionFile ? null : await readRuntimeSettingsFile(projectRoot);
   const initialFlow = await readInitialFlow(parsed.flowPath);
+  const startup = sessionFile?.session?.startup
+    ? migrateLegacyDefaultSdnFlowEditorStartup(sessionFile.session.startup)
+    : {};
+  if (sessionFile?.session?.startup && isLegacyDefaultSdnFlowEditorStartup(sessionFile.session.startup)) {
+    sessionFile.session = {
+      ...sessionFile.session,
+      startup,
+    };
+    await writeSdnFlowEditorSessionFile(sessionFile.resolvedPath, sessionFile.session);
+  }
+  const persistedStartup = runtimeSettingsFile?.settings?.startup
+    ? migrateLegacyDefaultSdnFlowEditorStartup(runtimeSettingsFile.settings.startup)
+    : {};
+  if (
+    runtimeSettingsFile?.settings?.startup &&
+    isLegacyDefaultSdnFlowEditorStartup(runtimeSettingsFile.settings.startup)
+  ) {
+    runtimeSettingsFile.settings = {
+      ...runtimeSettingsFile.settings,
+      startup: persistedStartup,
+    };
+    await writeSdnFlowEditorSettingsFile(
+      runtimeSettingsFile.resolvedPath,
+      runtimeSettingsFile.settings,
+    );
+  }
   const startEditorHost =
     options.startEditorHost ?? startSdnFlowEditorNodeHost;
+  const hostname = resolveStartupValue(
+    parsed.hostname,
+    DEFAULT_HOSTNAME,
+    startup.hostname,
+    persistedStartup.hostname,
+  );
+  const port = resolveStartupValue(
+    parsed.port,
+    DEFAULT_PORT,
+    startup.port,
+    persistedStartup.port,
+  );
+  const basePath = resolveStartupValue(
+    parsed.basePath,
+    DEFAULT_BASE_PATH,
+    startup.basePath,
+    persistedStartup.basePath,
+  );
+  const title = resolveStartupValue(
+    parsed.title,
+    null,
+    startup.title,
+    persistedStartup.title,
+  ) ?? "sdn-flow Editor";
+  const protocol = startup.protocol ?? persistedStartup.protocol ?? "http";
+  const security = sessionFile?.session?.security ?? runtimeSettingsFile?.settings?.security ?? null;
   const host = await startEditorHost({
-    hostname: parsed.hostname,
-    port: parsed.port,
-    basePath: parsed.basePath,
-    title: parsed.title ?? "sdn-flow Editor",
-    initialFlow: initialFlow?.json ?? null,
+    projectRoot,
+    protocol,
+    hostname,
+    port,
+    basePath,
+    title,
+    security,
+    initialFlow: sessionFile?.session?.flows ?? initialFlow?.json ?? null,
   });
 
   if (options.quiet !== true) {
@@ -153,6 +275,7 @@ export async function runSdnFlowEditorCli(argv = process.argv.slice(2), options 
     args: {
       ...parsed,
       flowPath: initialFlow?.resolvedPath ?? parsed.flowPath,
+      sessionFile: sessionFile?.resolvedPath ?? parsed.sessionFile,
     },
     host,
   };

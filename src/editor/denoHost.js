@@ -1,4 +1,5 @@
 import { createSdnFlowEditorFetchHandler } from "./fetchHandler.js";
+import { createSdnFlowEditorRuntimeManager } from "./runtimeManager.js";
 
 function normalizeHost(value, fallback = "127.0.0.1") {
   if (typeof value !== "string") {
@@ -8,7 +9,7 @@ function normalizeHost(value, fallback = "127.0.0.1") {
   return normalized.length > 0 ? normalized : fallback;
 }
 
-function normalizePort(value, fallback = 8080) {
+function normalizePort(value, fallback = 1990) {
   const port = Number.parseInt(String(value ?? fallback), 10);
   return Number.isFinite(port) && port >= 0 ? port : fallback;
 }
@@ -26,9 +27,22 @@ export async function startSdnFlowEditorDenoHost(options = {}) {
   }
 
   const hostname = normalizeHost(options.hostname, "127.0.0.1");
-  const port = normalizePort(options.port, 8080);
+  const port = normalizePort(options.port, 1990);
+  const runtimeManager =
+    options.runtimeManager ??
+    createSdnFlowEditorRuntimeManager({
+      ...options,
+      hostname,
+      port,
+    });
+  if (typeof runtimeManager.initialize === "function") {
+    await runtimeManager.initialize();
+  }
   const handler =
-    options.handler ?? createSdnFlowEditorFetchHandler(options);
+    options.handler ?? createSdnFlowEditorFetchHandler({
+      ...options,
+      runtimeManager,
+    });
 
   const server = await serve(
     {
@@ -37,6 +51,25 @@ export async function startSdnFlowEditorDenoHost(options = {}) {
     },
     handler,
   );
+  let closed = false;
+  const closeHost = async () => {
+    if (closed) {
+      return;
+    }
+    closed = true;
+    if (typeof server?.shutdown === "function") {
+      await server.shutdown();
+      return;
+    }
+    if (typeof server?.stop === "function") {
+      await server.stop();
+    }
+  };
+  if (typeof runtimeManager.bindHostLifecycle === "function") {
+    runtimeManager.bindHostLifecycle({
+      closeHost,
+    });
+  }
 
   return {
     platform: "deno",
@@ -44,15 +77,10 @@ export async function startSdnFlowEditorDenoHost(options = {}) {
     port,
     url: `http://${hostname}:${port}${options.basePath && options.basePath !== "/" ? options.basePath : "/"}`,
     handler,
+    runtimeManager,
     server,
     async close() {
-      if (typeof server?.shutdown === "function") {
-        await server.shutdown();
-        return;
-      }
-      if (typeof server?.stop === "function") {
-        await server.stop();
-      }
+      await closeHost();
     },
   };
 }

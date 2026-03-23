@@ -1,4 +1,4 @@
-import { normalizeCompiledArtifact } from "../deploy/FlowDeploymentClient.js";
+import { normalizeCompiledArtifact } from "../deploy/compiledArtifact.js";
 
 export const DefaultRequiredRuntimeExportRoles = Object.freeze([
   "descriptorSymbol",

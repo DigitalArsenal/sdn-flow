@@ -1,9 +1,11 @@
 export {
   BackpressurePolicy,
+  DefaultInvokeExports,
   DefaultManifestExports,
   DrainPolicy,
   ExternalInterfaceDirection,
   ExternalInterfaceKind,
+  InvokeSurface,
   NodeKind,
   RuntimeTarget,
   TriggerKind,

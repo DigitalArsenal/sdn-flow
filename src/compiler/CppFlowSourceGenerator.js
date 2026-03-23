@@ -330,6 +330,7 @@ function createGeneratorRequest({
         : new Uint8Array(),
     })),
     nodeIngressIndices: ingressTopology.flattenedNodeIngressIndices,
+    editorMetadataJson: JSON.stringify(normalizedProgram.editor ?? null),
   };
 }
 
@@ -461,6 +462,7 @@ function encodeGeneratorRequest(request) {
 
   writer.pushU32(request.nodeIngressIndices.length);
   request.nodeIngressIndices.forEach((value) => writer.pushU32(value));
+  writer.pushString(request.editorMetadataJson);
 
   return writer.finish();
 }

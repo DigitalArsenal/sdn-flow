@@ -344,7 +344,7 @@ export class FlowModel extends EventTarget {
 
 extern "C" int process(const uint8_t* input, uint32_t input_len,
                         uint8_t* output, uint32_t* output_len) {
-    // TODO: implement
+    // Implement here.
     *output_len = 0;
     return 0;
 }
@@ -353,7 +353,7 @@ extern "C" int process(const uint8_t* input, uint32_t input_len,
 
 def process(input_bytes: bytes) -> bytes:
     """Process a FlatBuffer frame and return the output frame."""
-    # TODO: implement
+    # Implement here.
     return b""
 `,
       rust: `//! sdn-flow plugin method
@@ -363,7 +363,7 @@ pub extern "C" fn process(
     input: *const u8, input_len: u32,
     output: *mut u8, output_len: *mut u32,
 ) -> i32 {
-    // TODO: implement
+    // Implement here.
     unsafe { *output_len = 0; }
     0
 }
@@ -371,7 +371,7 @@ pub extern "C" fn process(
       typescript: `// sdn-flow plugin method
 
 export function process(input: Uint8Array): Uint8Array {
-  // TODO: implement
+  // Implement here.
   return new Uint8Array(0);
 }
 `,

@@ -259,10 +259,47 @@ function withAllocatedFrame(bound, memory, frame, invoke) {
     memory,
     frame.portId ?? frame.port_id ?? null,
   );
+  const payload =
+    frame.bytes ??
+    frame.data ??
+    frame.payloadBytes ??
+    frame.payload_bytes ??
+    null;
+  let payloadPointer = Number(frame.offset ?? 0) >>> 0;
+  let payloadSize = Number(frame.size ?? 0) >>> 0;
+  let allocatedPayloadPointer = 0;
+  if (
+    payload instanceof Uint8Array ||
+    ArrayBuffer.isView(payload) ||
+    payload instanceof ArrayBuffer
+  ) {
+    const payloadBytes =
+      payload instanceof Uint8Array
+        ? payload
+        : payload instanceof ArrayBuffer
+          ? new Uint8Array(payload)
+          : new Uint8Array(payload.buffer, payload.byteOffset, payload.byteLength);
+    payloadPointer = Number(malloc(payloadBytes.byteLength || 1)) >>> 0;
+    allocatedPayloadPointer = payloadPointer;
+    payloadSize = payloadBytes.byteLength;
+    new Uint8Array(memory.buffer).set(payloadBytes, payloadPointer);
+  }
   try {
-    writeFrameDescriptor(memory, pointer, frame, portIdPointer);
+    writeFrameDescriptor(
+      memory,
+      pointer,
+      {
+        ...frame,
+        offset: payloadPointer,
+        size: payloadSize,
+      },
+      portIdPointer,
+    );
     return invoke(pointer);
   } finally {
+    if (allocatedPayloadPointer) {
+      free(allocatedPayloadPointer);
+    }
     if (portIdPointer) {
       free(portIdPointer);
     }

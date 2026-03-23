@@ -7,6 +7,7 @@ import {
   bindCompiledFlowRuntimeHost,
   bindCompiledInvocationAbi,
   bindCompiledRuntimeAbi,
+  DefaultInvokeExports,
   DefaultRequiredRuntimeExportRoles,
   FlowDeploymentClient,
   FlowNodeDispatchDescriptorLayout,
@@ -295,7 +296,7 @@ test("compiled invocation abi can stage a frame and decode the current invocatio
   const ingressFramePointer = 1024;
   const invocationFramePointer = 1152;
   const invocationPointer = 1280;
-  const allocPointer = 2048;
+  let allocPointer = 2048;
 
   const writeCString = (pointer, value) => {
     const encoded = new TextEncoder().encode(`${value}\0`);
@@ -338,8 +339,10 @@ test("compiled invocation abi can stage a frame and decode the current invocatio
     },
     wasmExports: {
       memory,
-      _malloc() {
-        return allocPointer;
+      _malloc(size = 0) {
+        const pointer = allocPointer;
+        allocPointer += Math.max(Number(size) >>> 0, 1) + 16;
+        return pointer;
       },
       _free() {},
       _sdn_flow_get_runtime_descriptor() {
@@ -391,8 +394,7 @@ test("compiled invocation abi can stage a frame and decode the current invocatio
   const enqueueCount = bound.enqueueTriggerFrame(0, {
     typeDescriptorIndex: 2,
     alignment: 8,
-    offset: 1234,
-    size: 64,
+    bytes: new Uint8Array([1, 2, 3, 4]),
     streamId: 9,
     sequence: 7,
     traceToken: 55,
@@ -402,7 +404,7 @@ test("compiled invocation abi can stage a frame and decode the current invocatio
 
   const ingressFrames = bound.readIngressFrameDescriptors();
   assert.equal(ingressFrames.length, 1);
-  assert.equal(ingressFrames[0].offset, 1234);
+  assert.equal(ingressFrames[0].size, 4);
   assert.equal(ingressFrames[0].traceToken, 55);
 
   const invocation = bound.prepareNodeInvocationDescriptor(3, 1);
@@ -411,7 +413,7 @@ test("compiled invocation abi can stage a frame and decode the current invocatio
   assert.equal(invocation.methodId, "propagate_one_orbit_samples");
   assert.equal(invocation.frameCount, 1);
   assert.equal(invocation.frames[0].portId, "in");
-  assert.equal(invocation.frames[0].offset, 1234);
+  assert.deepEqual(Array.from(bound.readFrameBytes(invocation.frames[0])), [1, 2, 3, 4]);
   assert.equal(invocation.frames[0].sequence, 7);
   assert.equal(invocation.frames[0].endOfStream, true);
 });
@@ -762,6 +764,7 @@ test("compiled flow runtime host executes a ready node through bound handlers", 
   const dependencyPointer = 1536;
   const dependencyWasmPointer = 1664;
   const dependencyManifestPointer = 1728;
+  const editorMetadataPointer = 1792;
   let allocPointer = 2048;
   let ready = true;
   let routedOutputs = 0;
@@ -771,6 +774,18 @@ test("compiled flow runtime host executes a ready node through bound handlers", 
   let lastDependencyId = null;
   const freedPointers = [];
   const inputPayload = new Uint8Array([1, 2, 3, 4]);
+  const editorMetadata = {
+    nodes: {
+      "node-1": {
+        type: "range",
+        config: {
+          property: "payload",
+          action: "scale",
+        },
+      },
+    },
+  };
+  const editorMetadataText = JSON.stringify(editorMetadata);
 
   const writeCString = (pointer, value) => {
     const encoded = new TextEncoder().encode(`${value}\0`);
@@ -784,6 +799,7 @@ test("compiled flow runtime host executes a ready node through bound handlers", 
   bytes.set(inputPayload, 1234);
   bytes.set([0x00, 0x61, 0x73, 0x6d], dependencyWasmPointer);
   bytes.set([0x46, 0x4c, 0x4f, 0x57], dependencyManifestPointer);
+  bytes.set(new TextEncoder().encode(editorMetadataText), editorMetadataPointer);
 
   view.setUint32(
     nodeDispatchPointer +
@@ -889,6 +905,8 @@ test("compiled flow runtime host executes a ready node through bound handlers", 
           "sdn_flow_get_node_dispatch_descriptor_count",
         dependencyDescriptorsSymbol: "sdn_flow_get_dependency_descriptors",
         dependencyCountSymbol: "sdn_flow_get_dependency_count",
+        editorMetadataJsonSymbol: "sdn_flow_get_editor_metadata_json",
+        editorMetadataSizeSymbol: "sdn_flow_get_editor_metadata_size",
       },
     },
     wasmExports: {
@@ -964,6 +982,12 @@ test("compiled flow runtime host executes a ready node through bound handlers", 
       _sdn_flow_get_dependency_count() {
         return 1;
       },
+      _sdn_flow_get_editor_metadata_json() {
+        return editorMetadataPointer;
+      },
+      _sdn_flow_get_editor_metadata_size() {
+        return editorMetadataText.length;
+      },
       _sdn_flow_apply_node_invocation_result(
         _nodeIndex,
         _statusCode,
@@ -1019,6 +1043,7 @@ test("compiled flow runtime host executes a ready node through bound handlers", 
     },
   });
 
+  assert.deepEqual(host.readEmbeddedEditorMetadata(), editorMetadata);
   const execution = await host.executeNextReadyNode({ frameBudget: 1 });
   assert.equal(execution.executed, true);
   assert.equal(execution.pluginId, "com.digitalarsenal.propagator.sgp4");
@@ -1568,6 +1593,156 @@ test("embedded dependencies can be instantiated from the compiled bundle and use
   assert.equal(instantiateCalls, 2);
   await host.destroyDependencies();
   assert.equal(destroyCalls, 2);
+});
+
+test("embedded dependency instantiation falls back to SDK direct invoke exports when descriptors omit them", async () => {
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  const bytes = new Uint8Array(memory.buffer);
+  const view = new DataView(memory.buffer);
+  const dependencyIdPointer = 512;
+  const pluginIdPointer = 576;
+  const versionPointer = 640;
+  const nodeDispatchPointer = 1024;
+  const dependencyPointer = 1280;
+  const dependencyWasmPointer = 1536;
+
+  const writeCString = (pointer, value) => {
+    bytes.set(new TextEncoder().encode(`${value}\0`), pointer);
+  };
+  writeCString(dependencyIdPointer, "dep-sdk-defaults");
+  writeCString(pluginIdPointer, "com.digitalarsenal.sdk.defaults");
+  writeCString(versionPointer, "1.0.0");
+  bytes.set([0x00, 0x61, 0x73, 0x6d], dependencyWasmPointer);
+
+  view.setUint32(
+    nodeDispatchPointer +
+      FlowNodeDispatchDescriptorLayout.fields.dependencyIdPointer.offset,
+    dependencyIdPointer,
+    true,
+  );
+  view.setUint32(
+    nodeDispatchPointer +
+      FlowNodeDispatchDescriptorLayout.fields.pluginIdPointer.offset,
+    pluginIdPointer,
+    true,
+  );
+
+  view.setUint32(
+    dependencyPointer +
+      SignedArtifactDependencyDescriptorLayout.fields.dependencyIdPointer
+        .offset,
+    dependencyIdPointer,
+    true,
+  );
+  view.setUint32(
+    dependencyPointer +
+      SignedArtifactDependencyDescriptorLayout.fields.pluginIdPointer.offset,
+    pluginIdPointer,
+    true,
+  );
+  view.setUint32(
+    dependencyPointer +
+      SignedArtifactDependencyDescriptorLayout.fields.versionPointer.offset,
+    versionPointer,
+    true,
+  );
+  view.setUint32(
+    dependencyPointer +
+      SignedArtifactDependencyDescriptorLayout.fields.wasmBytesPointer.offset,
+    dependencyWasmPointer,
+    true,
+  );
+  view.setUint32(
+    dependencyPointer +
+      SignedArtifactDependencyDescriptorLayout.fields.wasmSize.offset,
+    4,
+    true,
+  );
+
+  const dependencyRuntime = await instantiateEmbeddedDependencies({
+    artifact: {
+      ...compiledArtifactStub(),
+      runtimeExports: {
+        descriptorSymbol: "sdn_flow_get_runtime_descriptor",
+        resetStateSymbol: "sdn_flow_reset_runtime_state",
+        enqueueTriggerSymbol: "sdn_flow_enqueue_trigger_frames",
+        enqueueEdgeSymbol: "sdn_flow_enqueue_edge_frames",
+        readyNodeSymbol: "sdn_flow_get_ready_node_index",
+        beginInvocationSymbol: "sdn_flow_begin_node_invocation",
+        completeInvocationSymbol: "sdn_flow_complete_node_invocation",
+        applyInvocationResultSymbol: "sdn_flow_apply_node_invocation_result",
+        nodeDispatchDescriptorsSymbol: "sdn_flow_get_node_dispatch_descriptors",
+        nodeDispatchDescriptorCountSymbol:
+          "sdn_flow_get_node_dispatch_descriptor_count",
+        dependencyDescriptorsSymbol: "sdn_flow_get_dependency_descriptors",
+        dependencyCountSymbol: "sdn_flow_get_dependency_count",
+      },
+    },
+    wasmExports: {
+      memory,
+      sdn_flow_get_runtime_descriptor() {
+        return 64;
+      },
+      sdn_flow_reset_runtime_state() {},
+      sdn_flow_enqueue_trigger_frames() {},
+      sdn_flow_enqueue_edge_frames() {},
+      sdn_flow_get_ready_node_index() {
+        return 0xffffffff;
+      },
+      sdn_flow_begin_node_invocation() {
+        return 0;
+      },
+      sdn_flow_complete_node_invocation() {},
+      sdn_flow_apply_node_invocation_result() {
+        return 0;
+      },
+      sdn_flow_get_node_dispatch_descriptors() {
+        return nodeDispatchPointer;
+      },
+      sdn_flow_get_node_dispatch_descriptor_count() {
+        return 0;
+      },
+      sdn_flow_get_dependency_descriptors() {
+        return dependencyPointer;
+      },
+      sdn_flow_get_dependency_count() {
+        return 1;
+      },
+    },
+    instantiate: async (moduleBytes) => {
+      assert.deepEqual(Array.from(moduleBytes), [0x00, 0x61, 0x73, 0x6d]);
+      return {
+        instance: {
+          exports: {
+            [DefaultInvokeExports.invokeSymbol]() {
+              return 0;
+            },
+            [DefaultInvokeExports.allocSymbol]() {
+              return 0;
+            },
+            [DefaultInvokeExports.freeSymbol]() {},
+          },
+        },
+      };
+    },
+  });
+
+  const dependency =
+    dependencyRuntime.byDependencyId.get("dep-sdk-defaults");
+  assert.equal(
+    dependency?.resolvedExports.streamInvoke,
+    dependency?.exports?.[DefaultInvokeExports.invokeSymbol],
+  );
+  assert.equal(
+    dependency?.resolvedExports.malloc,
+    dependency?.exports?.[DefaultInvokeExports.allocSymbol],
+  );
+  assert.equal(
+    dependency?.resolvedExports.free,
+    dependency?.exports?.[DefaultInvokeExports.freeSymbol],
+  );
+  assert.equal(dependency?.resolvedExports.init, null);
+  assert.equal(dependency?.resolvedExports.destroy, null);
 });
 
 test("host runtime abi binder fails closed when a required export is missing", async () => {

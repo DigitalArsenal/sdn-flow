@@ -1,4 +1,5 @@
 import { bindCompiledDescriptorAbi } from "./descriptorAbi.js";
+import { DefaultInvokeExports } from "space-data-module-sdk/runtime";
 
 function resolveDependencyImportObject(imports, descriptor) {
   if (typeof imports === "function") {
@@ -28,6 +29,16 @@ function resolveNamedExport(exports, symbol) {
     return null;
   }
   return exports?.[symbol] ?? exports?.[`_${symbol}`] ?? null;
+}
+
+function resolveNamedExportWithDefault(exports, symbol, fallbackSymbol = null) {
+  if (symbol) {
+    return resolveNamedExport(exports, symbol);
+  }
+  if (!fallbackSymbol) {
+    return null;
+  }
+  return resolveNamedExport(exports, fallbackSymbol);
 }
 
 function toUint8Array(data) {
@@ -149,9 +160,21 @@ export async function instantiateEmbeddedDependencies({
       resolvedExports: {
         init: resolveNamedExport(exports, descriptor.initSymbol),
         destroy: resolveNamedExport(exports, descriptor.destroySymbol),
-        malloc: resolveNamedExport(exports, descriptor.mallocSymbol),
-        free: resolveNamedExport(exports, descriptor.freeSymbol),
-        streamInvoke: resolveNamedExport(exports, descriptor.streamInvokeSymbol),
+        malloc: resolveNamedExportWithDefault(
+          exports,
+          descriptor.mallocSymbol,
+          DefaultInvokeExports.allocSymbol,
+        ),
+        free: resolveNamedExportWithDefault(
+          exports,
+          descriptor.freeSymbol,
+          DefaultInvokeExports.freeSymbol,
+        ),
+        streamInvoke: resolveNamedExportWithDefault(
+          exports,
+          descriptor.streamInvokeSymbol,
+          DefaultInvokeExports.invokeSymbol,
+        ),
         manifestBytes: resolveNamedExport(
           exports,
           descriptor.manifestBytesSymbol,

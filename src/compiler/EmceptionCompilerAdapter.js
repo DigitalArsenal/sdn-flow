@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import { summarizeProgramRequirements } from "../designer/requirements.js";
 import { normalizeProgram } from "../runtime/index.js";
 import { bytesToHex, toUint8Array } from "../utils/encoding.js";
@@ -10,14 +12,13 @@ const DEFAULT_FLAGS = Object.freeze([
   "-O2",
   "-sWASM=1",
   "-sALLOW_MEMORY_GROWTH=1",
-  "-sNO_EXIT_RUNTIME=1",
-  "-sMODULARIZE=1",
-  "-sEXPORT_ES6=1",
-  "-sENVIRONMENT=web,worker,node",
-  "-sEXPORTED_FUNCTIONS=['_main','_malloc','_free','_flow_get_manifest_flatbuffer','_flow_get_manifest_flatbuffer_size','_sdn_flow_get_program_id','_sdn_flow_get_program_name','_sdn_flow_get_program_version','_sdn_flow_get_type_descriptors','_sdn_flow_get_type_descriptor_count','_sdn_flow_get_accepted_type_indices','_sdn_flow_get_accepted_type_index_count','_sdn_flow_get_trigger_descriptors','_sdn_flow_get_trigger_descriptor_count','_sdn_flow_get_node_descriptors','_sdn_flow_get_node_descriptor_count','_sdn_flow_get_node_dispatch_descriptors','_sdn_flow_get_node_dispatch_descriptor_count','_sdn_flow_get_edge_descriptors','_sdn_flow_get_edge_descriptor_count','_sdn_flow_get_trigger_binding_descriptors','_sdn_flow_get_trigger_binding_descriptor_count','_sdn_flow_get_dependency_descriptors','_sdn_flow_get_dependency_count','_sdn_flow_get_ingress_descriptors','_sdn_flow_get_ingress_descriptor_count','_sdn_flow_get_ingress_frame_descriptors','_sdn_flow_get_ingress_frame_descriptor_count','_sdn_flow_get_node_ingress_indices','_sdn_flow_get_node_ingress_index_count','_sdn_flow_get_external_interface_descriptors','_sdn_flow_get_external_interface_descriptor_count','_sdn_flow_get_ingress_runtime_states','_sdn_flow_get_ingress_runtime_state_count','_sdn_flow_get_node_runtime_states','_sdn_flow_get_node_runtime_state_count','_sdn_flow_get_current_invocation_descriptor','_sdn_flow_prepare_node_invocation_descriptor','_sdn_flow_reset_runtime_state','_sdn_flow_enqueue_trigger_frames','_sdn_flow_enqueue_trigger_frame','_sdn_flow_enqueue_edge_frames','_sdn_flow_enqueue_edge_frame','_sdn_flow_get_ready_node_index','_sdn_flow_begin_node_invocation','_sdn_flow_complete_node_invocation','_sdn_flow_apply_node_invocation_result','_sdn_flow_dispatch_next_ready_node_with_host','_sdn_flow_drain_with_host_dispatch','_sdn_flow_get_runtime_descriptor']",
+  "-sERROR_ON_UNDEFINED_SYMBOLS=0",
+  "-Wl,--no-entry",
+  "-sEXPORTED_FUNCTIONS=['_malloc','_free','_flow_get_manifest_flatbuffer','_flow_get_manifest_flatbuffer_size','_sdn_flow_get_program_id','_sdn_flow_get_program_name','_sdn_flow_get_program_version','_sdn_flow_get_editor_metadata_json','_sdn_flow_get_editor_metadata_size','_sdn_flow_get_type_descriptors','_sdn_flow_get_type_descriptor_count','_sdn_flow_get_accepted_type_indices','_sdn_flow_get_accepted_type_index_count','_sdn_flow_get_trigger_descriptors','_sdn_flow_get_trigger_descriptor_count','_sdn_flow_get_node_descriptors','_sdn_flow_get_node_descriptor_count','_sdn_flow_get_node_dispatch_descriptors','_sdn_flow_get_node_dispatch_descriptor_count','_sdn_flow_get_edge_descriptors','_sdn_flow_get_edge_descriptor_count','_sdn_flow_get_trigger_binding_descriptors','_sdn_flow_get_trigger_binding_descriptor_count','_sdn_flow_get_dependency_descriptors','_sdn_flow_get_dependency_count','_sdn_flow_get_ingress_descriptors','_sdn_flow_get_ingress_descriptor_count','_sdn_flow_get_ingress_frame_descriptors','_sdn_flow_get_ingress_frame_descriptor_count','_sdn_flow_get_node_ingress_indices','_sdn_flow_get_node_ingress_index_count','_sdn_flow_get_external_interface_descriptors','_sdn_flow_get_external_interface_descriptor_count','_sdn_flow_get_ingress_runtime_states','_sdn_flow_get_ingress_runtime_state_count','_sdn_flow_get_node_runtime_states','_sdn_flow_get_node_runtime_state_count','_sdn_flow_get_current_invocation_descriptor','_sdn_flow_prepare_node_invocation_descriptor','_sdn_flow_reset_runtime_state','_sdn_flow_enqueue_trigger_frames','_sdn_flow_enqueue_trigger_frame','_sdn_flow_enqueue_edge_frames','_sdn_flow_enqueue_edge_frame','_sdn_flow_get_ready_node_index','_sdn_flow_begin_node_invocation','_sdn_flow_complete_node_invocation','_sdn_flow_apply_node_invocation_result','_sdn_flow_dispatch_next_ready_node_with_host','_sdn_flow_drain_with_host_dispatch','_sdn_flow_get_runtime_descriptor']",
 ]);
 
 const DEFAULT_RUNTIME_MODEL = "compiled-cpp-wasm";
+const DEFAULT_WORKING_DIRECTORY = "/working";
 const DEFAULT_RUNTIME_EXPORTS = Object.freeze({
   mallocSymbol: "malloc",
   freeSymbol: "free",
@@ -70,10 +71,85 @@ const DEFAULT_RUNTIME_EXPORTS = Object.freeze({
   applyInvocationResultSymbol: "sdn_flow_apply_node_invocation_result",
   dispatchHostInvocationSymbol: "sdn_flow_dispatch_next_ready_node_with_host",
   drainWithHostDispatchSymbol: "sdn_flow_drain_with_host_dispatch",
+  editorMetadataJsonSymbol: "sdn_flow_get_editor_metadata_json",
+  editorMetadataSizeSymbol: "sdn_flow_get_editor_metadata_size",
 });
 
 async function maybeCall(value) {
   return value instanceof Promise ? value : Promise.resolve(value);
+}
+
+function normalizeWorkingDirectory(value) {
+  const normalized = String(value ?? "")
+    .trim()
+    .replaceAll("\\", "/");
+  if (!normalized) {
+    return DEFAULT_WORKING_DIRECTORY;
+  }
+  return normalized.startsWith("/")
+    ? path.posix.normalize(normalized)
+    : path.posix.join(DEFAULT_WORKING_DIRECTORY, normalized);
+}
+
+function createPortableLoaderModuleSource() {
+  return [
+    "export default async function createSdnFlowRuntimeLoader(module = {}) {",
+    "  const toBytes = (value) => {",
+    "    if (value instanceof Uint8Array) {",
+    "      return value;",
+    "    }",
+    "    if (ArrayBuffer.isView(value)) {",
+    "      return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);",
+    "    }",
+    "    if (value instanceof ArrayBuffer) {",
+    "      return new Uint8Array(value);",
+    "    }",
+    '    throw new Error("Loader module requires wasmBinary bytes.");',
+    "  };",
+    "  const incomingImports = module.imports ?? {};",
+    "  const baseImports = {",
+    "    ...incomingImports,",
+    "    env: {",
+    "      emscripten_notify_memory_growth() {},",
+    "      ...(incomingImports.env ?? {}),",
+    "    },",
+    "    wasi_snapshot_preview1: {",
+    "      args_sizes_get() { return 0; },",
+    "      args_get() { return 0; },",
+    "      proc_exit() { return 0; },",
+    "      ...(incomingImports.wasi_snapshot_preview1 ?? {}),",
+    "    },",
+    "  };",
+    "  if (typeof module.instantiateWasm === 'function') {",
+    "    let instance = null;",
+    "    let wasmModule = null;",
+    "    const result = await module.instantiateWasm(baseImports, (nextInstance, nextModule) => {",
+    "      instance = nextInstance;",
+    "      wasmModule = nextModule;",
+    "    });",
+    "    const exports = instance?.exports ?? result ?? {};",
+    "    return {",
+    "      ...exports,",
+    "      memory: exports.memory ?? null,",
+    "      wasmMemory: exports.memory ?? null,",
+    "      instance,",
+    "      module: wasmModule,",
+    "    };",
+    "  }",
+    "  const instantiated = await WebAssembly.instantiate(",
+    "    toBytes(module.wasmBinary),",
+    "    baseImports,",
+    "  );",
+    "  return {",
+    "    ...instantiated.instance.exports,",
+    "    memory: instantiated.instance.exports.memory ?? null,",
+    "    wasmMemory: instantiated.instance.exports.memory ?? null,",
+    "    instance: instantiated.instance,",
+    "    module: instantiated.module,",
+    "  };",
+    "}",
+    "",
+  ].join("\n");
 }
 
 export class EmceptionCompilerAdapter {
@@ -127,7 +203,7 @@ export class EmceptionCompilerAdapter {
   async prepareCompile({ program, metadata = null } = {}) {
     const normalizedProgram = normalizeProgram(program);
     const dependencies =
-      await this.#artifactCatalog.resolveProgramDependencies(normalizedProgram);
+      await this.#artifactCatalog.resolveProgramDependencies(program);
     const manifestBuffer = await this.#buildManifestBuffer({
       program: normalizedProgram,
       metadata,
@@ -149,6 +225,9 @@ export class EmceptionCompilerAdapter {
         ? "native-cpp-wasm"
         : (generatedSource?.generatorModel ?? "native-cpp-wasm");
     const outputName = String(metadata?.outputName ?? this.#outputName);
+    const workingDirectory = normalizeWorkingDirectory(
+      metadata?.workingDirectory,
+    );
     const flags = Array.isArray(metadata?.flags) ? metadata.flags : this.#flags;
     return {
       program: normalizedProgram,
@@ -158,15 +237,16 @@ export class EmceptionCompilerAdapter {
       runtimeExports: { ...DEFAULT_RUNTIME_EXPORTS },
       sourceGeneratorModel,
       outputName,
+      workingDirectory,
       flags,
       source,
       sourceFiles: [
         {
-          path: "/working/main.cpp",
+          path: path.posix.join(workingDirectory, "main.cpp"),
           content: source,
         },
       ],
-      command: `em++ ${flags.join(" ")} /working/main.cpp -o /working/${outputName}.mjs`,
+      command: `em++ ${flags.join(" ")} ${path.posix.join(workingDirectory, "main.cpp")} -o ${path.posix.join(workingDirectory, `${outputName}.wasm`)}`,
     };
   }
 
@@ -198,14 +278,15 @@ export class EmceptionCompilerAdapter {
 
     const wasm = toUint8Array(
       await maybeCall(
-        this.#emception.readFile(`/working/${compilePlan.outputName}.wasm`),
+        this.#emception.readFile(
+          path.posix.join(
+            compilePlan.workingDirectory,
+            `${compilePlan.outputName}.wasm`,
+          ),
+        ),
       ),
     );
-    const loaderModule = await maybeCall(
-      this.#emception.readFile(`/working/${compilePlan.outputName}.mjs`, {
-        encoding: "utf8",
-      }),
-    );
+    const loaderModule = createPortableLoaderModuleSource();
     const requirements = summarizeProgramRequirements({
       program: compilePlan.program,
     });

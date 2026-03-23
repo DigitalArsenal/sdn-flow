@@ -1,4 +1,5 @@
 import { startInstalledFlowAppHost } from "./appHost.js";
+import { ensureManagedSecurityState } from "./managedSecurity.js";
 
 function normalizeString(value, fallback = null) {
   if (typeof value !== "string") {
@@ -29,6 +30,31 @@ function normalizeNodeHeaders(headers = {}) {
     normalized[key] = String(value);
   }
   return normalized;
+}
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function mergeManagedSecuritySettings(base = {}, extra = {}) {
+  return {
+    ...(isPlainObject(base) ? base : {}),
+    ...(isPlainObject(extra) ? extra : {}),
+    wallet: {
+      ...(isPlainObject(base?.wallet) ? base.wallet : {}),
+      ...(isPlainObject(extra?.wallet) ? extra.wallet : {}),
+    },
+    tls: {
+      ...(isPlainObject(base?.tls) ? base.tls : {}),
+      ...(isPlainObject(extra?.tls) ? extra.tls : {}),
+    },
+  };
+}
+
+function resolveNodeBindingSecurity(binding = {}, options = {}) {
+  const optionSecurity = isPlainObject(options.security) ? options.security : {};
+  const bindingSecurity = isPlainObject(binding.security) ? binding.security : {};
+  return mergeManagedSecuritySettings(optionSecurity, bindingSecurity);
 }
 
 async function readNodeRequestBody(request) {
@@ -188,16 +214,42 @@ async function closeNodeServer(server) {
 }
 
 export function createNodeServeHttpAdapter(options = {}) {
-  return async function serveHttp({ binding, handler }) {
-    const { createServer } = await import("node:http");
+  return async function serveHttp({ binding, handler, runtimeId, programId }) {
+    const [{ createServer: createHttpServer }, { createServer: createHttpsServer }] =
+      await Promise.all([import("node:http"), import("node:https")]);
     const url = resolveBindingUrl(binding);
-    if (url.protocol && url.protocol !== "http:") {
+    if (url.protocol && url.protocol !== "http:" && url.protocol !== "https:") {
       throw new Error(
-        `createNodeServeHttpAdapter only supports http bindings, received ${url.protocol}.`,
+        `createNodeServeHttpAdapter only supports http and https bindings, received ${url.protocol}.`,
       );
     }
+    const protocol = url.protocol === "https:" ? "https" : "http";
+    const securityState =
+      protocol === "https"
+        ? await ensureManagedSecurityState({
+            projectRoot: options.projectRoot ?? options.cwd,
+            startup: {
+              protocol,
+              hostname: url.hostname,
+            },
+            security: resolveNodeBindingSecurity(binding, options),
+            scopeId:
+              binding.bindingId ??
+              runtimeId ??
+              programId ??
+              `${url.hostname || "127.0.0.1"}-${url.port || "443"}`,
+            scopeLabel:
+              programId ??
+              runtimeId ??
+              normalizeString(binding.description, "Installed Flow HTTP Listener") ??
+              "Installed Flow HTTP Listener",
+          })
+        : null;
+    if (protocol === "https" && !securityState?.serverOptions) {
+      throw new Error("HTTPS bindings require managed TLS server options.");
+    }
 
-    const server = (options.createServer ?? createServer)(async (request, response) => {
+    const requestListener = async (request, response) => {
       try {
         const fetchRequest = await createFetchRequestFromNodeIncomingMessage(
           request,
@@ -217,11 +269,24 @@ export function createNodeServeHttpAdapter(options = {}) {
             : "Internal Server Error",
         );
       }
-    });
+    };
+    const server =
+      protocol === "https"
+        ? (options.createHttpsServer ?? createHttpsServer)(
+            securityState.serverOptions,
+            requestListener,
+          )
+        : (options.createHttpServer ?? options.createServer ?? createHttpServer)(
+            requestListener,
+          );
 
     await listenNodeServer(server, {
       host: url.hostname,
-      port: url.port ? Number(url.port) : 80,
+      port: url.port
+        ? Number(url.port)
+        : protocol === "https"
+          ? 443
+          : 80,
     });
     const address = server.address();
     const actualPort =
@@ -229,15 +294,24 @@ export function createNodeServeHttpAdapter(options = {}) {
         ? address.port
         : url.port
           ? Number(url.port)
-          : 80;
+          : protocol === "https"
+            ? 443
+            : 80;
     const actualUrl = new URL(url.href);
     actualUrl.port = String(actualPort);
 
     return {
       platform: "node",
+      protocol,
       url: actualUrl.href,
       hostname: url.hostname,
       port: actualPort,
+      security: securityState
+        ? {
+            wallet: securityState.wallet,
+            tls: securityState.tls,
+          }
+        : null,
       server,
       async close() {
         await closeNodeServer(server);

@@ -1,5 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import https from "node:https";
+import os from "node:os";
+import path from "node:path";
 
 import {
   createBunServeHttpAdapter,
@@ -8,6 +12,38 @@ import {
   startInstalledFlowDenoHttpHost,
   startInstalledFlowNodeHttpHost,
 } from "../src/index.js";
+
+function requestTextOverHttps(url, ca, body = "payload") {
+  return new Promise((resolve, reject) => {
+    const request = https.request(
+      url,
+      {
+        method: "POST",
+        ca,
+        headers: {
+          "content-type": "text/plain",
+          "content-length": String(Buffer.byteLength(body)),
+        },
+      },
+      (response) => {
+        const chunks = [];
+        response.setEncoding("utf8");
+        response.on("data", (chunk) => {
+          chunks.push(chunk);
+        });
+        response.on("end", () => {
+          resolve({
+            statusCode: response.statusCode ?? 0,
+            headers: response.headers,
+            body: chunks.join(""),
+          });
+        });
+      },
+    );
+    request.once("error", reject);
+    request.end(body);
+  });
+}
 
 function buildHttpWorkspace(bindingUrl = "http://127.0.0.1:9080/download") {
   return {
@@ -300,4 +336,41 @@ test("startInstalledFlowNodeHttpHost starts a real Node HTTP listener from the h
   assert.equal(await response.text(), "payload");
 
   await host.stop();
+});
+
+test("startInstalledFlowNodeHttpHost provisions managed HTTPS certificates for https bindings", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "sdn-flow-host-https-"));
+  const host = await startInstalledFlowNodeHttpHost({
+    workspace: buildHttpWorkspace("https://127.0.0.1:0/download"),
+    security: {
+      storageDir: path.join(tempDir, ".sdn-flow-security"),
+    },
+    projectRoot: tempDir,
+  });
+
+  try {
+    assert.equal(host.listeners.length, 1);
+    assert.equal(host.listeners[0].handle.protocol, "https");
+    assert.match(host.listeners[0].handle.url, /^https:\/\//);
+    assert.equal(
+      typeof host.listeners[0].handle.security?.tls?.trustCertificatePath,
+      "string",
+    );
+
+    const trustCertificate = await fs.readFile(
+      host.listeners[0].handle.security.tls.trustCertificatePath,
+      "utf8",
+    );
+    const response = await requestTextOverHttps(
+      host.listeners[0].handle.url,
+      trustCertificate,
+    );
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.headers["x-runtime"], "flow");
+    assert.equal(response.body, "payload");
+  } finally {
+    await host.stop();
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
 });

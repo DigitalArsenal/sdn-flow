@@ -1,14 +1,11 @@
 import { toUint8Array } from "./encoding.js";
+import { getHdWalletRuntime } from "./hdWalletRuntime.js";
 
 let walletPromise = null;
 
 export async function getWasmWallet() {
   if (!walletPromise) {
-    walletPromise = (async () => {
-      const module = await import("hd-wallet-wasm");
-      const init = module.default ?? module.createHDWallet;
-      return init();
-    })();
+    walletPromise = getHdWalletRuntime();
   }
 
   return walletPromise;

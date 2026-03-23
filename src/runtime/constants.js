@@ -1,12 +1,12 @@
-import {
-  DefaultManifestExports as SharedDefaultManifestExports,
-  DrainPolicy as SharedDrainPolicy,
-  ExternalInterfaceDirection as SharedExternalInterfaceDirection,
-  ExternalInterfaceKind as SharedExternalInterfaceKind,
-  RuntimeTarget as SharedRuntimeTarget,
-} from "space-data-module-sdk";
-
-export const DrainPolicy = SharedDrainPolicy;
+export {
+  DefaultInvokeExports,
+  DefaultManifestExports,
+  DrainPolicy,
+  ExternalInterfaceDirection,
+  ExternalInterfaceKind,
+  InvokeSurface,
+  RuntimeTarget,
+} from "space-data-module-sdk/runtime";
 
 export const BackpressurePolicy = Object.freeze({
   DROP: "drop",
@@ -37,8 +37,3 @@ export const NodeKind = Object.freeze({
   RENDERER: "renderer",
   SINK: "sink",
 });
-
-export const ExternalInterfaceDirection = SharedExternalInterfaceDirection;
-export const ExternalInterfaceKind = SharedExternalInterfaceKind;
-export const RuntimeTarget = SharedRuntimeTarget;
-export const DefaultManifestExports = SharedDefaultManifestExports;

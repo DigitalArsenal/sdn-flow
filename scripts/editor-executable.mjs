@@ -157,6 +157,295 @@ async function runCommand(command, args, options = {}) {
   });
 }
 
+async function runCommandCapture(command, args, options = {}) {
+  return await new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: options.cwd,
+      env: options.env ?? process.env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.once("error", reject);
+    child.once("close", (code) => {
+      if (code === 0) {
+        resolve({ stdout, stderr });
+        return;
+      }
+      reject(new Error((stderr || stdout || `${command} ${args.join(" ")} exited with code ${code}`).trim()));
+    });
+  });
+}
+
+function isWithinPath(parentPath, candidatePath) {
+  const relativePath = path.relative(parentPath, candidatePath);
+  return relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
+}
+
+function getNodeModulePackageRoot(projectRoot, filePath) {
+  const nodeModulesRoot = path.join(projectRoot, "node_modules");
+  if (!isWithinPath(nodeModulesRoot, filePath)) {
+    return null;
+  }
+  const relativePath = path.relative(nodeModulesRoot, filePath);
+  const segments = relativePath.split(path.sep).filter(Boolean);
+  if (segments.length === 0) {
+    return null;
+  }
+  const packageSegments = segments[0].startsWith("@") ? segments.slice(0, 2) : segments.slice(0, 1);
+  if (packageSegments.length === 0) {
+    return null;
+  }
+  return path.join(nodeModulesRoot, ...packageSegments);
+}
+
+function getNamedNodeModulePackageRoot(projectRoot, packageName) {
+  const segments = String(packageName ?? "").split("/").filter(Boolean);
+  if (segments.length === 0) {
+    return null;
+  }
+  return path.join(projectRoot, "node_modules", ...segments);
+}
+
+async function readPackageJson(filePath) {
+  return JSON.parse(await fs.readFile(filePath, "utf8"));
+}
+
+function getStagePackageManifest(projectPackageJson = {}) {
+  const manifest = {
+    name: "sdn-flow-editor-stage",
+    private: true,
+    type: "module",
+  };
+  const dependencies =
+    projectPackageJson && typeof projectPackageJson === "object" ? projectPackageJson.dependencies : null;
+  const optionalDependencies =
+    projectPackageJson && typeof projectPackageJson === "object"
+      ? projectPackageJson.optionalDependencies
+      : null;
+
+  if (dependencies && Object.keys(dependencies).length > 0) {
+    manifest.dependencies = { ...dependencies };
+  }
+  if (optionalDependencies && Object.keys(optionalDependencies).length > 0) {
+    manifest.optionalDependencies = { ...optionalDependencies };
+  }
+
+  return manifest;
+}
+
+function resolveLocalFileDependencyPath(projectRoot, specifier) {
+  const normalizedSpecifier = normalizeString(specifier, null);
+  if (!normalizedSpecifier || normalizedSpecifier.startsWith("file:") === false) {
+    return null;
+  }
+  const relativePath = normalizedSpecifier.slice("file:".length);
+  if (!relativePath) {
+    return null;
+  }
+  return path.resolve(projectRoot, relativePath);
+}
+
+async function getLocalFileDependencies(projectRoot, projectPackageJson = {}) {
+  const localDependencies = new Map();
+  const dependencyEntries = [
+    ...Object.entries(projectPackageJson.dependencies ?? {}),
+    ...Object.entries(projectPackageJson.optionalDependencies ?? {}),
+  ];
+
+  for (const [packageName, specifier] of dependencyEntries) {
+    const packageRoot = resolveLocalFileDependencyPath(projectRoot, specifier);
+    if (!packageRoot) {
+      continue;
+    }
+    try {
+      await fs.access(path.join(packageRoot, "package.json"));
+      localDependencies.set(packageName, {
+        packageName,
+        packageRoot,
+        installedPackageRoot: getNamedNodeModulePackageRoot(projectRoot, packageName),
+        filePaths: new Set(),
+      });
+    } catch {
+      // Ignore missing local dependency roots here and let Deno surface the real resolution error later.
+    }
+  }
+
+  return localDependencies;
+}
+
+function findLocalFileDependencyByPath(localDependencies, filePath) {
+  for (const dependencyRecord of localDependencies.values()) {
+    if (isWithinPath(dependencyRecord.packageRoot, filePath)) {
+      return dependencyRecord;
+    }
+  }
+  return null;
+}
+
+async function copyFileToStage(stageDir, sourceRoot, sourcePath, targetRoot) {
+  const relativePath = path.relative(sourceRoot, sourcePath);
+  if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+    return;
+  }
+  const targetPath = path.join(stageDir, targetRoot, relativePath);
+  await fs.mkdir(path.dirname(targetPath), { recursive: true });
+  await fs.copyFile(sourcePath, targetPath);
+}
+
+async function copyLocalDependencyFilesToStage(stageDir, dependencyRecord) {
+  const targetRoot = path.join("node_modules", ...dependencyRecord.packageName.split("/"));
+  await copyFileToStage(
+    stageDir,
+    dependencyRecord.packageRoot,
+    path.join(dependencyRecord.packageRoot, "package.json"),
+    targetRoot,
+  );
+
+  for (const filePath of dependencyRecord.filePaths) {
+    await copyFileToStage(stageDir, dependencyRecord.packageRoot, filePath, targetRoot);
+  }
+}
+
+async function collectPackageRootsWithDependencies(projectRoot, initialPackageRoots = []) {
+  const discoveredRoots = new Set();
+  const pendingRoots = [...initialPackageRoots];
+
+  while (pendingRoots.length > 0) {
+    const packageRoot = pendingRoots.shift();
+    if (!packageRoot || discoveredRoots.has(packageRoot)) {
+      continue;
+    }
+    discoveredRoots.add(packageRoot);
+
+    try {
+      const packageJsonPath = path.join(packageRoot, "package.json");
+      const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf8"));
+      const dependencyNames = [
+        ...Object.keys(packageJson.dependencies ?? {}),
+        ...Object.keys(packageJson.optionalDependencies ?? {}),
+      ];
+      for (const dependencyName of dependencyNames) {
+        const dependencyRoot = getNamedNodeModulePackageRoot(projectRoot, dependencyName);
+        if (!dependencyRoot) {
+          continue;
+        }
+        try {
+          await fs.access(dependencyRoot);
+          if (!discoveredRoots.has(dependencyRoot)) {
+            pendingRoots.push(dependencyRoot);
+          }
+        } catch {
+          // Some optional/runtime-specific dependencies may not be installed locally.
+        }
+      }
+    } catch {
+      // Ignore malformed or missing package metadata in the staged closure walk.
+    }
+  }
+
+  return discoveredRoots;
+}
+
+export async function prepareStagedSdnFlowEditorWorkspace(options = {}) {
+  const projectRoot = path.resolve(options.projectRoot ?? PROJECT_ROOT);
+  const denoBinaryPath = options.denoBinaryPath ?? getLocalDenoBinaryPath(options);
+  const stageDir = path.join(projectRoot, "generated-tools", ".build", "editor-executable-stage");
+  const capture = options.runCommandCapture ?? runCommandCapture;
+  const projectPackageJson = await readPackageJson(path.join(projectRoot, "package.json")).catch(() => ({}));
+  const localDependencies = await getLocalFileDependencies(projectRoot, projectPackageJson);
+  const graphResult = await capture(
+    denoBinaryPath,
+    ["info", "--json", "./tools/sdn-flow-editor.ts"],
+    {
+      cwd: projectRoot,
+      env: options.env ?? process.env,
+    },
+  );
+  const graph = JSON.parse(graphResult.stdout);
+  const filePaths = new Set();
+  const packageRoots = new Set();
+
+  for (const moduleRecord of graph.modules ?? []) {
+    const specifier = String(moduleRecord?.specifier ?? "");
+    if (!specifier.startsWith("file://")) {
+      continue;
+    }
+    const filePath = fileURLToPath(specifier);
+    if (!isWithinPath(projectRoot, filePath)) {
+      const localDependency = findLocalFileDependencyByPath(localDependencies, filePath);
+      if (localDependency) {
+        localDependency.filePaths.add(filePath);
+        if (localDependency.installedPackageRoot) {
+          packageRoots.add(localDependency.installedPackageRoot);
+        }
+      }
+      continue;
+    }
+    const packageRoot = getNodeModulePackageRoot(projectRoot, filePath);
+    if (packageRoot) {
+      packageRoots.add(packageRoot);
+      continue;
+    }
+    filePaths.add(filePath);
+  }
+  const expandedPackageRoots = await collectPackageRootsWithDependencies(projectRoot, packageRoots);
+
+  await fs.rm(stageDir, { recursive: true, force: true });
+  await fs.mkdir(stageDir, { recursive: true });
+  await fs.writeFile(
+    path.join(stageDir, "package.json"),
+    JSON.stringify(getStagePackageManifest(projectPackageJson), null, 2),
+    "utf8",
+  );
+
+  for (const filePath of filePaths) {
+    const relativePath = path.relative(projectRoot, filePath);
+    const targetPath = path.join(stageDir, relativePath);
+    await fs.mkdir(path.dirname(targetPath), { recursive: true });
+    await fs.copyFile(filePath, targetPath);
+  }
+
+  const localPackageRoots = new Set(
+    [...localDependencies.values()]
+      .map((dependencyRecord) => dependencyRecord.installedPackageRoot)
+      .filter(Boolean),
+  );
+  for (const packageRoot of expandedPackageRoots) {
+    if (localPackageRoots.has(packageRoot)) {
+      continue;
+    }
+    const relativePath = path.relative(projectRoot, packageRoot);
+    const targetPath = path.join(stageDir, relativePath);
+    await fs.mkdir(path.dirname(targetPath), { recursive: true });
+    await fs.cp(packageRoot, targetPath, {
+      recursive: true,
+      force: true,
+    });
+  }
+
+  for (const dependencyRecord of localDependencies.values()) {
+    if (dependencyRecord.filePaths.size > 0) {
+      await copyLocalDependencyFilesToStage(stageDir, dependencyRecord);
+    }
+  }
+
+  return {
+    cwd: stageDir,
+    entryPath: "./tools/sdn-flow-editor.ts",
+    stageDir,
+  };
+}
+
 export async function buildSdnFlowEditorExecutable(options = {}) {
   const projectRoot = path.resolve(options.projectRoot ?? PROJECT_ROOT);
   const outputPath = getSdnFlowEditorExecutablePath({
@@ -169,6 +458,8 @@ export async function buildSdnFlowEditorExecutable(options = {}) {
     platform: options.platform,
   });
   const execute = options.runCommand ?? runCommand;
+  const prepareCompileWorkspace =
+    options.prepareCompileWorkspace ?? prepareStagedSdnFlowEditorWorkspace;
 
   await fs.access(denoBinaryPath).catch(() => {
     throw new Error(
@@ -177,23 +468,39 @@ export async function buildSdnFlowEditorExecutable(options = {}) {
   });
 
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
+  await execute(getNpmCommand(options.platform), ["run", "build:shared-runtime-constants"], {
+    cwd: projectRoot,
+    env: options.env,
+    stdio: "inherit",
+  });
   await execute(getNpmCommand(options.platform), ["run", "build:editor-assets"], {
     cwd: projectRoot,
     env: options.env,
     stdio: "inherit",
   });
+  const compileWorkspace = await prepareCompileWorkspace({
+    projectRoot,
+    denoBinaryPath,
+    platform: options.platform,
+    env: options.env,
+  });
   await execute(
     denoBinaryPath,
     [
       "compile",
+      "--no-check",
       "--allow-net",
       "--allow-read",
+      "--allow-write",
+      "--allow-run",
+      "--allow-env",
+      "--allow-sys",
       "--output",
       outputPath,
-      "./tools/sdn-flow-editor.ts",
+      compileWorkspace.entryPath ?? "./tools/sdn-flow-editor.ts",
     ],
     {
-      cwd: projectRoot,
+      cwd: compileWorkspace.cwd ?? projectRoot,
       env: options.env,
       stdio: "inherit",
     },

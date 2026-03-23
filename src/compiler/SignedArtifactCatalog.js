@@ -86,8 +86,17 @@ export class SignedArtifactCatalog {
 
   async resolveProgramDependencies(program) {
     const normalizedProgram = normalizeProgram(program);
+    const rawArtifactDependencies = Array.isArray(program?.artifactDependencies)
+      ? program.artifactDependencies
+      : [];
     const resolved = [];
-    for (const dependency of normalizedProgram.artifactDependencies) {
+    for (
+      let index = 0;
+      index < normalizedProgram.artifactDependencies.length;
+      index += 1
+    ) {
+      const dependency = normalizedProgram.artifactDependencies[index];
+      const rawDependency = rawArtifactDependencies[index] ?? {};
       const artifact = this.getArtifact(dependency);
       if (!artifact.signature || !artifact.signerPublicKey) {
         throw new Error(
@@ -113,33 +122,40 @@ export class SignedArtifactCatalog {
         sha256: artifact.sha256 ?? computedSha256,
         manifestExports: {
           bytesSymbol: preferNonEmptyString(
-            dependency.manifestExports?.bytesSymbol,
+            rawDependency.manifestExports?.bytesSymbol ??
+              rawDependency.manifest_exports?.bytes_symbol,
             artifact.manifestExports?.bytesSymbol,
           ),
           sizeSymbol: preferNonEmptyString(
-            dependency.manifestExports?.sizeSymbol,
+            rawDependency.manifestExports?.sizeSymbol ??
+              rawDependency.manifest_exports?.size_symbol,
             artifact.manifestExports?.sizeSymbol,
           ),
         },
         runtimeExports: {
           initSymbol: preferNonEmptyString(
-            dependency.runtimeExports?.initSymbol,
+            rawDependency.runtimeExports?.initSymbol ??
+              rawDependency.runtime_exports?.init_symbol,
             artifact.runtimeExports?.initSymbol,
           ),
           destroySymbol: preferNonEmptyString(
-            dependency.runtimeExports?.destroySymbol,
+            rawDependency.runtimeExports?.destroySymbol ??
+              rawDependency.runtime_exports?.destroy_symbol,
             artifact.runtimeExports?.destroySymbol,
           ),
           mallocSymbol: preferNonEmptyString(
-            dependency.runtimeExports?.mallocSymbol,
+            rawDependency.runtimeExports?.mallocSymbol ??
+              rawDependency.runtime_exports?.malloc_symbol,
             artifact.runtimeExports?.mallocSymbol,
           ),
           freeSymbol: preferNonEmptyString(
-            dependency.runtimeExports?.freeSymbol,
+            rawDependency.runtimeExports?.freeSymbol ??
+              rawDependency.runtime_exports?.free_symbol,
             artifact.runtimeExports?.freeSymbol,
           ),
           streamInvokeSymbol: preferNonEmptyString(
-            dependency.runtimeExports?.streamInvokeSymbol,
+            rawDependency.runtimeExports?.streamInvokeSymbol ??
+              rawDependency.runtime_exports?.stream_invoke_symbol,
             artifact.runtimeExports?.streamInvokeSymbol,
           ),
         },

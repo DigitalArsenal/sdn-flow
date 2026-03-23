@@ -1,6 +1,13 @@
-import { createServer } from "node:http";
+import { createServer as createHttpServer } from "node:http";
+import { createServer as createHttpsServer } from "node:https";
+import process from "node:process";
 
+import { normalizeStartupProtocol } from "../host/managedSecurity.js";
 import { createSdnFlowEditorFetchHandler } from "./fetchHandler.js";
+import {
+  buildSdnFlowEditorUrl,
+  createSdnFlowEditorRuntimeManager,
+} from "./runtimeManager.js";
 
 function normalizeHost(value, fallback = "127.0.0.1") {
   if (typeof value !== "string") {
@@ -10,7 +17,7 @@ function normalizeHost(value, fallback = "127.0.0.1") {
   return normalized.length > 0 ? normalized : fallback;
 }
 
-function normalizePort(value, fallback = 8080) {
+function normalizePort(value, fallback = 1990) {
   const port = Number.parseInt(String(value ?? fallback), 10);
   return Number.isFinite(port) && port >= 0 ? port : fallback;
 }
@@ -93,14 +100,46 @@ async function close(server) {
 }
 
 export async function startSdnFlowEditorNodeHost(options = {}) {
+  const protocol = normalizeStartupProtocol(options.protocol, "http");
   const hostname = normalizeHost(options.hostname, "127.0.0.1");
-  const port = normalizePort(options.port, 8080);
+  const port = normalizePort(options.port, 1990);
+  const runtimeManager =
+    options.runtimeManager ??
+    createSdnFlowEditorRuntimeManager({
+      ...options,
+      protocol,
+      hostname,
+      port,
+      execProcess: options.execProcess ?? process.execve?.bind(process) ?? null,
+    });
+  if (typeof runtimeManager.initialize === "function") {
+    await runtimeManager.initialize();
+  }
   const handler =
-    options.handler ?? createSdnFlowEditorFetchHandler(options);
-  const server = createServer(async (request, response) => {
+    options.handler ?? createSdnFlowEditorFetchHandler({
+      ...options,
+      runtimeManager,
+    });
+  const activeStartup =
+    runtimeManager.getRuntimeStatus?.().activeStartup ?? {
+      protocol,
+      hostname,
+      port,
+      basePath: options.basePath ?? "/",
+    };
+  const activeProtocol = normalizeStartupProtocol(activeStartup.protocol, protocol);
+  const securityState =
+    activeProtocol === "https" && typeof runtimeManager.ensureSecurityState === "function"
+      ? await runtimeManager.ensureSecurityState()
+      : null;
+  if (activeProtocol === "https" && !securityState?.serverOptions) {
+    throw new Error("HTTPS startup requires managed TLS server options.");
+  }
+
+  const requestListener = async (request, response) => {
     try {
       const fetchRequest = await toFetchRequest(request, {
-        origin: `http://${hostname}:${port}`,
+        origin: `${activeProtocol}://${hostname}:${port}`,
       });
       const fetchResponse = await handler(fetchRequest);
       await writeFetchResponse(fetchResponse, response);
@@ -112,7 +151,16 @@ export async function startSdnFlowEditorNodeHost(options = {}) {
           : "Internal Server Error",
       );
     }
-  });
+  };
+  const server =
+    activeProtocol === "https"
+      ? (options.createHttpsServer ?? createHttpsServer)(
+          securityState.serverOptions,
+          requestListener,
+        )
+      : (options.createHttpServer ?? options.createServer ?? createHttpServer)(
+          requestListener,
+        );
 
   await listen(server, {
     host: hostname,
@@ -123,18 +171,43 @@ export async function startSdnFlowEditorNodeHost(options = {}) {
     address && typeof address === "object" && "port" in address
       ? address.port
       : port;
+  let closed = false;
+  const closeHost = async () => {
+    if (closed) {
+      return;
+    }
+    closed = true;
+    await close(server);
+  };
+  if (typeof runtimeManager.bindHostLifecycle === "function") {
+    runtimeManager.bindHostLifecycle({
+      closeHost,
+    });
+  }
 
   return {
     platform: "node",
+    protocol: activeProtocol,
     hostname,
     port: actualPort,
-    url: `http://${hostname}:${actualPort}${
-      options.basePath && options.basePath !== "/" ? options.basePath : "/"
-    }`,
+    url: buildSdnFlowEditorUrl({
+      ...activeStartup,
+      protocol: activeProtocol,
+      hostname,
+      port: actualPort,
+      basePath: activeStartup.basePath ?? options.basePath ?? "/",
+    }),
     handler,
+    runtimeManager,
+    security: securityState
+      ? {
+          wallet: securityState.wallet,
+          tls: securityState.tls,
+        }
+      : null,
     server,
     async close() {
-      await close(server);
+      await closeHost();
     },
   };
 }

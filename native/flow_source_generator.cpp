@@ -136,6 +136,7 @@ struct Request {
   std::vector<ExternalInterfaceDescriptor> external_interfaces;
   std::vector<SignedArtifactDependency> dependencies;
   std::vector<std::uint32_t> node_ingress_indices;
+  std::string editor_metadata_json;
 };
 
 class BinaryReader {
@@ -563,6 +564,7 @@ Request readRequest(BinaryReader& reader) {
   for (std::uint32_t index = 0; index < node_ingress_index_count; ++index) {
     request.node_ingress_indices.push_back(reader.readU32());
   }
+  request.editor_metadata_json = reader.readString();
 
   if (reader.hasRemaining()) {
     throw std::runtime_error("unexpected trailing bytes in generator request");
@@ -1135,19 +1137,6 @@ std::string generateSource(const Request& request) {
       << "  descriptor.end_of_stream = false;\n"
       << "  descriptor.occupied = false;\n"
       << "}\n\n";
-  out << "static void clear_invocation_descriptor() {\n"
-      << "  kCurrentInvocationDescriptor.node_index = kInvalidIndex;\n"
-      << "  kCurrentInvocationDescriptor.dispatch_descriptor_index = kInvalidIndex;\n"
-      << "  kCurrentInvocationDescriptor.plugin_id = nullptr;\n"
-      << "  kCurrentInvocationDescriptor.method_id = nullptr;\n"
-      << "  kCurrentInvocationDescriptor.frames = kInvocationFrameBuffer;\n"
-      << "  kCurrentInvocationDescriptor.frame_count = 0;\n"
-      << "  for (std::size_t index = 0; index < "
-      << (request.ingress_descriptors.empty() ? 1 : request.ingress_descriptors.size())
-      << "; ++index) {\n"
-      << "    clear_frame_descriptor(kInvocationFrameBuffer[index]);\n"
-      << "  }\n"
-      << "}\n\n";
 
   out << renderByteArray("kFlowManifest", request.manifest_buffer) << "\n\n";
   out << renderStringPointerArray("kRequiredPlugins", request.required_plugins)
@@ -1217,6 +1206,8 @@ std::string generateSource(const Request& request) {
       << cppStringLiteral(request.program_version) << ";\n";
   out << "static const char kProgramDescription[] = "
       << cppStringLiteral(request.program_description) << ";\n";
+  out << "static const char kEditorMetadataJson[] = "
+      << cppStringLiteral(request.editor_metadata_json) << ";\n";
   out << "static const char kExecutionModel[] = \"compiled-cpp-wasm\";\n";
   out << "static const char kEntrypoint[] = \"main\";\n";
   out << "static const char kManifestBytesSymbol[] = "
@@ -1344,6 +1335,61 @@ std::string generateSource(const Request& request) {
       << "    kIngressDescriptors[ingress_index].target_port_id;\n"
       << "  kIngressFrameDescriptors[ingress_index].occupied = true;\n"
       << "}\n\n";
+
+  out << "static FlowRuntimeDescriptor kRuntimeDescriptor = {\n"
+      << "  kProgramId,\n"
+      << "  kProgramName,\n"
+      << "  kProgramVersion,\n"
+      << "  kProgramDescription,\n"
+      << "  kExecutionModel,\n"
+      << "  kEntrypoint,\n"
+      << "  kManifestBytesSymbol,\n"
+      << "  kManifestSizeSymbol,\n"
+      << "  kRequiredPlugins,\n"
+      << "  " << request.required_plugins.size() << ",\n"
+      << "  kTypeDescriptors,\n"
+      << "  " << request.type_descriptors.size() << ",\n"
+      << "  kAcceptedTypeIndices,\n"
+      << "  " << request.accepted_type_indices.size() << ",\n"
+      << "  kTriggerDescriptors,\n"
+      << "  " << request.triggers.size() << ",\n"
+      << "  kNodeDescriptors,\n"
+      << "  " << request.nodes.size() << ",\n"
+      << "  kNodeDispatchDescriptors,\n"
+      << "  " << request.nodes.size() << ",\n"
+      << "  kEdgeDescriptors,\n"
+      << "  " << request.edges.size() << ",\n"
+      << "  kTriggerBindingDescriptors,\n"
+      << "  " << request.trigger_bindings.size() << ",\n"
+      << "  kIngressDescriptors,\n"
+      << "  " << request.ingress_descriptors.size() << ",\n"
+      << "  kNodeIngressIndices,\n"
+      << "  " << request.node_ingress_indices.size() << ",\n"
+      << "  kExternalInterfaceDescriptors,\n"
+      << "  " << request.external_interfaces.size() << ",\n"
+      << "  kDependencies,\n"
+      << "  " << request.dependencies.size() << ",\n"
+      << "  kIngressFrameDescriptors,\n"
+      << "  " << request.ingress_descriptors.size() << ",\n"
+      << "  &kCurrentInvocationDescriptor,\n"
+      << "  kIngressRuntimeStates,\n"
+      << "  " << request.ingress_descriptors.size() << ",\n"
+      << "  kNodeRuntimeStates,\n"
+      << "  " << request.nodes.size() << '\n'
+      << "};\n\n";
+  out << "static void clear_invocation_descriptor() {\n"
+      << "  kCurrentInvocationDescriptor.node_index = kInvalidIndex;\n"
+      << "  kCurrentInvocationDescriptor.dispatch_descriptor_index = kInvalidIndex;\n"
+      << "  kCurrentInvocationDescriptor.plugin_id = nullptr;\n"
+      << "  kCurrentInvocationDescriptor.method_id = nullptr;\n"
+      << "  kCurrentInvocationDescriptor.frames = kInvocationFrameBuffer;\n"
+      << "  kCurrentInvocationDescriptor.frame_count = 0;\n"
+      << "  for (std::size_t index = 0; index < "
+      << (request.ingress_descriptors.empty() ? 1 : request.ingress_descriptors.size())
+      << "; ++index) {\n"
+      << "    clear_frame_descriptor(kInvocationFrameBuffer[index]);\n"
+      << "  }\n"
+      << "}\n\n";
   out << "static std::uint32_t route_output_frame(\n"
       << "  std::uint32_t node_index,\n"
       << "  const FlowFrameDescriptor * frame\n"
@@ -1407,48 +1453,6 @@ std::string generateSource(const Request& request) {
       << "    kCurrentInvocationDescriptor.frame_count += 1;\n"
       << "  }\n"
       << "}\n\n";
-
-  out << "static FlowRuntimeDescriptor kRuntimeDescriptor = {\n"
-      << "  kProgramId,\n"
-      << "  kProgramName,\n"
-      << "  kProgramVersion,\n"
-      << "  kProgramDescription,\n"
-      << "  kExecutionModel,\n"
-      << "  kEntrypoint,\n"
-      << "  kManifestBytesSymbol,\n"
-      << "  kManifestSizeSymbol,\n"
-      << "  kRequiredPlugins,\n"
-      << "  " << request.required_plugins.size() << ",\n"
-      << "  kTypeDescriptors,\n"
-      << "  " << request.type_descriptors.size() << ",\n"
-      << "  kAcceptedTypeIndices,\n"
-      << "  " << request.accepted_type_indices.size() << ",\n"
-      << "  kTriggerDescriptors,\n"
-      << "  " << request.triggers.size() << ",\n"
-      << "  kNodeDescriptors,\n"
-      << "  " << request.nodes.size() << ",\n"
-      << "  kNodeDispatchDescriptors,\n"
-      << "  " << request.nodes.size() << ",\n"
-      << "  kEdgeDescriptors,\n"
-      << "  " << request.edges.size() << ",\n"
-      << "  kTriggerBindingDescriptors,\n"
-      << "  " << request.trigger_bindings.size() << ",\n"
-      << "  kIngressDescriptors,\n"
-      << "  " << request.ingress_descriptors.size() << ",\n"
-      << "  kNodeIngressIndices,\n"
-      << "  " << request.node_ingress_indices.size() << ",\n"
-      << "  kExternalInterfaceDescriptors,\n"
-      << "  " << request.external_interfaces.size() << ",\n"
-      << "  kDependencies,\n"
-      << "  " << request.dependencies.size() << ",\n"
-      << "  kIngressFrameDescriptors,\n"
-      << "  " << request.ingress_descriptors.size() << ",\n"
-      << "  &kCurrentInvocationDescriptor,\n"
-      << "  kIngressRuntimeStates,\n"
-      << "  " << request.ingress_descriptors.size() << ",\n"
-      << "  kNodeRuntimeStates,\n"
-      << "  " << request.nodes.size() << '\n'
-      << "};\n\n";
   out << "}  // namespace " << namespace_name << "\n\n";
   out << "extern \"C\" const std::uint8_t * flow_get_manifest_flatbuffer() {\n"
       << "  return " << namespace_name << "::kFlowManifest;\n"
@@ -1466,6 +1470,12 @@ std::string generateSource(const Request& request) {
       << "}\n\n";
   out << "extern \"C\" const char * sdn_flow_get_program_version() {\n"
       << "  return " << namespace_name << "::kProgramVersion;\n"
+      << "}\n\n";
+  out << "extern \"C\" const char * sdn_flow_get_editor_metadata_json() {\n"
+      << "  return " << namespace_name << "::kEditorMetadataJson;\n"
+      << "}\n\n";
+  out << "extern \"C\" std::size_t sdn_flow_get_editor_metadata_size() {\n"
+      << "  return sizeof(" << namespace_name << "::kEditorMetadataJson) - 1;\n"
       << "}\n\n";
   out << "extern \"C\" const " << namespace_name
       << "::FlowTypeDescriptor * sdn_flow_get_type_descriptors() {\n"

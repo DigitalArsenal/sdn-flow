@@ -99,6 +99,19 @@ function resolveNamedExport(exports, symbol) {
   return null;
 }
 
+function readCString(memory, pointer) {
+  const base = Number(pointer) >>> 0;
+  if (!memory || !(memory.buffer instanceof ArrayBuffer) || base === 0) {
+    return null;
+  }
+  const bytes = new Uint8Array(memory.buffer);
+  let end = base;
+  while (end < bytes.length && bytes[end] !== 0) {
+    end += 1;
+  }
+  return new TextDecoder().decode(bytes.subarray(base, end));
+}
+
 function writeCString(memory, pointer, value) {
   const bytes = new Uint8Array(memory.buffer);
   const encoded = new TextEncoder().encode(`${String(value ?? "")}\0`);
@@ -424,6 +437,44 @@ export async function bindCompiledFlowRuntimeHost({
     dependencyImports,
     resolveEntrypoint(entrypoint = artifact?.entrypoint ?? "main") {
       return resolveNamedExport(resolvedWasmExports, entrypoint);
+    },
+    readEmbeddedEditorMetadata() {
+      if (!resolvedMemory || !(resolvedMemory.buffer instanceof ArrayBuffer)) {
+        return null;
+      }
+      const metadataExport = resolveNamedExport(
+        resolvedWasmExports,
+        bound.artifact?.runtimeExports?.editorMetadataJsonSymbol,
+      );
+      if (!metadataExport) {
+        return null;
+      }
+      const metadataPointer = Number(metadataExport.value() ?? 0) >>> 0;
+      if (metadataPointer === 0) {
+        return null;
+      }
+      const sizeExport = resolveNamedExport(
+        resolvedWasmExports,
+        bound.artifact?.runtimeExports?.editorMetadataSizeSymbol,
+      );
+      const metadataText =
+        sizeExport && typeof sizeExport.value === "function"
+          ? new TextDecoder().decode(
+              new Uint8Array(
+                resolvedMemory.buffer,
+                metadataPointer,
+                Number(sizeExport.value() ?? 0) >>> 0,
+              ),
+            )
+          : readCString(resolvedMemory, metadataPointer);
+      if (!metadataText) {
+        return null;
+      }
+      try {
+        return JSON.parse(metadataText);
+      } catch {
+        return metadataText;
+      }
     },
     runEntrypoint({
       entrypoint = artifact?.entrypoint ?? "main",

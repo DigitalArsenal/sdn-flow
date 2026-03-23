@@ -50,6 +50,47 @@ function normalizeBoolean(value, fallback = false) {
   return fallback;
 }
 
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function cloneJsonCompatibleValue(value) {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof structuredClone === "function") {
+    try {
+      return structuredClone(value);
+    } catch {
+      // Fall through to JSON normalization.
+    }
+  }
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return value;
+  }
+}
+
+function normalizeHostedBindingSecurity(binding = {}) {
+  const security = isPlainObject(binding.security) ? cloneJsonCompatibleValue(binding.security) : null;
+  const tls = isPlainObject(binding.tls) ? cloneJsonCompatibleValue(binding.tls) : null;
+  if (!security && !tls) {
+    return null;
+  }
+  return {
+    ...(security ?? {}),
+    ...(tls
+      ? {
+          tls: {
+            ...(isPlainObject(security?.tls) ? security.tls : {}),
+            ...tls,
+          },
+        }
+      : {}),
+  };
+}
+
 function defaultRuntimeExecution(kind) {
   return "compiled-wasm";
 }
@@ -80,6 +121,8 @@ export function normalizeHostedBinding(binding = {}) {
       .filter(Boolean)
       .join(":");
 
+  const normalizedSecurity = normalizeHostedBindingSecurity(binding);
+
   return {
     bindingId: bindingId || `${direction}:${transport}`,
     direction,
@@ -97,6 +140,7 @@ export function normalizeHostedBinding(binding = {}) {
     url: normalizeString(binding.url, null),
     required: normalizeBoolean(binding.required, true),
     description: normalizeString(binding.description, null),
+    ...(normalizedSecurity ? { security: normalizedSecurity } : {}),
   };
 }
 
