@@ -14,6 +14,8 @@ import { summarizeProgramRequirements } from "../designer/requirements.js";
 import { findManifestFiles } from "../compliance/index.js";
 import {
   BackpressurePolicy,
+  ExternalInterfaceDirection,
+  ExternalInterfaceKind,
   MethodRegistry,
   TriggerKind,
   normalizeFrame,
@@ -29,9 +31,11 @@ import {
 import {
   HostedRuntimeAdapter,
   HostedRuntimeAuthority,
+  HostedRuntimeBindingDirection,
   HostedRuntimeEngine,
   HostedRuntimeKind,
   HostedRuntimeStartupPhase,
+  HostedRuntimeTransport,
 } from "./constants.js";
 import { bindCompiledFlowRuntimeHost } from "./compiledFlowRuntimeHost.js";
 import { instantiateArtifactWithLoaderModule } from "./loaderModule.js";
@@ -874,6 +878,415 @@ async function disposeInstalledCompiledRuntime(runtimeState = null) {
   }
 }
 
+function hasUriScheme(value) {
+  const normalized = normalizeString(value, null);
+  return normalized ? /^[a-z][a-z0-9+.-]*:/i.test(normalized) : false;
+}
+
+function defaultHostedHttpBaseUrl(engine) {
+  return engine === HostedRuntimeEngine.BROWSER
+    ? "https://browser.invalid"
+    : "http://127.0.0.1";
+}
+
+function buildHostedHttpBindingUrl(pathOrUrl, options = {}) {
+  const normalizedPathOrUrl = normalizeString(pathOrUrl, null);
+  if (!normalizedPathOrUrl) {
+    return null;
+  }
+  if (hasUriScheme(normalizedPathOrUrl)) {
+    return normalizedPathOrUrl;
+  }
+  const baseUrl =
+    normalizeString(options.httpBaseUrl, null) ??
+    defaultHostedHttpBaseUrl(options.engine);
+  try {
+    return new URL(normalizedPathOrUrl, baseUrl).toString();
+  } catch {
+    return null;
+  }
+}
+
+function buildHostedInterfaceResourceUrl(externalInterface = {}, options = {}) {
+  const resource = normalizeString(externalInterface.resource, null);
+  const path = normalizeString(externalInterface.path, null);
+  const interfaceId =
+    normalizeString(externalInterface.interfaceId, null) ?? "binding";
+
+  if (externalInterface.kind === ExternalInterfaceKind.HTTP) {
+    return buildHostedHttpBindingUrl(path ?? resource, options);
+  }
+  if (resource && hasUriScheme(resource)) {
+    return resource;
+  }
+
+  switch (externalInterface.kind) {
+    case ExternalInterfaceKind.TIMER:
+    case ExternalInterfaceKind.SCHEDULE:
+      return `schedule://${resource ?? interfaceId}`;
+    case ExternalInterfaceKind.PIPE:
+      return `pipe://${resource ?? interfaceId}`;
+    case ExternalInterfaceKind.PROTOCOL:
+      return null;
+    default:
+      return resource;
+  }
+}
+
+function bindingDescriptionPrefix(bindingMode, noun) {
+  const normalizedMode = normalizeBindingMode(bindingMode, null);
+  if (!normalizedMode) {
+    return noun;
+  }
+  return `${normalizedMode === DeploymentBindingMode.DELEGATED ? "Delegated" : "Local"} ${noun}`;
+}
+
+function buildHostedBindingDescription({
+  externalInterface = null,
+  bindingMode = null,
+  noun = "binding",
+} = {}) {
+  const baseDescription = normalizeString(externalInterface?.description, null);
+  const prefix = bindingDescriptionPrefix(bindingMode, noun);
+  return baseDescription ? `${prefix}: ${baseDescription}` : prefix;
+}
+
+function extractTriggerOwners(externalInterface = {}) {
+  return (Array.isArray(externalInterface.owners) ? externalInterface.owners : [])
+    .filter((owner) => typeof owner === "string" && owner.startsWith("trigger:"))
+    .map((owner) => owner.slice(8));
+}
+
+function resolveMatchingScheduleBinding(externalInterface, deploymentPlan) {
+  const triggerIds = new Set(extractTriggerOwners(externalInterface));
+  if (externalInterface.kind === ExternalInterfaceKind.TIMER) {
+    const resource = normalizeString(externalInterface.resource, null);
+    if (resource) {
+      triggerIds.add(resource);
+    }
+    const interfaceId = normalizeString(externalInterface.interfaceId, null);
+    if (interfaceId) {
+      triggerIds.add(interfaceId);
+    }
+  }
+  return (deploymentPlan?.scheduleBindings ?? []).find((binding) =>
+    triggerIds.has(binding.triggerId),
+  );
+}
+
+function resolveMatchingServiceBinding(externalInterface, deploymentPlan) {
+  const triggerIds = new Set(extractTriggerOwners(externalInterface));
+  const interfacePath =
+    normalizeString(externalInterface.path, null) ??
+    (externalInterface.kind === ExternalInterfaceKind.HTTP
+      ? normalizeString(externalInterface.resource, null)
+      : null);
+
+  return (deploymentPlan?.serviceBindings ?? []).find((binding) => {
+    if (
+      normalizeString(binding.serviceKind, "")?.toLowerCase() !== "http-server"
+    ) {
+      return false;
+    }
+    if (binding.triggerId && triggerIds.has(binding.triggerId)) {
+      return true;
+    }
+    return Boolean(
+      interfacePath &&
+        normalizeString(binding.routePath, null) === interfacePath,
+    );
+  });
+}
+
+function resolveMatchingProtocolInstallations(externalInterface, deploymentPlan) {
+  const interfaceProtocolId =
+    normalizeString(externalInterface.protocolId, null) ??
+    normalizeString(externalInterface.resource, null);
+  if (!interfaceProtocolId) {
+    return [];
+  }
+  return (deploymentPlan?.protocolInstallations ?? []).filter(
+    (installation) => installation.protocolId === interfaceProtocolId,
+  );
+}
+
+function resolveHostedProtocolBindingUrl(installation = {}) {
+  return (
+    normalizeString(installation.nodeInfoUrl, null) ??
+    normalizeString(installation.serviceName, null) ??
+    null
+  );
+}
+
+function createHostedBindingRecord(binding, bindingMap) {
+  const key = [
+    normalizeString(binding.bindingId, null) ?? "",
+    normalizeString(binding.direction, null) ?? "",
+    normalizeString(binding.transport, null) ?? "",
+    normalizeString(binding.protocolId, null) ?? "",
+    normalizeString(binding.url, null) ?? "",
+    normalizeString(binding.audience, null) ?? "",
+  ].join("::");
+  if (!bindingMap.has(key)) {
+    bindingMap.set(key, binding);
+  }
+}
+
+function createHostedBindingsForDirection({
+  externalInterface,
+  bindingIdPrefix,
+  direction,
+  transport,
+  url = null,
+  protocolId = null,
+  audience = null,
+  description = null,
+  required = true,
+} = {}) {
+  return {
+    bindingId: `${bindingIdPrefix}:${direction}`,
+    direction,
+    transport,
+    protocolId,
+    audience,
+    url,
+    required,
+    description,
+  };
+}
+
+function createHostedBindingsForExternalInterface(
+  externalInterface,
+  { runtimeId, engine, deploymentPlan, httpBaseUrl } = {},
+) {
+  const directions = [];
+  switch (externalInterface.direction) {
+    case ExternalInterfaceDirection.INPUT:
+      directions.push(HostedRuntimeBindingDirection.LISTEN);
+      break;
+    case ExternalInterfaceDirection.OUTPUT:
+      directions.push(HostedRuntimeBindingDirection.DIAL);
+      break;
+    case ExternalInterfaceDirection.BIDIRECTIONAL:
+      directions.push(
+        HostedRuntimeBindingDirection.LISTEN,
+        HostedRuntimeBindingDirection.DIAL,
+      );
+      break;
+    default:
+      return [];
+  }
+
+  const bindingIdPrefix =
+    normalizeString(externalInterface.interfaceId, null) ??
+    `${runtimeId}:${externalInterface.kind}`;
+  const required = externalInterface.required !== false;
+
+  switch (externalInterface.kind) {
+    case ExternalInterfaceKind.TIMER:
+    case ExternalInterfaceKind.SCHEDULE: {
+      const scheduleBinding = resolveMatchingScheduleBinding(
+        externalInterface,
+        deploymentPlan,
+      );
+      return [
+        createHostedBindingsForDirection({
+          externalInterface,
+          bindingIdPrefix:
+            normalizeString(scheduleBinding?.scheduleId, null) ?? bindingIdPrefix,
+          direction: HostedRuntimeBindingDirection.LISTEN,
+          transport: HostedRuntimeTransport.SAME_APP,
+          url: buildHostedInterfaceResourceUrl(externalInterface),
+          description: buildHostedBindingDescription({
+            externalInterface,
+            bindingMode: scheduleBinding?.bindingMode ?? DeploymentBindingMode.DELEGATED,
+            noun: "scheduler binding",
+          }),
+          required,
+        }),
+      ];
+    }
+
+    case ExternalInterfaceKind.HTTP: {
+      const serviceBinding = resolveMatchingServiceBinding(
+        externalInterface,
+        deploymentPlan,
+      );
+      return directions.map((direction) =>
+        createHostedBindingsForDirection({
+          externalInterface,
+          bindingIdPrefix:
+            normalizeString(serviceBinding?.serviceId, null) ?? bindingIdPrefix,
+          direction,
+          transport: HostedRuntimeTransport.HTTP,
+          url:
+            direction === HostedRuntimeBindingDirection.LISTEN
+              ? buildHostedHttpBindingUrl(
+                  serviceBinding?.remoteUrl ??
+                    serviceBinding?.routePath ??
+                    externalInterface.path ??
+                    externalInterface.resource,
+                  {
+                    httpBaseUrl,
+                    engine,
+                  },
+                )
+              : buildHostedHttpBindingUrl(
+                  externalInterface.resource ?? externalInterface.path,
+                  {
+                    httpBaseUrl,
+                    engine,
+                  },
+                ),
+          description: buildHostedBindingDescription({
+            externalInterface,
+            bindingMode:
+              serviceBinding?.bindingMode ??
+              (direction === HostedRuntimeBindingDirection.LISTEN
+                ? DeploymentBindingMode.DELEGATED
+                : null),
+            noun:
+              direction === HostedRuntimeBindingDirection.LISTEN
+                ? "HTTP listener binding"
+                : "HTTP outbound binding",
+          }),
+          required,
+        }),
+      );
+    }
+
+    case ExternalInterfaceKind.PROTOCOL: {
+      const protocolInstallations = resolveMatchingProtocolInstallations(
+        externalInterface,
+        deploymentPlan,
+      );
+      const defaultProtocolId =
+        normalizeString(externalInterface.protocolId, null) ??
+        normalizeString(externalInterface.resource, null);
+      const bindings = [];
+
+      for (const direction of directions) {
+        const matchingInstallation =
+          direction === HostedRuntimeBindingDirection.LISTEN
+            ? protocolInstallations.find(
+                (installation) =>
+                  normalizeString(installation.role, null) === "handle",
+              ) ?? protocolInstallations[0]
+            : protocolInstallations.find(
+                (installation) =>
+                  normalizeString(installation.role, null) !== "handle",
+              ) ?? protocolInstallations[0];
+
+        bindings.push(
+          createHostedBindingsForDirection({
+            externalInterface,
+            bindingIdPrefix:
+              normalizeString(matchingInstallation?.wireId, null) ??
+              bindingIdPrefix,
+            direction,
+            transport: HostedRuntimeTransport.SDN_PROTOCOL,
+            protocolId:
+              normalizeString(matchingInstallation?.protocolId, null) ??
+              defaultProtocolId,
+            url: resolveHostedProtocolBindingUrl(matchingInstallation),
+            audience:
+              normalizeString(matchingInstallation?.peerId, null) ??
+              normalizeString(matchingInstallation?.serviceName, null) ??
+              (direction === HostedRuntimeBindingDirection.DIAL
+                ? "sdn-peers"
+                : null),
+            description: buildHostedBindingDescription({
+              externalInterface,
+              noun:
+                direction === HostedRuntimeBindingDirection.LISTEN
+                  ? "protocol host binding"
+                  : "protocol dial binding",
+            }),
+            required,
+          }),
+        );
+      }
+
+      return bindings;
+    }
+
+    case ExternalInterfaceKind.FILESYSTEM:
+    case ExternalInterfaceKind.DATABASE:
+    case ExternalInterfaceKind.HOST_SERVICE:
+    case ExternalInterfaceKind.PIPE:
+    case ExternalInterfaceKind.CONTEXT: {
+      return directions.map((direction) =>
+        createHostedBindingsForDirection({
+          externalInterface,
+          bindingIdPrefix,
+          direction,
+          transport: HostedRuntimeTransport.SAME_APP,
+          url: buildHostedInterfaceResourceUrl(externalInterface, {
+            httpBaseUrl,
+            engine,
+          }),
+          description: buildHostedBindingDescription({
+            externalInterface,
+            noun: `${externalInterface.kind} binding`,
+          }),
+          required,
+        }),
+      );
+    }
+
+    case ExternalInterfaceKind.TCP:
+    case ExternalInterfaceKind.UDP:
+    case ExternalInterfaceKind.TLS:
+    case ExternalInterfaceKind.WEBSOCKET:
+    case ExternalInterfaceKind.MQTT:
+    case ExternalInterfaceKind.NETWORK: {
+      return directions.map((direction) =>
+        createHostedBindingsForDirection({
+          externalInterface,
+          bindingIdPrefix,
+          direction,
+          transport: HostedRuntimeTransport.DIRECT,
+          url: buildHostedInterfaceResourceUrl(externalInterface, {
+            httpBaseUrl,
+            engine,
+          }),
+          description: buildHostedBindingDescription({
+            externalInterface,
+            noun: `${externalInterface.kind} binding`,
+          }),
+          required,
+        }),
+      );
+    }
+
+    default:
+      return [];
+  }
+}
+
+function deriveHostedRuntimeBindings({
+  runtimeId,
+  requirements,
+  deploymentPlan,
+  engine,
+  httpBaseUrl,
+} = {}) {
+  const bindingMap = new Map();
+  for (const externalInterface of Array.isArray(requirements?.externalInterfaces)
+    ? requirements.externalInterfaces
+    : []) {
+    for (const binding of createHostedBindingsForExternalInterface(externalInterface, {
+      runtimeId,
+      engine,
+      deploymentPlan,
+      httpBaseUrl,
+    })) {
+      createHostedBindingRecord(binding, bindingMap);
+    }
+  }
+  return Array.from(bindingMap.values());
+}
+
 export function createInstalledFlowHostedRuntimePlan(options = {}) {
   const program = normalizeProgram(options.program ?? {});
   const requirements = summarizeProgramRequirements({
@@ -881,20 +1294,27 @@ export function createInstalledFlowHostedRuntimePlan(options = {}) {
     manifests: options.manifests ?? [],
     registry: options.registry ?? null,
   });
+  const runtimeId =
+    options.runtimeId ?? `${program.programId ?? "flow-program"}:runtime`;
+  const engine = options.engine ?? HostedRuntimeEngine.DENO;
+  const deploymentPlan =
+    options.deploymentPlan ??
+    resolveInstalledFlowDeploymentPlan(program, {
+      ...options,
+      deploymentPlan: options.deploymentPlan ?? null,
+    });
 
   return normalizeHostedRuntimePlan({
     hostId: options.hostId ?? "sdn-js-local",
     hostKind: options.hostKind ?? "sdn-js",
     adapter: options.adapter ?? HostedRuntimeAdapter.SDN_JS,
-    engine: options.engine ?? HostedRuntimeEngine.DENO,
+    engine,
     description:
       options.description ??
       `Auto-start flow host for ${program.programId ?? "flow-program"}.`,
     runtimes: [
       {
-        runtimeId:
-          options.runtimeId ??
-          `${program.programId ?? "flow-program"}:runtime`,
+        runtimeId,
         kind: HostedRuntimeKind.FLOW,
         programId: program.programId ?? null,
         description: options.runtimeDescription ?? program.description ?? null,
@@ -912,9 +1332,17 @@ export function createInstalledFlowHostedRuntimePlan(options = {}) {
             program,
             requirements,
             hostPlan: options.hostPlan ?? null,
-            deploymentPlan: options.deploymentPlan ?? null,
+            deploymentPlan,
           }),
-        bindings: options.bindings ?? [],
+        bindings:
+          options.bindings ??
+          deriveHostedRuntimeBindings({
+            runtimeId,
+            requirements,
+            deploymentPlan,
+            engine,
+            httpBaseUrl: options.httpBaseUrl,
+          }),
       },
     ],
   });

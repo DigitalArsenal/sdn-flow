@@ -206,6 +206,168 @@ test("installed flow hosted runtime plans default to the Deno engine for sdn-js 
   assert.equal(plan.runtimes[0].autoStart, true);
 });
 
+test("installed flow hosted runtime plans derive explicit delegated scheduler, HTTP, storage, and protocol bindings", () => {
+  const plan = createInstalledFlowHostedRuntimePlan({
+    engine: HostedRuntimeEngine.DENO,
+    httpBaseUrl: "https://gateway.example.test/base/",
+    program: {
+      programId: "com.digitalarsenal.examples.binding-surface-plan",
+      nodes: [],
+      edges: [],
+      triggers: [
+        {
+          triggerId: "catalog-refresh",
+          kind: "timer",
+          defaultIntervalMs: 60000,
+        },
+        {
+          triggerId: "catalog-http",
+          kind: "http-request",
+          source: "/catalog/latest",
+        },
+      ],
+      triggerBindings: [],
+      requiredPlugins: [],
+      externalInterfaces: [
+        {
+          interfaceId: "catalog-dir",
+          kind: "filesystem",
+          direction: "output",
+          capability: "filesystem",
+          resource: "file:///var/lib/sdn/catalog-cache",
+          required: true,
+        },
+        {
+          interfaceId: "flatsql-store",
+          kind: "database",
+          direction: "bidirectional",
+          capability: "storage_query",
+          resource: "storage://flatsql",
+          required: true,
+        },
+        {
+          interfaceId: "storage-adapter",
+          kind: "host-service",
+          direction: "bidirectional",
+          capability: "storage_adapter",
+          resource: "storage-adapter://flatsql",
+          required: true,
+        },
+        {
+          interfaceId: "pnm-outbound",
+          kind: "protocol",
+          direction: "output",
+          capability: "protocol_dial",
+          protocolId: "/sds/pnm/1.0.0",
+          resource: "/sds/pnm/1.0.0",
+          required: true,
+        },
+      ],
+    },
+    deploymentPlan: {
+      pluginId: "com.digitalarsenal.examples.binding-surface-plan",
+      version: "1.0.0",
+      scheduleBindings: [
+        {
+          scheduleId: "schedule-catalog-refresh",
+          bindingMode: "delegated",
+          triggerId: "catalog-refresh",
+          scheduleKind: "interval",
+          intervalMs: 60000,
+        },
+      ],
+      serviceBindings: [
+        {
+          serviceId: "service-catalog-http",
+          bindingMode: "delegated",
+          serviceKind: "http-server",
+          triggerId: "catalog-http",
+          routePath: "/catalog/latest",
+          remoteUrl: "https://gateway.example.test/catalog/latest",
+        },
+      ],
+      inputBindings: [],
+      publicationBindings: [],
+      authPolicies: [],
+      protocolInstallations: [
+        {
+          protocolId: "/sds/pnm/1.0.0",
+          wireId: "pnm-wire",
+          transportKind: "http",
+          role: "dial",
+          nodeInfoUrl: "https://node.example.test/pnm",
+        },
+      ],
+    },
+  });
+  const summary = summarizeHostedRuntimePlan(plan);
+
+  assert.equal(
+    summary.bindings.some(
+      (binding) =>
+        binding.bindingId === "schedule-catalog-refresh:listen" &&
+        binding.transport === "same-app" &&
+        binding.url === "schedule://catalog-refresh",
+    ),
+    true,
+  );
+  assert.equal(
+    summary.bindings.some(
+      (binding) =>
+        binding.bindingId === "service-catalog-http:listen" &&
+        binding.transport === "http" &&
+        binding.url === "https://gateway.example.test/catalog/latest",
+    ),
+    true,
+  );
+  assert.equal(
+    summary.bindings.some(
+      (binding) =>
+        binding.bindingId === "catalog-dir:dial" &&
+        binding.transport === "same-app" &&
+        binding.url === "file:///var/lib/sdn/catalog-cache",
+    ),
+    true,
+  );
+  assert.equal(
+    summary.bindings.some(
+      (binding) =>
+        binding.bindingId === "flatsql-store:listen" &&
+        binding.transport === "same-app" &&
+        binding.url === "storage://flatsql",
+    ),
+    true,
+  );
+  assert.equal(
+    summary.bindings.some(
+      (binding) =>
+        binding.bindingId === "flatsql-store:dial" &&
+        binding.transport === "same-app" &&
+        binding.url === "storage://flatsql",
+    ),
+    true,
+  );
+  assert.equal(
+    summary.bindings.some(
+      (binding) =>
+        binding.bindingId === "storage-adapter:listen" &&
+        binding.transport === "same-app" &&
+        binding.url === "storage-adapter://flatsql",
+    ),
+    true,
+  );
+  assert.equal(
+    summary.bindings.some(
+      (binding) =>
+        binding.bindingId === "pnm-wire:dial" &&
+        binding.transport === "sdn-protocol" &&
+        binding.protocolId === "/sds/pnm/1.0.0" &&
+        binding.url === "https://node.example.test/pnm",
+    ),
+    true,
+  );
+});
+
 test("installed flow service auto-starts timer triggers with positive intervals", async () => {
   const scheduledIntervals = [];
   const clearedHandles = [];
