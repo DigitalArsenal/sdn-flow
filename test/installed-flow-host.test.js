@@ -1175,15 +1175,32 @@ test("installed flow service exposes delegated deployment bindings explicitly", 
   );
 });
 
-test("installed flow service rejects unsupported local publication bindings", async () => {
+test("installed flow service captures local publication bindings from trigger ingress and node outputs", async () => {
   const service = createInstalledFlowService({
     program: {
       programId: "com.digitalarsenal.examples.local-publication-service",
-      nodes: [],
+      nodes: [
+        {
+          nodeId: "publisher",
+          pluginId: "com.digitalarsenal.examples.memory.publisher",
+          methodId: "publish_records",
+        },
+      ],
       edges: [],
-      triggers: [],
-      triggerBindings: [],
-      requiredPlugins: [],
+      triggers: [
+        {
+          triggerId: "manual",
+          kind: "manual",
+        },
+      ],
+      triggerBindings: [
+        {
+          triggerId: "manual",
+          targetNodeId: "publisher",
+          targetPortId: "records",
+        },
+      ],
+      requiredPlugins: ["com.digitalarsenal.examples.memory.publisher"],
     },
     deploymentPlan: {
       pluginId: "com.digitalarsenal.examples.local-publication-service",
@@ -1193,20 +1210,94 @@ test("installed flow service rejects unsupported local publication bindings", as
       inputBindings: [],
       publicationBindings: [
         {
+          publicationId: "publication-ingress",
+          bindingMode: "local",
+          sourceKind: "trigger-ingress",
+          sourceTriggerId: "manual",
+        },
+        {
           publicationId: "publication-local",
           bindingMode: "local",
           sourceKind: "node-output",
           sourceNodeId: "publisher",
-          topic: "catalog/items",
+          sourceOutputPortId: "published",
         },
       ],
       authPolicies: [],
       protocolInstallations: [],
     },
     discover: false,
+    pluginPackages: [
+      {
+        manifest: {
+          pluginId: "com.digitalarsenal.examples.memory.publisher",
+          name: "In-Memory Publisher",
+          version: "1.0.0",
+          pluginFamily: "publisher",
+          methods: [
+            {
+              methodId: "publish_records",
+              inputPorts: [{ portId: "records", required: true }],
+              outputPorts: [{ portId: "published" }],
+              maxBatch: 8,
+              drainPolicy: "drain-to-empty",
+            },
+          ],
+        },
+        handlers: {
+          publish_records({ inputs }) {
+            return {
+              outputs: inputs.map((frame) => ({
+                ...frame,
+                portId: "published",
+              })),
+              backlogRemaining: 0,
+              yielded: false,
+            };
+          },
+        },
+      },
+    ],
   });
 
-  await assert.rejects(service.start(), /local publicationBindings/i);
+  const startup = await service.start();
+  const response = await service.dispatchTriggerFrames("manual", [
+    {
+      portId: "records",
+      streamId: 1,
+      sequence: 1,
+      typeRef: {
+        schemaName: "CatalogRecord.fbs",
+        fileIdentifier: "CTLG",
+      },
+      payload: new Uint8Array([1, 2, 3]),
+    },
+  ]);
+
+  assert.deepEqual(
+    startup.deploymentBindings.publications.local.map(
+      (binding) => binding.publicationId,
+    ),
+    ["publication-ingress", "publication-local"],
+  );
+  assert.equal(response.outputs.length, 1);
+  assert.equal(response.publications.length, 2);
+  assert.deepEqual(
+    response.publications.map((event) => event.publicationId),
+    ["publication-ingress", "publication-local"],
+  );
+  assert.equal(response.publications[0].source.triggerId, "manual");
+  assert.equal(response.publications[0].source.nodeId, null);
+  assert.equal(response.publications[1].source.nodeId, "publisher");
+  assert.equal(response.publications[1].source.methodId, "publish_records");
+  assert.equal(response.publications[1].source.portId, "published");
+  assert.deepEqual(
+    Array.from(response.publications[1].frame.payload),
+    [1, 2, 3],
+  );
+  assert.equal(service.getPublicationEventCount(), 2);
+  service.clearPublicationEvents();
+  assert.equal(service.getPublicationEventCount(), 0);
 });
 
 test("installed flow service rejects unsupported input and protocol deployment bindings", async () => {

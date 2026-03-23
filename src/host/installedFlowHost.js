@@ -1421,6 +1421,8 @@ export function createInstalledFlowHostedRuntimePlan(options = {}) {
 export function createInstalledFlowHost(options = {}) {
   const registry = options.registry ?? new MethodRegistry();
   const sinkEvents = [];
+  const nodeOutputListeners = new Set();
+  const triggerFrameListeners = new Set();
   const userOnSinkOutput =
     options.onSinkOutput ?? options.runtimeOptions?.onSinkOutput ?? null;
   let started = false;
@@ -1442,6 +1444,23 @@ export function createInstalledFlowHost(options = {}) {
       userOnSinkOutput(sinkEvent);
     }
     return sinkEvent;
+  }
+
+  function subscribeRuntimeListener(listeners, listener) {
+    if (typeof listener !== "function") {
+      return () => {};
+    }
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  }
+
+  function emitRuntimeEvent(listeners, event = {}) {
+    for (const listener of listeners) {
+      listener(event);
+    }
+    return event;
   }
 
   const runtime = {
@@ -1728,6 +1747,10 @@ export function createInstalledFlowHost(options = {}) {
         routeInvocationOutputs(nodeId, outputs = []) {
           for (const output of Array.isArray(outputs) ? outputs : []) {
             const normalizedOutput = cloneInstalledRuntimeFrame(output);
+            emitRuntimeEvent(nodeOutputListeners, {
+              nodeId,
+              frame: cloneInstalledRuntimeFrame(normalizedOutput),
+            });
             const sourceKey = `${nodeId}:${normalizedOutput.portId}`;
             const edges = this.edgesBySource.get(sourceKey) ?? [];
             if (edges.length === 0) {
@@ -1769,6 +1792,10 @@ export function createInstalledFlowHost(options = {}) {
           }
           for (const frameInput of Array.isArray(frames) ? frames : [frames]) {
             const normalizedFrame = normalizeInstalledRuntimeFrame(frameInput);
+            emitRuntimeEvent(triggerFrameListeners, {
+              triggerId,
+              frame: cloneInstalledRuntimeFrame(normalizedFrame),
+            });
             for (const binding of bindings) {
               this.enqueueEnvelope(
                 binding.targetNodeId,
@@ -1953,6 +1980,12 @@ export function createInstalledFlowHost(options = {}) {
     inspectQueues() {
       return runtime.inspectQueues();
     },
+    subscribeNodeOutputs(listener) {
+      return subscribeRuntimeListener(nodeOutputListeners, listener);
+    },
+    subscribeTriggerFrames(listener) {
+      return subscribeRuntimeListener(triggerFrameListeners, listener);
+    },
   };
 }
 
@@ -2037,6 +2070,8 @@ export function createInstalledFlowService(options = {}) {
     null;
   const nowFn = options.nowFn ?? Date.now;
   const onError = options.onError ?? null;
+  const publicationEvents = [];
+  const userOnPublication = options.onPublication ?? null;
   let started = false;
   let verifiedBindingsPlan = null;
   let resolvedLocalAuthPoliciesById = new Map();
@@ -2117,6 +2152,13 @@ export function createInstalledFlowService(options = {}) {
 
   function listServiceBindings() {
     return listServiceBindingsFromPlan(getDeploymentPlan());
+  }
+
+  function listLocalPublicationBindings() {
+    return filterBindingsByMode(
+      listPublicationBindingsFromPlan(getDeploymentPlan()),
+      DeploymentBindingMode.LOCAL,
+    );
   }
 
   function invalidateResolvedBindingCaches() {
@@ -2543,6 +2585,133 @@ export function createInstalledFlowService(options = {}) {
     };
   }
 
+  function findProgramNode(nodeId) {
+    return (
+      getProgram().nodes.find((candidate) => candidate.nodeId === nodeId) ?? null
+    );
+  }
+
+  function listProgramNodesByMethodId(methodId) {
+    return getProgram().nodes.filter((candidate) => candidate.methodId === methodId);
+  }
+
+  function resolveMethodOutputPorts(node) {
+    if (!node) {
+      return [];
+    }
+    const methodDescriptor = host.registry?.getMethod(node.pluginId, node.methodId);
+    return Array.isArray(methodDescriptor?.method?.outputPorts)
+      ? methodDescriptor.method.outputPorts
+      : [];
+  }
+
+  function buildPublicationSourceForNodeOutput(nodeId, frame = {}) {
+    const node = findProgramNode(nodeId);
+    return {
+      nodeId,
+      pluginId: node?.pluginId ?? null,
+      methodId: node?.methodId ?? null,
+      portId: normalizeString(frame.portId, null),
+      triggerId: null,
+    };
+  }
+
+  function buildPublicationSourceForTrigger(triggerId, frame = {}) {
+    return {
+      nodeId: null,
+      pluginId: null,
+      methodId: null,
+      portId: normalizeString(frame.portId, null),
+      triggerId,
+    };
+  }
+
+  function emitPublicationEvent({ binding, source, frame } = {}) {
+    const publicationEvent = {
+      index: publicationEvents.length,
+      publicationId: binding?.publicationId ?? null,
+      bindingMode: binding?.bindingMode ?? null,
+      sourceKind: binding?.sourceKind ?? null,
+      source: cloneJsonCompatibleValue(source) ?? null,
+      binding: cloneJsonCompatibleValue(binding) ?? null,
+      frame: frame ? cloneInstalledRuntimeFrame(frame) : null,
+    };
+    publicationEvents.push(publicationEvent);
+    if (typeof userOnPublication === "function") {
+      userOnPublication(publicationEvent);
+    }
+    return publicationEvent;
+  }
+
+  function matchesNodeOutputPublicationBinding(binding, nodeId, frame = {}) {
+    if (normalizeString(binding?.sourceTriggerId, null)) {
+      return false;
+    }
+    const expectedNodeId = normalizeString(binding?.sourceNodeId, null);
+    if (expectedNodeId && expectedNodeId !== nodeId) {
+      return false;
+    }
+    const expectedMethodId = normalizeString(binding?.sourceMethodId, null);
+    const node = findProgramNode(nodeId);
+    if (expectedMethodId && expectedMethodId !== node?.methodId) {
+      return false;
+    }
+    const expectedPortId = normalizeString(binding?.sourceOutputPortId, null);
+    if (expectedPortId && expectedPortId !== normalizeString(frame?.portId, null)) {
+      return false;
+    }
+    return Boolean(expectedNodeId || expectedMethodId);
+  }
+
+  function matchesTriggerPublicationBinding(binding, triggerId) {
+    const expectedTriggerId = normalizeString(binding?.sourceTriggerId, null);
+    if (!expectedTriggerId || expectedTriggerId !== triggerId) {
+      return false;
+    }
+    if (
+      normalizeString(binding?.sourceNodeId, null) ||
+      normalizeString(binding?.sourceMethodId, null) ||
+      normalizeString(binding?.sourceOutputPortId, null)
+    ) {
+      return false;
+    }
+    return true;
+  }
+
+  function captureNodeOutputPublications(event = {}) {
+    const nodeId = normalizeString(event.nodeId, null);
+    if (!nodeId) {
+      return;
+    }
+    for (const binding of listLocalPublicationBindings()) {
+      if (!matchesNodeOutputPublicationBinding(binding, nodeId, event.frame)) {
+        continue;
+      }
+      emitPublicationEvent({
+        binding,
+        source: buildPublicationSourceForNodeOutput(nodeId, event.frame),
+        frame: event.frame,
+      });
+    }
+  }
+
+  function captureTriggerPublications(event = {}) {
+    const triggerId = normalizeString(event.triggerId, null);
+    if (!triggerId) {
+      return;
+    }
+    for (const binding of listLocalPublicationBindings()) {
+      if (!matchesTriggerPublicationBinding(binding, triggerId)) {
+        continue;
+      }
+      emitPublicationEvent({
+        binding,
+        source: buildPublicationSourceForTrigger(triggerId, event.frame),
+        frame: event.frame,
+      });
+    }
+  }
+
   async function assertSupportedLocalBindings(deploymentPlan = getDeploymentPlan()) {
     if (verifiedBindingsPlan === deploymentPlan) {
       return;
@@ -2612,12 +2781,75 @@ export function createInstalledFlowService(options = {}) {
       listPublicationBindingsFromPlan(deploymentPlan),
       DeploymentBindingMode.LOCAL,
     );
-    if (localPublicationBindings.length > 0) {
+    if (
+      localPublicationBindings.length > 0 &&
+      (typeof host.subscribeNodeOutputs !== "function" ||
+        typeof host.subscribeTriggerFrames !== "function")
+    ) {
       throw new Error(
-        `Installed flow service cannot host local publicationBindings: ${localPublicationBindings
-          .map((binding) => binding.publicationId)
-          .join(", ")}.`,
+        "Installed flow service cannot host local publicationBindings because the host does not expose publication event subscriptions.",
       );
+    }
+    for (const binding of localPublicationBindings) {
+      const sourceTriggerId = normalizeString(binding.sourceTriggerId, null);
+      const sourceNodeId = normalizeString(binding.sourceNodeId, null);
+      const sourceMethodId = normalizeString(binding.sourceMethodId, null);
+      const sourceOutputPortId = normalizeString(binding.sourceOutputPortId, null);
+
+      if (sourceTriggerId) {
+        const trigger = getProgram().triggers.find(
+          (candidate) => candidate.triggerId === sourceTriggerId,
+        );
+        if (!trigger) {
+          throw new Error(
+            `Installed flow service cannot host local publication binding "${binding.publicationId}" because trigger "${sourceTriggerId}" is not present in the program.`,
+          );
+        }
+      }
+
+      if (sourceNodeId) {
+        const node = findProgramNode(sourceNodeId);
+        if (!node) {
+          throw new Error(
+            `Installed flow service cannot host local publication binding "${binding.publicationId}" because node "${sourceNodeId}" is not present in the program.`,
+          );
+        }
+        if (sourceMethodId && sourceMethodId !== node.methodId) {
+          throw new Error(
+            `Installed flow service cannot host local publication binding "${binding.publicationId}" because node "${sourceNodeId}" does not use method "${sourceMethodId}".`,
+          );
+        }
+        if (sourceOutputPortId) {
+          const outputPorts = resolveMethodOutputPorts(node);
+          if (!outputPorts.some((port) => port?.portId === sourceOutputPortId)) {
+            throw new Error(
+              `Installed flow service cannot host local publication binding "${binding.publicationId}" because node "${sourceNodeId}" does not declare output port "${sourceOutputPortId}".`,
+            );
+          }
+        }
+        continue;
+      }
+
+      if (sourceMethodId) {
+        const matchingNodes = listProgramNodesByMethodId(sourceMethodId);
+        if (matchingNodes.length === 0) {
+          throw new Error(
+            `Installed flow service cannot host local publication binding "${binding.publicationId}" because no program node uses method "${sourceMethodId}".`,
+          );
+        }
+        if (
+          sourceOutputPortId &&
+          !matchingNodes.some((node) =>
+            resolveMethodOutputPorts(node).some(
+              (port) => port?.portId === sourceOutputPortId,
+            ),
+          )
+        ) {
+          throw new Error(
+            `Installed flow service cannot host local publication binding "${binding.publicationId}" because no matching method output port "${sourceOutputPortId}" is present in the program.`,
+          );
+        }
+      }
     }
 
     const inputBindings = listInputBindingsFromPlan(deploymentPlan);
@@ -2713,12 +2945,15 @@ export function createInstalledFlowService(options = {}) {
 
   async function dispatchTriggerFrames(triggerId, frames) {
     await host.start();
+    await assertSupportedLocalBindings();
     const startIndex = host.getSinkEventCount();
+    const startPublicationIndex = publicationEvents.length;
     host.enqueueTriggerFrames(triggerId, frames);
     const drainResult = await host.drain(options.drainOptions);
     return {
       triggerId,
       outputs: host.getSinkOutputsSince(startIndex),
+      publications: publicationEvents.slice(startPublicationIndex),
       ...drainResult,
     };
   }
@@ -2739,6 +2974,7 @@ export function createInstalledFlowService(options = {}) {
   }
 
   async function handleHttpRequest(request = {}) {
+    await host.start();
     const { trigger, binding } = resolveHttpTrigger(request);
     if (binding) {
       await assertLocalHttpRequestAuthorized(binding, request);
@@ -2861,11 +3097,18 @@ export function createInstalledFlowService(options = {}) {
     timerHandles.clear();
   }
 
+  if (typeof host.subscribeNodeOutputs === "function") {
+    host.subscribeNodeOutputs(captureNodeOutputPublications);
+  }
+  if (typeof host.subscribeTriggerFrames === "function") {
+    host.subscribeTriggerFrames(captureTriggerPublications);
+  }
+
   return {
     host,
     async start() {
-      await assertSupportedLocalBindings();
       const startup = await host.start();
+      await assertSupportedLocalBindings();
       if (!started) {
         if (options.autoStartTimers !== false) {
           startTimerServices();
@@ -2904,6 +3147,15 @@ export function createInstalledFlowService(options = {}) {
     handleHttpRequest,
     listTimerTriggers,
     listHttpRoutes,
+    getPublicationEventCount() {
+      return publicationEvents.length;
+    },
+    getPublicationEventsSince(index = 0) {
+      return publicationEvents.slice(Math.max(0, Number(index) || 0));
+    },
+    clearPublicationEvents() {
+      publicationEvents.splice(0, publicationEvents.length);
+    },
     getDeploymentBindingSummary() {
       return buildDeploymentBindingSummary();
     },
@@ -2912,6 +3164,7 @@ export function createInstalledFlowService(options = {}) {
         started,
         timerTriggers: listTimerTriggers(),
         httpRoutes: listHttpRoutes(),
+        publicationEvents: publicationEvents.length,
         deploymentBindings: buildDeploymentBindingSummary(),
       };
     },

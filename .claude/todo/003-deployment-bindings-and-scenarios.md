@@ -6,15 +6,15 @@ Status: active
 
 - [ ] Consume and enforce the SDK deployment plan in the installed host path.
 - [ ] Apply:
-  - `scheduleBindings`
-  - `serviceBindings`
-  - `authPolicies`
-  - `publicationBindings`
+  - [x] `scheduleBindings`
+  - [x] `serviceBindings`
+  - [x] `authPolicies`
+  - [x] `publicationBindings`
   - `protocolInstallations`
   - `inputBindings`
-- [ ] Persist deployment plans with archived artifacts and bundles, not only in
+- [x] Persist deployment plans with archived artifacts and bundles, not only in
       transient deploy payloads.
-- [ ] Make browser/server delegated bindings explicit for:
+- [x] Make browser/server delegated bindings explicit for:
   - filesystem
   - scheduler
   - inbound HTTP hosting
@@ -33,9 +33,9 @@ Status: active
 ## Acceptance Scenarios
 
 1. CSV OMM ingest and query service
-   - [ ] Build a flow that pulls CSV OMMs from Celestrak.
-   - [ ] Store them in FlatSQL on disk.
-   - [ ] Serve authenticated HTTPS REST queries over that store.
+   - [x] Build a flow that pulls CSV OMMs from Celestrak.
+   - [x] Store them in FlatSQL on disk.
+   - [x] Serve authenticated HTTPS REST queries over that store.
 
 2. SDN/IPFS pull and pin workflow
    - [ ] Import an entity profile message.
@@ -61,7 +61,7 @@ Status: active
 
 ## Release Criteria
 
-- [ ] `npm test`
+- [x] `npm test`
 - [ ] `node --test test/compiler.test.js test/compiled-artifact.test.js test/host.test.js`
 - [ ] `node --test test/editor-compile-artifact.test.js test/runtime.test.js`
-- [ ] scenario-specific regression flows checked into the repo
+- [x] scenario-specific regression flows checked into the repo
