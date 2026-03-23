@@ -731,6 +731,7 @@ export async function createInstalledFlowApp(options = {}) {
     deploymentPlan: workspace.deploymentPlan,
     serializedArtifact: workspace.serializedArtifact,
     hostPlan: workspace.hostPlan,
+    baseDirectory: workspace.baseDirectory,
     pluginRootDirectories: workspace.pluginRootDirectories,
     pluginPackages: workspace.pluginPackages,
     discover: workspace.discover,

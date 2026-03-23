@@ -128,6 +128,76 @@ function normalizeHeaderRecord(headers) {
   return normalized;
 }
 
+function resolvePathLike(value, baseDirectory = process.cwd()) {
+  const normalized = normalizeString(value, null);
+  if (!normalized) {
+    return null;
+  }
+  return path.isAbsolute(normalized)
+    ? path.resolve(normalized)
+    : path.resolve(baseDirectory, normalized);
+}
+
+function normalizeNamedRecordCollection(values, idKey, normalizeEntry) {
+  if (Array.isArray(values)) {
+    return values
+      .map((value) => normalizeEntry(value, null))
+      .filter((value) => value?.[idKey]);
+  }
+  if (isObject(values)) {
+    return Object.entries(values)
+      .map(([key, value]) => normalizeEntry(value, key))
+      .filter((value) => value?.[idKey]);
+  }
+  return [];
+}
+
+function normalizeServerKeyAliases(value) {
+  const normalized = normalizeString(value, null);
+  if (!normalized) {
+    return [];
+  }
+  const aliases = new Set([normalized]);
+  const prefixedMatch = normalized.match(/^([a-z0-9._-]+):(.*)$/i);
+  if (prefixedMatch) {
+    const prefix = prefixedMatch[1].toLowerCase();
+    const body = prefixedMatch[2].trim();
+    aliases.add(`${prefix}:${body}`);
+    if (/^[0-9a-f]+$/i.test(body)) {
+      aliases.add(`${prefix}:${body.toUpperCase()}`);
+      aliases.add(`${prefix}:${body.toLowerCase()}`);
+      aliases.add(body.toUpperCase());
+      aliases.add(body.toLowerCase());
+    }
+    return Array.from(aliases);
+  }
+  if (/^[0-9a-f]+$/i.test(normalized)) {
+    aliases.add(normalized.toUpperCase());
+    aliases.add(normalized.toLowerCase());
+    aliases.add(`ed25519:${normalized.toUpperCase()}`);
+    aliases.add(`ed25519:${normalized.toLowerCase()}`);
+  }
+  return Array.from(aliases);
+}
+
+function mergeStringSet(target, values) {
+  for (const value of normalizeStringArray(values)) {
+    target.add(value);
+  }
+}
+
+function mergeServerKeySet(target, values) {
+  for (const value of Array.isArray(values) ? values : []) {
+    for (const alias of normalizeServerKeyAliases(value)) {
+      target.add(alias);
+    }
+  }
+}
+
+function sortStringSet(values) {
+  return Array.from(values).sort();
+}
+
 function toSortedUniqueStrings(values) {
   return Array.from(new Set(normalizeStringArray(values))).sort();
 }
@@ -1889,6 +1959,74 @@ export function createInstalledFlowHost(options = {}) {
 export function createInstalledFlowService(options = {}) {
   const host = options.host ?? createInstalledFlowHost(options);
   const timerHandles = new Map();
+  const authBaseDirectory =
+    resolvePathLike(options.baseDirectory ?? options.cwd, process.cwd()) ??
+    process.cwd();
+  const configuredWalletProfiles = normalizeNamedRecordCollection(
+    options.walletProfiles ?? options.auth?.walletProfiles,
+    "walletProfileId",
+    (value, inferredId) => ({
+      walletProfileId:
+        normalizeString(
+          value?.walletProfileId ?? value?.profileId ?? inferredId,
+          null,
+        ) ?? null,
+      recordPath: resolvePathLike(
+        value?.recordPath ?? value?.walletRecordPath ?? value?.path,
+        authBaseDirectory,
+      ),
+      allowPeerIds: toSortedUniqueStrings([
+        value?.peerId,
+        ...(value?.peerIds ?? []),
+        ...(value?.allowPeerIds ?? []),
+      ]),
+      allowServerKeys: toSortedUniqueStrings([
+        value?.serverKey,
+        ...(value?.serverKeys ?? []),
+        ...(value?.allowServerKeys ?? []),
+      ]),
+      allowEntityIds: toSortedUniqueStrings([
+        value?.entityId,
+        ...(value?.entityIds ?? []),
+        ...(value?.allowEntityIds ?? []),
+      ]),
+      signingPublicKeyHex: normalizeString(
+        value?.signingPublicKeyHex ?? value?.publicKeyHex,
+        null,
+      ),
+    }),
+  );
+  const configuredTrustMaps = normalizeNamedRecordCollection(
+    options.trustMaps ?? options.auth?.trustMaps,
+    "trustMapId",
+    (value, inferredId) => ({
+      trustMapId:
+        normalizeString(
+          value?.trustMapId ?? value?.mapId ?? inferredId,
+          null,
+        ) ?? null,
+      allowPeerIds: toSortedUniqueStrings([
+        ...(value?.allowPeerIds ?? []),
+      ]),
+      allowServerKeys: toSortedUniqueStrings([
+        ...(value?.allowServerKeys ?? []),
+      ]),
+      allowEntityIds: toSortedUniqueStrings([
+        ...(value?.allowEntityIds ?? []),
+      ]),
+      walletProfileIds: toSortedUniqueStrings([
+        value?.walletProfileId,
+        ...(value?.walletProfileIds ?? []),
+      ]),
+    }),
+  );
+  const walletProfilesById = new Map(
+    configuredWalletProfiles.map((profile) => [profile.walletProfileId, profile]),
+  );
+  const trustMapsById = new Map(
+    configuredTrustMaps.map((trustMap) => [trustMap.trustMapId, trustMap]),
+  );
+  const walletProfileTrustCache = new Map();
   const setIntervalFn =
     options.setIntervalFn ??
     globalThis.setInterval?.bind(globalThis) ??
@@ -1900,6 +2038,8 @@ export function createInstalledFlowService(options = {}) {
   const nowFn = options.nowFn ?? Date.now;
   const onError = options.onError ?? null;
   let started = false;
+  let verifiedBindingsPlan = null;
+  let resolvedLocalAuthPoliciesById = new Map();
 
   function getProgram() {
     const program = host.getProgram();
@@ -1979,6 +2119,138 @@ export function createInstalledFlowService(options = {}) {
     return listServiceBindingsFromPlan(getDeploymentPlan());
   }
 
+  function invalidateResolvedBindingCaches() {
+    walletProfileTrustCache.clear();
+    verifiedBindingsPlan = null;
+    resolvedLocalAuthPoliciesById = new Map();
+  }
+
+  async function readWalletProfileRecord(profile) {
+    if (!profile?.recordPath) {
+      return null;
+    }
+    try {
+      return await readJsonFile(profile.recordPath);
+    } catch (error) {
+      throw new Error(
+        `Installed flow service could not read wallet profile "${profile.walletProfileId}" from "${profile.recordPath}": ${error?.message ?? error}`,
+      );
+    }
+  }
+
+  async function resolveWalletProfileTrust(profileId) {
+    const normalizedProfileId = normalizeString(profileId, null);
+    if (!normalizedProfileId) {
+      return {
+        allowPeerIds: [],
+        allowServerKeys: [],
+        allowEntityIds: [],
+      };
+    }
+    const cachedTrust = walletProfileTrustCache.get(normalizedProfileId);
+    if (cachedTrust) {
+      return cachedTrust;
+    }
+
+    const profile = walletProfilesById.get(normalizedProfileId);
+    if (!profile) {
+      throw new Error(
+        `Installed flow service cannot resolve wallet profile "${normalizedProfileId}" for local auth enforcement.`,
+      );
+    }
+
+    const trustPromise = (async () => {
+      const record = await readWalletProfileRecord(profile);
+      const allowPeerIds = new Set(profile.allowPeerIds);
+      const allowServerKeys = new Set();
+      const allowEntityIds = new Set(profile.allowEntityIds);
+      mergeServerKeySet(allowServerKeys, profile.allowServerKeys);
+      mergeServerKeySet(allowServerKeys, [profile.signingPublicKeyHex]);
+      mergeStringSet(allowPeerIds, [
+        record?.peerId,
+        ...(record?.peerIds ?? []),
+      ]);
+      mergeStringSet(allowEntityIds, [
+        record?.entityId,
+        ...(record?.entityIds ?? []),
+      ]);
+      mergeServerKeySet(allowServerKeys, [
+        record?.serverKey,
+        ...(record?.serverKeys ?? []),
+        record?.signingPublicKeyHex,
+      ]);
+      return {
+        allowPeerIds: sortStringSet(allowPeerIds),
+        allowServerKeys: sortStringSet(allowServerKeys),
+        allowEntityIds: sortStringSet(allowEntityIds),
+      };
+    })();
+
+    walletProfileTrustCache.set(normalizedProfileId, trustPromise);
+    return trustPromise;
+  }
+
+  async function resolveTrustMapTrust(trustMapId) {
+    const normalizedTrustMapId = normalizeString(trustMapId, null);
+    if (!normalizedTrustMapId) {
+      return {
+        allowPeerIds: [],
+        allowServerKeys: [],
+        allowEntityIds: [],
+      };
+    }
+    const trustMap = trustMapsById.get(normalizedTrustMapId);
+    if (!trustMap) {
+      throw new Error(
+        `Installed flow service cannot resolve trust map "${normalizedTrustMapId}" for local auth enforcement.`,
+      );
+    }
+    const allowPeerIds = new Set(trustMap.allowPeerIds);
+    const allowServerKeys = new Set();
+    const allowEntityIds = new Set(trustMap.allowEntityIds);
+    mergeServerKeySet(allowServerKeys, trustMap.allowServerKeys);
+
+    for (const walletProfileId of trustMap.walletProfileIds) {
+      const walletTrust = await resolveWalletProfileTrust(walletProfileId);
+      mergeStringSet(allowPeerIds, walletTrust.allowPeerIds);
+      mergeServerKeySet(allowServerKeys, walletTrust.allowServerKeys);
+      mergeStringSet(allowEntityIds, walletTrust.allowEntityIds);
+    }
+
+    return {
+      allowPeerIds: sortStringSet(allowPeerIds),
+      allowServerKeys: sortStringSet(allowServerKeys),
+      allowEntityIds: sortStringSet(allowEntityIds),
+    };
+  }
+
+  async function resolveEffectiveLocalAuthPolicy(authPolicy) {
+    const allowPeerIds = new Set(authPolicy.allowPeerIds ?? []);
+    const allowServerKeys = new Set();
+    const allowEntityIds = new Set(authPolicy.allowEntityIds ?? []);
+    mergeServerKeySet(allowServerKeys, authPolicy.allowServerKeys ?? []);
+
+    if (authPolicy.walletProfileId) {
+      const walletTrust = await resolveWalletProfileTrust(authPolicy.walletProfileId);
+      mergeStringSet(allowPeerIds, walletTrust.allowPeerIds);
+      mergeServerKeySet(allowServerKeys, walletTrust.allowServerKeys);
+      mergeStringSet(allowEntityIds, walletTrust.allowEntityIds);
+    }
+    if (authPolicy.trustMapId) {
+      const trustMapTrust = await resolveTrustMapTrust(authPolicy.trustMapId);
+      mergeStringSet(allowPeerIds, trustMapTrust.allowPeerIds);
+      mergeServerKeySet(allowServerKeys, trustMapTrust.allowServerKeys);
+      mergeStringSet(allowEntityIds, trustMapTrust.allowEntityIds);
+    }
+
+    return {
+      ...authPolicy,
+      allowPeerIds: sortStringSet(allowPeerIds),
+      allowServerKeys: sortStringSet(allowServerKeys),
+      allowEntityIds: sortStringSet(allowEntityIds),
+    };
+  }
+
   function resolveLocalAuthPoliciesForServiceBinding(
     serviceBinding,
     deploymentPlan = getDeploymentPlan(),
@@ -2038,6 +2310,18 @@ export function createInstalledFlowService(options = {}) {
     }
 
     return resolvedPolicies;
+  }
+
+  function resolveEffectiveLocalAuthPoliciesForServiceBinding(
+    serviceBinding,
+    deploymentPlan = getDeploymentPlan(),
+  ) {
+    return resolveLocalAuthPoliciesForServiceBinding(
+      serviceBinding,
+      deploymentPlan,
+    ).map(
+      (policy) => resolvedLocalAuthPoliciesById.get(policy.policyId) ?? policy,
+    );
   }
 
   function resolveHttpRequestSecurityContext(request = {}) {
@@ -2107,8 +2391,22 @@ export function createInstalledFlowService(options = {}) {
     };
   }
 
-  function assertLocalHttpRequestAuthorized(serviceBinding, request = {}) {
-    const authPolicies = resolveLocalAuthPoliciesForServiceBinding(serviceBinding);
+  function isAllowedServerKey(allowedValues, requestedValue) {
+    if (!Array.isArray(allowedValues) || allowedValues.length === 0) {
+      return true;
+    }
+    const allowedAliases = new Set();
+    mergeServerKeySet(allowedAliases, allowedValues);
+    return normalizeServerKeyAliases(requestedValue).some((value) =>
+      allowedAliases.has(value),
+    );
+  }
+
+  async function assertLocalHttpRequestAuthorized(serviceBinding, request = {}) {
+    await assertSupportedLocalBindings();
+    const authPolicies = resolveEffectiveLocalAuthPoliciesForServiceBinding(
+      serviceBinding,
+    );
     if (authPolicies.length === 0) {
       return;
     }
@@ -2150,7 +2448,10 @@ export function createInstalledFlowService(options = {}) {
       }
       if (
         authPolicy.allowServerKeys.length > 0 &&
-        !authPolicy.allowServerKeys.includes(securityContext.serverKey ?? "")
+        !isAllowedServerKey(
+          authPolicy.allowServerKeys,
+          securityContext.serverKey ?? "",
+        )
       ) {
         throw createHttpStatusError(
           403,
@@ -2242,7 +2543,10 @@ export function createInstalledFlowService(options = {}) {
     };
   }
 
-  function assertSupportedLocalBindings(deploymentPlan = getDeploymentPlan()) {
+  async function assertSupportedLocalBindings(deploymentPlan = getDeploymentPlan()) {
+    if (verifiedBindingsPlan === deploymentPlan) {
+      return;
+    }
     const localScheduleBindings = filterBindingsByMode(
       listScheduleBindingsFromPlan(deploymentPlan),
       DeploymentBindingMode.LOCAL,
@@ -2281,6 +2585,7 @@ export function createInstalledFlowService(options = {}) {
       resolveLocalAuthPoliciesForServiceBinding(serviceBinding, deploymentPlan);
     }
 
+    const nextResolvedLocalAuthPoliciesById = new Map();
     for (const authPolicy of filterBindingsByMode(
       listAuthPoliciesFromPlan(deploymentPlan),
       DeploymentBindingMode.LOCAL,
@@ -2297,11 +2602,10 @@ export function createInstalledFlowService(options = {}) {
           `Installed flow service cannot enforce local auth policy "${authPolicy.policyId}" because targetId "${targetId}" is not a local HTTP service binding.`,
         );
       }
-      if (authPolicy.walletProfileId || authPolicy.trustMapId) {
-        throw new Error(
-          `Installed flow service cannot enforce local auth policy "${authPolicy.policyId}" because walletProfileId/trustMapId resolution is not implemented in the local host path.`,
-        );
-      }
+      nextResolvedLocalAuthPoliciesById.set(
+        authPolicy.policyId,
+        await resolveEffectiveLocalAuthPolicy(authPolicy),
+      );
     }
 
     const localPublicationBindings = filterBindingsByMode(
@@ -2338,6 +2642,9 @@ export function createInstalledFlowService(options = {}) {
           .join(", ")}.`,
       );
     }
+
+    resolvedLocalAuthPoliciesById = nextResolvedLocalAuthPoliciesById;
+    verifiedBindingsPlan = deploymentPlan;
   }
 
   function resolveHttpTrigger(request = {}) {
@@ -2434,7 +2741,7 @@ export function createInstalledFlowService(options = {}) {
   async function handleHttpRequest(request = {}) {
     const { trigger, binding } = resolveHttpTrigger(request);
     if (binding) {
-      assertLocalHttpRequestAuthorized(binding, request);
+      await assertLocalHttpRequestAuthorized(binding, request);
     }
     const response = await dispatchTriggerFrames(trigger.triggerId, [
       buildHttpRequestTriggerFrame(trigger, request),
@@ -2557,7 +2864,7 @@ export function createInstalledFlowService(options = {}) {
   return {
     host,
     async start() {
-      assertSupportedLocalBindings();
+      await assertSupportedLocalBindings();
       const startup = await host.start();
       if (!started) {
         if (options.autoStartTimers !== false) {
@@ -2576,7 +2883,8 @@ export function createInstalledFlowService(options = {}) {
       const restartTimers = started && options.autoStartTimers !== false;
       stopTimerServices();
       const refreshResult = await host.refreshPlugins(refreshOptions);
-      assertSupportedLocalBindings();
+      invalidateResolvedBindingCaches();
+      await assertSupportedLocalBindings();
       if (restartTimers) {
         startTimerServices();
       }

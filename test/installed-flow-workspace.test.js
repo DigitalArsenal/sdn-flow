@@ -14,6 +14,7 @@ import {
   updateWorkspacePackageReference,
   writeInstalledFlowWorkspace,
 } from "../src/index.js";
+import { ensureManagedSecurityState } from "../src/host/managedSecurity.js";
 
 const ExamplePluginsDirectory = new URL("../examples/plugins", import.meta.url)
   .pathname;
@@ -223,6 +224,166 @@ test("createInstalledFlowApp boots a persisted workspace and runs the installed 
     packageCatalogCount: 0,
     hostId: null,
   });
+});
+
+test("createInstalledFlowApp passes workspace.service trust material into the installed flow service", async () => {
+  const workspaceDirectory = await mkdtemp(
+    path.join(os.tmpdir(), "sdn-flow-installed-app-auth-"),
+  );
+  const securityState = await ensureManagedSecurityState({
+    projectRoot: workspaceDirectory,
+    scopeId: "trusted-client",
+    security: {
+      storageDir: path.join(workspaceDirectory, ".sdn-flow-security"),
+      wallet: {
+        enabled: true,
+      },
+      tls: {
+        enabled: false,
+      },
+    },
+    startup: {
+      protocol: "https",
+      hostname: "127.0.0.1",
+    },
+  });
+  const trustedServerKey = `ed25519:${securityState.wallet.signingPublicKeyHex}`;
+  const app = await createInstalledFlowApp({
+    workspace: {
+      workspaceId: "authenticated-app",
+      discover: false,
+      program: {
+        programId: "com.digitalarsenal.examples.authenticated-app",
+        nodes: [
+          {
+            nodeId: "responder",
+            pluginId: "com.digitalarsenal.examples.memory.workspace-auth-http",
+            methodId: "serve_http_request",
+          },
+        ],
+        edges: [],
+        triggers: [
+          {
+            triggerId: "secure-download",
+            kind: "http-request",
+            source: "/secure-download",
+          },
+        ],
+        triggerBindings: [
+          {
+            triggerId: "secure-download",
+            targetNodeId: "responder",
+            targetPortId: "request",
+          },
+        ],
+        requiredPlugins: ["com.digitalarsenal.examples.memory.workspace-auth-http"],
+      },
+      deploymentPlan: {
+        pluginId: "com.digitalarsenal.examples.authenticated-app",
+        version: "1.0.0",
+        scheduleBindings: [],
+        serviceBindings: [
+          {
+            serviceId: "service-secure-download",
+            triggerId: "secure-download",
+            bindingMode: "local",
+            serviceKind: "http-server",
+            routePath: "/secure-download",
+            method: "GET",
+            authPolicyId: "workspace-wallet-trust",
+          },
+        ],
+        inputBindings: [],
+        publicationBindings: [],
+        authPolicies: [
+          {
+            policyId: "workspace-wallet-trust",
+            bindingMode: "local",
+            targetKind: "service",
+            targetId: "service-secure-download",
+            trustMapId: "approved-callers",
+            requireSignedRequests: true,
+            requireEncryptedTransport: true,
+          },
+        ],
+        protocolInstallations: [],
+      },
+      pluginPackages: [
+        {
+          manifest: {
+            pluginId: "com.digitalarsenal.examples.memory.workspace-auth-http",
+            name: "In-Memory Workspace Auth HTTP",
+            version: "1.0.0",
+            pluginFamily: "responder",
+            methods: [
+              {
+                methodId: "serve_http_request",
+                inputPorts: [{ portId: "request", required: true }],
+                outputPorts: [{ portId: "response" }],
+                maxBatch: 8,
+                drainPolicy: "drain-to-empty",
+              },
+            ],
+          },
+          handlers: {
+            serve_http_request({ inputs }) {
+              return {
+                outputs: inputs.map((frame) => ({
+                  ...frame,
+                  portId: "response",
+                  metadata: {
+                    statusCode: 200,
+                  },
+                })),
+                backlogRemaining: 0,
+                yielded: false,
+              };
+            },
+          },
+        },
+      ],
+      service: {
+        walletProfiles: {
+          "trusted-client": {
+            recordPath: securityState.wallet.recordPath,
+          },
+        },
+        trustMaps: {
+          "approved-callers": {
+            walletProfileId: "trusted-client",
+          },
+        },
+      },
+      fetch: {
+        baseUrl: "https://example.test",
+      },
+    },
+  });
+
+  await app.start();
+
+  const rejected = await app.fetchHandler(
+    new Request("https://example.test/secure-download", {
+      method: "GET",
+      headers: {
+        "x-sdn-server-key": "ed25519:not-approved",
+        "x-sdn-signed-request": "1",
+      },
+    }),
+  );
+  assert.equal(rejected.status, 403);
+
+  const accepted = await app.fetchHandler(
+    new Request("https://example.test/secure-download", {
+      method: "GET",
+      headers: {
+        "x-sdn-server-key": trustedServerKey,
+        "x-sdn-signed-request": "1",
+      },
+    }),
+  );
+
+  assert.equal(accepted.status, 200);
 });
 
 test("workspace package install and uninstall helpers maintain the explicit plugin catalog", async () => {

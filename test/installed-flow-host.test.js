@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { mkdtemp, readFile } from "node:fs/promises";
 
 import {
   createInstalledFlowHost,
@@ -11,11 +13,110 @@ import {
   HostedRuntimeEngine,
   summarizeHostedRuntimePlan,
 } from "../src/index.js";
+import { ensureManagedSecurityState } from "../src/host/managedSecurity.js";
 
 async function readJson(relativeUrl) {
   return JSON.parse(
     await readFile(new URL(relativeUrl, import.meta.url), "utf8"),
   );
+}
+
+function createAuthenticatedHttpServiceOptions(extra = {}) {
+  return {
+    program: {
+      programId: "com.digitalarsenal.examples.authenticated-http-service",
+      nodes: [
+        {
+          nodeId: "responder",
+          pluginId: "com.digitalarsenal.examples.memory.auth-http",
+          methodId: "serve_http_request",
+        },
+      ],
+      edges: [],
+      triggers: [
+        {
+          triggerId: "secure-download",
+          kind: "http-request",
+          source: "/secure-download",
+        },
+      ],
+      triggerBindings: [
+        {
+          triggerId: "secure-download",
+          targetNodeId: "responder",
+          targetPortId: "request",
+        },
+      ],
+      requiredPlugins: ["com.digitalarsenal.examples.memory.auth-http"],
+    },
+    deploymentPlan: {
+      pluginId: "com.digitalarsenal.examples.authenticated-http-service",
+      version: "1.0.0",
+      scheduleBindings: [],
+      serviceBindings: [
+        {
+          serviceId: "service-secure-download",
+          triggerId: "secure-download",
+          bindingMode: "local",
+          serviceKind: "http-server",
+          routePath: "/secure-download",
+          method: "GET",
+          authPolicyId: "approved-keys",
+        },
+      ],
+      inputBindings: [],
+      publicationBindings: [],
+      authPolicies: [
+        {
+          policyId: "approved-keys",
+          bindingMode: "local",
+          targetKind: "service",
+          targetId: "service-secure-download",
+          allowServerKeys: ["ed25519:approved"],
+          requireSignedRequests: true,
+          requireEncryptedTransport: true,
+        },
+      ],
+      protocolInstallations: [],
+    },
+    discover: false,
+    pluginPackages: [
+      {
+        manifest: {
+          pluginId: "com.digitalarsenal.examples.memory.auth-http",
+          name: "In-Memory Auth HTTP",
+          version: "1.0.0",
+          pluginFamily: "responder",
+          methods: [
+            {
+              methodId: "serve_http_request",
+              inputPorts: [{ portId: "request", required: true }],
+              outputPorts: [{ portId: "response" }],
+              maxBatch: 8,
+              drainPolicy: "drain-to-empty",
+            },
+          ],
+        },
+        handlers: {
+          serve_http_request({ inputs }) {
+            return {
+              outputs: inputs.map((frame) => ({
+                ...frame,
+                portId: "response",
+                metadata: {
+                  ...frame.metadata,
+                  statusCode: 200,
+                },
+              })),
+              backlogRemaining: 0,
+              yielded: false,
+            };
+          },
+        },
+      },
+    ],
+    ...extra,
+  };
 }
 
 test("host plan summaries track engine compatibility for the shared sdn-js family", () => {
@@ -848,100 +949,7 @@ test("installed flow service rejects delegated HTTP bindings from the local host
 });
 
 test("installed flow service enforces local HTTP auth policies from the deployment plan", async () => {
-  const service = createInstalledFlowService({
-    program: {
-      programId: "com.digitalarsenal.examples.authenticated-http-service",
-      nodes: [
-        {
-          nodeId: "responder",
-          pluginId: "com.digitalarsenal.examples.memory.auth-http",
-          methodId: "serve_http_request",
-        },
-      ],
-      edges: [],
-      triggers: [
-        {
-          triggerId: "secure-download",
-          kind: "http-request",
-          source: "/secure-download",
-        },
-      ],
-      triggerBindings: [
-        {
-          triggerId: "secure-download",
-          targetNodeId: "responder",
-          targetPortId: "request",
-        },
-      ],
-      requiredPlugins: ["com.digitalarsenal.examples.memory.auth-http"],
-    },
-    deploymentPlan: {
-      pluginId: "com.digitalarsenal.examples.authenticated-http-service",
-      version: "1.0.0",
-      scheduleBindings: [],
-      serviceBindings: [
-        {
-          serviceId: "service-secure-download",
-          triggerId: "secure-download",
-          bindingMode: "local",
-          serviceKind: "http-server",
-          routePath: "/secure-download",
-          method: "GET",
-          authPolicyId: "approved-keys",
-        },
-      ],
-      inputBindings: [],
-      publicationBindings: [],
-      authPolicies: [
-        {
-          policyId: "approved-keys",
-          bindingMode: "local",
-          targetKind: "service",
-          targetId: "service-secure-download",
-          allowServerKeys: ["ed25519:approved"],
-          requireSignedRequests: true,
-          requireEncryptedTransport: true,
-        },
-      ],
-      protocolInstallations: [],
-    },
-    discover: false,
-    pluginPackages: [
-      {
-        manifest: {
-          pluginId: "com.digitalarsenal.examples.memory.auth-http",
-          name: "In-Memory Auth HTTP",
-          version: "1.0.0",
-          pluginFamily: "responder",
-          methods: [
-            {
-              methodId: "serve_http_request",
-              inputPorts: [{ portId: "request", required: true }],
-              outputPorts: [{ portId: "response" }],
-              maxBatch: 8,
-              drainPolicy: "drain-to-empty",
-            },
-          ],
-        },
-        handlers: {
-          serve_http_request({ inputs }) {
-            return {
-              outputs: inputs.map((frame) => ({
-                ...frame,
-                portId: "response",
-                metadata: {
-                  ...frame.metadata,
-                  statusCode: 200,
-                },
-              })),
-              backlogRemaining: 0,
-              yielded: false,
-            };
-          },
-        },
-      },
-    ],
-  });
+  const service = createInstalledFlowService(createAuthenticatedHttpServiceOptions());
 
   const startup = await service.start();
   assert.equal(startup.deploymentBindings.authPolicies.local.length, 1);
@@ -978,6 +986,112 @@ test("installed flow service enforces local HTTP auth policies from the deployme
 
   assert.equal(response.serviceId, "service-secure-download");
   assert.deepEqual(response.authPolicies, ["approved-keys"]);
+  assert.equal(response.outputs[0].frame.metadata.statusCode, 200);
+});
+
+test("installed flow service resolves walletProfileId and trustMapId against managed wallet trust material", async () => {
+  const securityDirectory = await mkdtemp(
+    path.join(os.tmpdir(), "sdn-flow-service-wallet-trust-"),
+  );
+  const securityState = await ensureManagedSecurityState({
+    projectRoot: securityDirectory,
+    scopeId: "trusted-client",
+    security: {
+      storageDir: path.join(securityDirectory, ".sdn-flow-security"),
+      wallet: {
+        enabled: true,
+      },
+      tls: {
+        enabled: false,
+      },
+    },
+    startup: {
+      protocol: "https",
+      hostname: "127.0.0.1",
+    },
+  });
+  const trustedServerKey = `ed25519:${securityState.wallet.signingPublicKeyHex}`;
+  const service = createInstalledFlowService(
+    createAuthenticatedHttpServiceOptions({
+      deploymentPlan: {
+        pluginId: "com.digitalarsenal.examples.authenticated-http-service",
+        version: "1.0.0",
+        scheduleBindings: [],
+        serviceBindings: [
+          {
+            serviceId: "service-secure-download",
+            triggerId: "secure-download",
+            bindingMode: "local",
+            serviceKind: "http-server",
+            routePath: "/secure-download",
+            method: "GET",
+            authPolicyId: "wallet-trust",
+          },
+        ],
+        inputBindings: [],
+        publicationBindings: [],
+        authPolicies: [
+          {
+            policyId: "wallet-trust",
+            bindingMode: "local",
+            targetKind: "service",
+            targetId: "service-secure-download",
+            walletProfileId: "trusted-client",
+            trustMapId: "approved-callers",
+            requireSignedRequests: true,
+            requireEncryptedTransport: true,
+          },
+        ],
+        protocolInstallations: [],
+      },
+      walletProfiles: {
+        "trusted-client": {
+          recordPath: securityState.wallet.recordPath,
+        },
+      },
+      trustMaps: {
+        "approved-callers": {
+          walletProfileId: "trusted-client",
+        },
+      },
+    }),
+  );
+
+  const startup = await service.start();
+  assert.deepEqual(
+    startup.deploymentBindings.authPolicies.local.map((policy) => policy.policyId),
+    ["wallet-trust"],
+  );
+
+  await assert.rejects(
+    service.handleHttpRequest({
+      path: "/secure-download",
+      method: "GET",
+      headers: {
+        "x-sdn-server-key": "ed25519:not-approved",
+        "x-sdn-signed-request": "1",
+      },
+      metadata: {
+        url: "https://example.test/secure-download",
+      },
+    }),
+    /server key/i,
+  );
+
+  const response = await service.handleHttpRequest({
+    path: "/secure-download",
+    method: "GET",
+    headers: {
+      "x-sdn-server-key": trustedServerKey.toLowerCase(),
+      "x-sdn-signed-request": "1",
+    },
+    metadata: {
+      url: "https://example.test/secure-download",
+    },
+  });
+
+  assert.equal(response.serviceId, "service-secure-download");
+  assert.deepEqual(response.authPolicies, ["wallet-trust"]);
   assert.equal(response.outputs[0].frame.metadata.statusCode, 200);
 });
 
