@@ -1,0 +1,196 @@
+{
+  "programId": "com.digitalarsenal.examples.csv-omm-query-service",
+  "name": "CSV OMM Query Service",
+  "version": "0.1.0",
+  "description": "Fetches CSV OMMs from CelesTrak, stores them in FlatSQL, and serves authenticated HTTP query responses over the stored catalog.",
+  "runtimeTargets": [
+    "wasmedge"
+  ],
+  "nodes": [
+    {
+      "nodeId": "fetch-csv-omm",
+      "pluginId": "com.digitalarsenal.flow.http-fetcher",
+      "methodId": "fetch_records",
+      "kind": "ingest",
+      "drainPolicy": "drain-until-yield"
+    },
+    {
+      "nodeId": "store-omm",
+      "pluginId": "com.digitalarsenal.flatsql.store",
+      "methodId": "upsert_records",
+      "kind": "storage",
+      "drainPolicy": "drain-until-yield"
+    },
+    {
+      "nodeId": "build-query",
+      "pluginId": "com.digitalarsenal.flow.sql-http-bridge",
+      "methodId": "build_sql_query_from_http_request",
+      "kind": "bridge",
+      "drainPolicy": "drain-until-yield"
+    },
+    {
+      "nodeId": "query-omm",
+      "pluginId": "com.digitalarsenal.flatsql.store",
+      "methodId": "query_sql",
+      "kind": "query",
+      "drainPolicy": "drain-until-yield"
+    },
+    {
+      "nodeId": "respond-query",
+      "pluginId": "com.digitalarsenal.flow.sql-http-bridge",
+      "methodId": "build_http_response_from_rows",
+      "kind": "responder",
+      "drainPolicy": "drain-until-yield"
+    }
+  ],
+  "edges": [
+    {
+      "edgeId": "fetch-to-store",
+      "fromNodeId": "fetch-csv-omm",
+      "fromPortId": "records",
+      "toNodeId": "store-omm",
+      "toPortId": "records",
+      "backpressurePolicy": "queue",
+      "queueDepth": 256
+    },
+    {
+      "edgeId": "query-request-to-store",
+      "fromNodeId": "build-query",
+      "fromPortId": "query",
+      "toNodeId": "query-omm",
+      "toPortId": "query",
+      "backpressurePolicy": "queue",
+      "queueDepth": 64
+    },
+    {
+      "edgeId": "query-result-to-response",
+      "fromNodeId": "query-omm",
+      "fromPortId": "rows",
+      "toNodeId": "respond-query",
+      "toPortId": "rows",
+      "backpressurePolicy": "queue",
+      "queueDepth": 64
+    }
+  ],
+  "triggers": [
+    {
+      "triggerId": "sync-celestrak-csv",
+      "kind": "timer",
+      "source": "sync-celestrak-csv",
+      "defaultIntervalMs": 300000,
+      "acceptedTypes": [
+        {
+          "schemaName": "TimerTick.fbs",
+          "fileIdentifier": "TICK"
+        }
+      ],
+      "description": "Refreshes the CSV OMM catalog from CelesTrak every five minutes."
+    },
+    {
+      "triggerId": "query-http",
+      "kind": "http-request",
+      "source": "/catalog/omm/query",
+      "acceptedTypes": [
+        {
+          "schemaName": "HttpRequest.fbs",
+          "fileIdentifier": "HREQ"
+        }
+      ],
+      "description": "Serves authenticated REST queries over the stored OMM catalog."
+    }
+  ],
+  "triggerBindings": [
+    {
+      "triggerId": "sync-celestrak-csv",
+      "targetNodeId": "fetch-csv-omm",
+      "targetPortId": "trigger",
+      "backpressurePolicy": "latest",
+      "queueDepth": 1
+    },
+    {
+      "triggerId": "query-http",
+      "targetNodeId": "build-query",
+      "targetPortId": "request",
+      "backpressurePolicy": "queue",
+      "queueDepth": 32
+    }
+  ],
+  "requiredPlugins": [
+    "com.digitalarsenal.flow.http-fetcher",
+    "com.digitalarsenal.flatsql.store",
+    "com.digitalarsenal.flow.sql-http-bridge"
+  ],
+  "externalInterfaces": [
+    {
+      "interfaceId": "celestrak-csv-http",
+      "kind": "http",
+      "direction": "output",
+      "capability": "http",
+      "resource": "https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=csv",
+      "description": "Pulls CSV OMMs from CelesTrak."
+    },
+    {
+      "interfaceId": "flatsql-storage-adapter",
+      "kind": "host-service",
+      "direction": "bidirectional",
+      "capability": "storage_adapter",
+      "resource": "storage-adapter://flatsql",
+      "description": "Selects the host-backed FlatSQL adapter for persistent storage."
+    },
+    {
+      "interfaceId": "flatsql-database",
+      "kind": "database",
+      "direction": "bidirectional",
+      "capability": "storage_query",
+      "resource": "file:///var/lib/sdn/flatsql/celestrak-omm.db",
+      "description": "Persistent FlatSQL backing store for synchronized CSV OMM records."
+    },
+    {
+      "interfaceId": "query-http",
+      "kind": "http",
+      "direction": "input",
+      "capability": "http",
+      "resource": "/catalog/omm/query",
+      "path": "/catalog/omm/query",
+      "description": "Authenticated REST query endpoint for stored OMM data."
+    }
+  ],
+  "artifactDependencies": [
+    {
+      "dependencyId": "http-fetcher-signed",
+      "pluginId": "com.digitalarsenal.flow.http-fetcher",
+      "version": "1.0.0",
+      "artifactUri": "signed://plugins/http-fetcher/1.0.0",
+      "sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+      "signature": "ed25519:demo-http-fetcher-signature",
+      "signerPublicKey": "ed25519:demo-signer-1",
+      "requiredCapabilities": [
+        "http"
+      ]
+    },
+    {
+      "dependencyId": "flatsql-store-signed",
+      "pluginId": "com.digitalarsenal.flatsql.store",
+      "version": "1.1.0",
+      "artifactUri": "signed://plugins/flatsql-store/1.1.0",
+      "sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+      "signature": "ed25519:demo-flatsql-signature",
+      "signerPublicKey": "ed25519:demo-signer-1",
+      "requiredCapabilities": [
+        "storage_query",
+        "storage_write",
+        "storage_adapter"
+      ]
+    },
+    {
+      "dependencyId": "sql-http-bridge-signed",
+      "pluginId": "com.digitalarsenal.flow.sql-http-bridge",
+      "version": "1.0.0",
+      "artifactUri": "signed://plugins/sql-http-bridge/1.0.0",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "signature": "ed25519:demo-sql-http-bridge-signature",
+      "signerPublicKey": "ed25519:demo-signer-1",
+      "requiredCapabilities": []
+    }
+  ]
+}

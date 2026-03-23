@@ -40,6 +40,215 @@ function frame(portId, schemaName, fileIdentifier, payload, overrides = {}) {
   };
 }
 
+test("CSV OMM query service example summarizes CelesTrak ingest, FlatSQL persistence, and HTTP query requirements", async () => {
+  const flow = await readJson(
+    "../examples/flows/csv-omm-query-service/flow.json",
+  );
+  const manifests = await Promise.all([
+    readJson("../examples/plugins/http-fetcher/manifest.json"),
+    readJson("../examples/plugins/flatsql-store/manifest.json"),
+    readJson("../examples/plugins/sql-http-bridge/manifest.json"),
+  ]);
+
+  const session = new FlowDesignerSession({ program: flow });
+  const summary = session.inspectRequirements({ manifests });
+
+  assert.deepEqual(summary.capabilities, [
+    "http",
+    "storage_adapter",
+    "storage_query",
+    "storage_write",
+  ]);
+  assert.equal(summary.artifactDependencies.length, 3);
+  assert.equal(
+    summary.externalInterfaces.some(
+      (item) =>
+        item.kind === "http" &&
+        item.direction === "output" &&
+        item.resource?.includes("FORMAT=csv"),
+    ),
+    true,
+  );
+  assert.equal(
+    summary.externalInterfaces.some(
+      (item) =>
+        item.kind === "database" &&
+        item.resource === "file:///var/lib/sdn/flatsql/celestrak-omm.db",
+    ),
+    true,
+  );
+  assert.equal(
+    summary.externalInterfaces.some(
+      (item) =>
+        item.kind === "http" &&
+        item.direction === "input" &&
+        item.path === "/catalog/omm/query",
+    ),
+    true,
+  );
+});
+
+test("CSV OMM query service example runs through the reference harness end-to-end", async () => {
+  const flow = await readJson(
+    "../examples/flows/csv-omm-query-service/flow.json",
+  );
+  const manifests = {
+    fetcher: await readJson("../examples/plugins/http-fetcher/manifest.json"),
+    flatsql: await readJson("../examples/plugins/flatsql-store/manifest.json"),
+    bridge: await readJson("../examples/plugins/sql-http-bridge/manifest.json"),
+  };
+
+  const registry = new MethodRegistry();
+  const storedRecords = new Map();
+
+  registry.registerPlugin({
+    manifest: manifests.fetcher,
+    handlers: {
+      fetch_records: ({ inputs }) => ({
+        outputs: inputs.flatMap((input) => [
+          frame("records", "AlignedRecordBatch.fbs", "RECS", {
+            norad: 25544,
+            name: "ISS (ZARYA)",
+            source: "celestrak-csv",
+          }),
+          frame("records", "AlignedRecordBatch.fbs", "RECS", {
+            norad: 43013,
+            name: "AO-91",
+            source: "celestrak-csv",
+          }),
+        ]),
+        backlogRemaining: 0,
+        yielded: false,
+      }),
+    },
+  });
+
+  registry.registerPlugin({
+    manifest: manifests.flatsql,
+    handlers: {
+      upsert_records: ({ inputs }) => {
+        const outputs = [];
+        for (const input of inputs) {
+          storedRecords.set(input.payload.norad, input.payload);
+          outputs.push(
+            frame(
+              "stored",
+              "StoredRecordRef.fbs",
+              "STRF",
+              { norad: input.payload.norad },
+              {
+                sequence: input.sequence,
+                traceId: input.traceId,
+              },
+            ),
+          );
+        }
+        return { outputs, backlogRemaining: 0, yielded: false };
+      },
+      query_sql: ({ inputs }) => {
+        const request = inputs.at(-1)?.payload ?? {};
+        const requestedNorad = Number(request.params?.norad ?? request.norad ?? 0);
+        const rows = requestedNorad
+          ? [storedRecords.get(requestedNorad)].filter(Boolean)
+          : Array.from(storedRecords.values());
+        return {
+          outputs: [
+            frame("rows", "SqlQueryResult.fbs", "SQLR", {
+              rows,
+            }),
+          ],
+          backlogRemaining: 0,
+          yielded: false,
+        };
+      },
+      query_objects_within_radius: () => ({
+        outputs: [
+          frame("matches", "ProximitySelection.fbs", "PRXY", {
+            matches: [],
+          }),
+        ],
+        backlogRemaining: 0,
+        yielded: false,
+      }),
+    },
+  });
+
+  registry.registerPlugin({
+    manifest: manifests.bridge,
+    handlers: {
+      build_sql_query_from_http_request: ({ inputs }) => ({
+        outputs: inputs.map((input) =>
+          frame("query", "SqlQueryRequest.fbs", "SQLQ", {
+            sql: "SELECT * FROM omm WHERE norad = :norad",
+            params: {
+              norad: Number(input.payload.norad),
+            },
+          }),
+        ),
+        backlogRemaining: 0,
+        yielded: false,
+      }),
+      build_http_response_from_rows: ({ inputs }) => ({
+        outputs: inputs.map((input) =>
+          frame("response", "HttpResponse.fbs", "HRSP", JSON.stringify(input.payload), {
+            traceId: input.traceId,
+          }),
+        ).map((output) => ({
+          ...output,
+          metadata: {
+            statusCode: 200,
+            responseHeaders: {
+              "content-type": "application/json",
+            },
+          },
+        })),
+        backlogRemaining: 0,
+        yielded: false,
+      }),
+    },
+  });
+
+  const runtime = new FlowRuntime({ registry });
+  runtime.loadProgram(flow);
+
+  runtime.enqueueTriggerFrames("sync-celestrak-csv", [
+    frame("trigger", "TimerTick.fbs", "TICK", {
+      at: "2026-03-23T00:00:00.000Z",
+    }),
+  ]);
+  const syncResult = await runtime.drain();
+  assert.equal(syncResult.idle, true);
+  assert.equal(storedRecords.size, 2);
+
+  const sinkOutputs = [];
+  const queryRuntime = new FlowRuntime({
+    registry,
+    onSinkOutput(event) {
+      sinkOutputs.push(event);
+    },
+  });
+  queryRuntime.loadProgram(flow);
+  queryRuntime.enqueueTriggerFrames("query-http", [
+    frame("request", "HttpRequest.fbs", "HREQ", {
+      norad: 25544,
+    }),
+  ]);
+  const queryResult = await queryRuntime.drain();
+
+  assert.equal(queryResult.idle, true);
+  assert.equal(sinkOutputs.length, 1);
+  assert.equal(sinkOutputs[0].nodeId, "respond-query");
+  assert.deepEqual(JSON.parse(sinkOutputs[0].frame.payload), {
+    rows: [
+      {
+        norad: 25544,
+        name: "ISS (ZARYA)",
+        source: "celestrak-csv",
+      },
+    ],
+  });
+});
+
 test("ISS proximity OEM example summarizes external requirements for the visual editor", async () => {
   const flow = await readJson("../examples/flows/iss-proximity-oem/flow.json");
   const manifests = await Promise.all([

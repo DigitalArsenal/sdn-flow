@@ -1,0 +1,98 @@
+{
+  "pluginId": "com.digitalarsenal.flow.sql-http-bridge",
+  "name": "SQL HTTP Bridge",
+  "version": "1.0.0",
+  "pluginFamily": "bridge",
+  "capabilities": [],
+  "externalInterfaces": [],
+  "methods": [
+    {
+      "methodId": "build_sql_query_from_http_request",
+      "displayName": "Build SQL Query From HTTP Request",
+      "inputPorts": [
+        {
+          "portId": "request",
+          "acceptedTypeSets": [
+            {
+              "setId": "http-request",
+              "allowedTypes": [
+                {
+                  "schemaName": "HttpRequest.fbs",
+                  "fileIdentifier": "HREQ"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 16,
+          "required": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portId": "query",
+          "acceptedTypeSets": [
+            {
+              "setId": "sql-query",
+              "allowedTypes": [
+                {
+                  "schemaName": "SqlQueryRequest.fbs",
+                  "fileIdentifier": "SQLQ"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 16,
+          "required": true
+        }
+      ],
+      "maxBatch": 32,
+      "drainPolicy": "drain-until-yield"
+    },
+    {
+      "methodId": "build_http_response_from_rows",
+      "displayName": "Build HTTP Response From Rows",
+      "inputPorts": [
+        {
+          "portId": "rows",
+          "acceptedTypeSets": [
+            {
+              "setId": "sql-result",
+              "allowedTypes": [
+                {
+                  "schemaName": "SqlQueryResult.fbs",
+                  "fileIdentifier": "SQLR"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 16,
+          "required": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portId": "response",
+          "acceptedTypeSets": [
+            {
+              "setId": "http-response",
+              "allowedTypes": [
+                {
+                  "schemaName": "HttpResponse.fbs",
+                  "fileIdentifier": "HRSP"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 16,
+          "required": true
+        }
+      ],
+      "maxBatch": 32,
+      "drainPolicy": "drain-until-yield"
+    }
+  ]
+}
