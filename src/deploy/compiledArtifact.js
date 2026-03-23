@@ -209,6 +209,14 @@ function normalizeRuntimeExports(exports = {}) {
   };
 }
 
+function normalizeOptionalString(value, fallback = null) {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : fallback;
+}
+
 export async function normalizeCompiledArtifact(artifact = {}) {
   if (artifact.wasm === undefined || artifact.wasm === null) {
     throw new Error("Compiled flow artifact must include wasm bytes.");
@@ -255,6 +263,10 @@ export async function normalizeCompiledArtifact(artifact = {}) {
     runtimeExports: normalizeRuntimeExports(
       artifact.runtimeExports ?? artifact.runtime_exports,
     ),
+    loaderModule: normalizeOptionalString(
+      artifact.loaderModule ?? artifact.loader_module,
+      null,
+    ),
     entrypoint: artifact.entrypoint ?? "_start",
     graphHash,
     manifestHash,
@@ -281,6 +293,7 @@ export function serializeCompiledArtifact(artifact) {
     manifestBase64: bytesToBase64(artifact.manifestBuffer),
     manifestExports: artifact.manifestExports,
     runtimeExports: artifact.runtimeExports,
+    loaderModule: artifact.loaderModule ?? null,
     entrypoint: artifact.entrypoint,
     graphHash: artifact.graphHash,
     manifestHash: artifact.manifestHash,
@@ -305,6 +318,8 @@ export async function deserializeCompiledArtifact(serializedArtifact = {}) {
         serializedArtifact.manifest_exports,
       runtimeExports:
         serializedArtifact.runtimeExports ?? serializedArtifact.runtime_exports,
+      loaderModule:
+        serializedArtifact.loaderModule ?? serializedArtifact.loader_module,
     });
   }
 

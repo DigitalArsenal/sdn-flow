@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   buildDefaultFlowManifestBuffer,
+  createInstalledFlowHost,
   decodeCompiledArtifactManifest,
   evaluateHostedRuntimeTargetSupport,
   FlowDeploymentClient,
@@ -251,5 +252,124 @@ test("FlowDeploymentClient.prepareDeployment reads embedded PMAN runtimeTargets 
         engine: HostedRuntimeEngine.WASI,
       },
     }),
+  );
+});
+
+test("createInstalledFlowHost enforces browser, server, wasi, and wasmedge host plans from embedded runtimeTargets", async () => {
+  const runtimeHost = {
+    enqueueTriggerFrame() {},
+    async drain() {
+      return {
+        idle: true,
+        iterations: 0,
+        executions: [],
+      };
+    },
+    resetRuntimeState() {},
+    async destroyDependencies() {},
+    resolvedByRole: {
+      readyNodeSymbol() {
+        return 0xffffffff;
+      },
+    },
+  };
+  const program = createProgram({
+    triggers: [
+      {
+        triggerId: "manual",
+        kind: "manual",
+      },
+    ],
+  });
+  const cases = [
+    {
+      runtimeTarget: RuntimeTarget.BROWSER,
+      hostKind: "orbpro",
+      adapter: HostedRuntimeAdapter.SDN_JS,
+      engine: HostedRuntimeEngine.BROWSER,
+    },
+    {
+      runtimeTarget: RuntimeTarget.SERVER,
+      hostKind: "sdn-js",
+      adapter: HostedRuntimeAdapter.SDN_JS,
+      engine: HostedRuntimeEngine.DENO,
+    },
+    {
+      runtimeTarget: RuntimeTarget.WASI,
+      hostKind: "standalone-wasi",
+      adapter: HostedRuntimeAdapter.HOST_INTERNAL,
+      engine: HostedRuntimeEngine.WASI,
+    },
+    {
+      runtimeTarget: RuntimeTarget.WASMEDGE,
+      hostKind: "wasmedge",
+      adapter: HostedRuntimeAdapter.HOST_INTERNAL,
+      engine: HostedRuntimeEngine.WASI,
+    },
+  ];
+
+  for (const testCase of cases) {
+    const artifact = await normalizeCompiledArtifact({
+      programId: program.programId,
+      wasm: new Uint8Array([0x00, 0x61, 0x73, 0x6d]),
+      manifestBuffer: buildDefaultFlowManifestBuffer({
+        program,
+        runtimeTargets: [testCase.runtimeTarget],
+      }),
+    });
+    const host = createInstalledFlowHost({
+      program,
+      discover: false,
+      artifact,
+      runtimeHost,
+      hostPlan: {
+        hostId: `${testCase.hostKind}-host`,
+        hostKind: testCase.hostKind,
+        adapter: testCase.adapter,
+        engine: testCase.engine,
+        runtimes: [
+          {
+            runtimeId: `${testCase.runtimeTarget}-runtime`,
+            kind: "flow",
+            programId: program.programId,
+          },
+        ],
+      },
+    });
+
+    await assert.doesNotReject(host.start());
+  }
+
+  const incompatibleArtifact = await normalizeCompiledArtifact({
+    programId: program.programId,
+    wasm: new Uint8Array([0x00, 0x61, 0x73, 0x6d]),
+    manifestBuffer: buildDefaultFlowManifestBuffer({
+      program,
+      runtimeTargets: [RuntimeTarget.WASMEDGE],
+    }),
+  });
+  const incompatibleHost = createInstalledFlowHost({
+    program,
+    discover: false,
+    artifact: incompatibleArtifact,
+    runtimeHost,
+    hostPlan: {
+      hostId: "browser-host",
+      hostKind: "orbpro",
+      adapter: HostedRuntimeAdapter.SDN_JS,
+      engine: HostedRuntimeEngine.BROWSER,
+      runtimes: [
+        {
+          runtimeId: "browser-runtime",
+          kind: "flow",
+          programId: program.programId,
+        },
+      ],
+    },
+  });
+
+  await assert.rejects(
+    incompatibleHost.start(),
+    /cannot start runtime "browser-runtime".*wasmedge/i,
   );
 });

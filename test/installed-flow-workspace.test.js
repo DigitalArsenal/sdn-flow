@@ -131,6 +131,50 @@ test("writeInstalledFlowWorkspace stores relative paths and round-trips back to 
   ]);
 });
 
+test("installed flow workspaces persist deployment plans and serialized artifacts", async () => {
+  const workspaceDirectory = await mkdtemp(
+    path.join(os.tmpdir(), "sdn-flow-workspace-artifact-"),
+  );
+  const workspacePath = path.join(workspaceDirectory, "workspace.json");
+
+  await writeInstalledFlowWorkspace(workspacePath, {
+    workspaceId: "artifact-workspace",
+    flowPath: SinglePluginFlowPath,
+    deploymentPlan: {
+      pluginId: "com.digitalarsenal.examples.single-plugin-flow",
+      version: "0.1.0",
+      scheduleBindings: [],
+      serviceBindings: [],
+      inputBindings: [],
+      publicationBindings: [],
+      authPolicies: [],
+      protocolInstallations: [],
+    },
+    serializedArtifact: {
+      programId: "com.digitalarsenal.examples.single-plugin-flow",
+      wasmBase64: "AGFzbQ==",
+      manifestBase64: "RkxPVw==",
+      loaderModule: "export default function createRuntime() {}",
+    },
+  });
+
+  const workspace = await readInstalledFlowWorkspace(workspacePath);
+  const rawWorkspace = JSON.parse(await readFile(workspacePath, "utf8"));
+
+  assert.equal(
+    workspace.deploymentPlan?.pluginId,
+    "com.digitalarsenal.examples.single-plugin-flow",
+  );
+  assert.equal(
+    workspace.serializedArtifact?.loaderModule,
+    "export default function createRuntime() {}",
+  );
+  assert.equal(
+    rawWorkspace.serializedArtifact.loaderModule,
+    "export default function createRuntime() {}",
+  );
+});
+
 test("createInstalledFlowApp boots a persisted workspace and runs the installed flow host", async () => {
   const workspaceDirectory = await mkdtemp(
     path.join(os.tmpdir(), "sdn-flow-installed-app-"),

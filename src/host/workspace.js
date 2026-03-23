@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import { normalizeDeploymentPlan } from "space-data-module-sdk";
 import { normalizeProgram } from "../runtime/index.js";
 import {
   createInstalledFlowFetchHandler,
@@ -54,6 +55,24 @@ function relativizePathLike(value, baseDirectory) {
 
 function normalizeMetadata(value) {
   return isObject(value) ? { ...value } : {};
+}
+
+function cloneJsonCompatibleValue(value) {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof structuredClone === "function") {
+    try {
+      return structuredClone(value);
+    } catch {
+      // Fall through to JSON normalization.
+    }
+  }
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return value;
+  }
 }
 
 function normalizeWorkspacePluginPackage(pluginPackage = {}, baseDirectory = null) {
@@ -123,6 +142,10 @@ function serializeWorkspacePackageReference(reference, baseDirectory) {
     status: reference.status,
     metadata: reference.metadata,
   };
+}
+
+function normalizeSerializedArtifact(value) {
+  return isObject(value) ? cloneJsonCompatibleValue(value) : null;
 }
 
 function packageReferenceKey(reference = {}) {
@@ -221,6 +244,13 @@ export function normalizeInstalledFlowWorkspace(workspace = {}, options = {}) {
     workspace.hostPlan && isObject(workspace.hostPlan)
       ? normalizeHostedRuntimePlan(workspace.hostPlan)
       : null;
+  const deploymentPlan =
+    workspace.deploymentPlan && isObject(workspace.deploymentPlan)
+      ? normalizeDeploymentPlan(workspace.deploymentPlan)
+      : null;
+  const serializedArtifact = normalizeSerializedArtifact(
+    workspace.serializedArtifact ?? workspace.serialized_artifact,
+  );
   const flowPath = resolvePathLike(
     workspace.flowPath ?? workspace.programPath,
     baseDirectory,
@@ -253,6 +283,8 @@ export function normalizeInstalledFlowWorkspace(workspace = {}, options = {}) {
     baseDirectory,
     flowPath,
     hostPlanPath,
+    deploymentPlan,
+    serializedArtifact,
     pluginRootDirectories,
     pluginPackages,
     packageCatalog,
@@ -316,6 +348,8 @@ export async function writeInstalledFlowWorkspace(workspacePath, workspace, opti
       normalizedWorkspace.hostPlanPath,
       baseDirectory,
     ),
+    deploymentPlan: normalizedWorkspace.deploymentPlan,
+    serializedArtifact: normalizedWorkspace.serializedArtifact,
     pluginRootDirectories: normalizedWorkspace.pluginRootDirectories.map(
       (directory) => relativizePathLike(directory, baseDirectory),
     ),
@@ -694,6 +728,9 @@ export async function createInstalledFlowApp(options = {}) {
 
   const service = createInstalledFlowService({
     program: workspace.program,
+    deploymentPlan: workspace.deploymentPlan,
+    serializedArtifact: workspace.serializedArtifact,
+    hostPlan: workspace.hostPlan,
     pluginRootDirectories: workspace.pluginRootDirectories,
     pluginPackages: workspace.pluginPackages,
     discover: workspace.discover,
@@ -765,6 +802,9 @@ export async function createInstalledFlowApp(options = {}) {
       const refreshResult = await service.refresh({
         ...refreshOptions,
         program: workspace.program,
+        deploymentPlan: workspace.deploymentPlan,
+        serializedArtifact: workspace.serializedArtifact,
+        hostPlan: workspace.hostPlan,
         pluginRootDirectories: workspace.pluginRootDirectories,
         pluginPackages: workspace.pluginPackages,
         discover: workspace.discover,

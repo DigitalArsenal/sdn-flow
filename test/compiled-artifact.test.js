@@ -161,6 +161,7 @@ test("serialized compiled artifacts can be decoded back into runtime artifacts",
     programId: "flow.artifact.serialized",
     wasm: new Uint8Array([0x00, 0x61, 0x73, 0x6d]),
     manifestBuffer: new Uint8Array([0x46, 0x4c, 0x4f, 0x57]),
+    loaderModule: "export default function createRuntime() {}",
     runtimeExports: {
       readyNodeSymbol: "sdn_flow_get_ready_node_index",
       drainWithHostDispatchSymbol: "sdn_flow_drain_with_host_dispatch",
@@ -182,6 +183,10 @@ test("serialized compiled artifacts can be decoded back into runtime artifacts",
   assert.equal(
     decoded.runtimeExports.drainWithHostDispatchSymbol,
     "sdn_flow_drain_with_host_dispatch",
+  );
+  assert.equal(
+    decoded.loaderModule,
+    "export default function createRuntime() {}",
   );
 });
 

@@ -1,11 +1,19 @@
 import { access, readFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { DeploymentBindingMode } from "space-data-module-sdk";
+import {
+  EmceptionCompilerAdapter,
+  buildDefaultFlowManifestBuffer,
+  createSdkEmceptionSession,
+  inferFlowRuntimeTargets,
+} from "../compiler/index.js";
 import { summarizeProgramRequirements } from "../designer/requirements.js";
 import { findManifestFiles } from "../compliance/index.js";
 import {
-  FlowRuntime,
+  BackpressurePolicy,
   MethodRegistry,
   TriggerKind,
   normalizeFrame,
@@ -13,13 +21,22 @@ import {
   normalizeProgram,
 } from "../runtime/index.js";
 import {
+  createFlowDeploymentPlan,
+  listCompiledArtifactRuntimeTargets,
+  normalizeCompiledArtifact,
+  resolveCompiledArtifactInput,
+} from "../deploy/index.js";
+import {
   HostedRuntimeAdapter,
   HostedRuntimeAuthority,
   HostedRuntimeEngine,
   HostedRuntimeKind,
   HostedRuntimeStartupPhase,
 } from "./constants.js";
+import { bindCompiledFlowRuntimeHost } from "./compiledFlowRuntimeHost.js";
+import { instantiateArtifactWithLoaderModule } from "./loaderModule.js";
 import { normalizeHostedRuntimePlan } from "./normalize.js";
+import { evaluateHostedRuntimeTargetSupport } from "./profile.js";
 
 function normalizeString(value, fallback = null) {
   if (typeof value !== "string") {
@@ -389,6 +406,399 @@ export async function registerInstalledPluginPackages({
   return loadedPackages;
 }
 
+function groupBy(items, keySelector) {
+  const grouped = new Map();
+  for (const item of Array.isArray(items) ? items : []) {
+    const key = keySelector(item);
+    const bucket = grouped.get(key);
+    if (bucket) {
+      bucket.push(item);
+    } else {
+      grouped.set(key, [item]);
+    }
+  }
+  return grouped;
+}
+
+function cloneJsonCompatibleValue(value) {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof structuredClone === "function") {
+    try {
+      return structuredClone(value);
+    } catch {
+      // Fall through to JSON normalization.
+    }
+  }
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return value;
+  }
+}
+
+function normalizePayloadBytes(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (value instanceof Uint8Array) {
+    return value;
+  }
+  if (value instanceof ArrayBuffer) {
+    return new Uint8Array(value);
+  }
+  if (ArrayBuffer.isView(value)) {
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  }
+  if (typeof value === "string") {
+    return new TextEncoder().encode(value);
+  }
+  return null;
+}
+
+function normalizeInstalledRuntimeFrame(frame = {}, defaultPortId = null) {
+  const normalized = normalizeFrame(frame, defaultPortId);
+  const payload =
+    normalizePayloadBytes(
+      frame.bytes ??
+        frame.data ??
+        frame.payloadBytes ??
+        frame.payload_bytes ??
+        normalized.payload,
+    ) ?? new Uint8Array();
+  const traceToken = Number(
+    frame.traceToken ?? frame.trace_token ?? frame.traceId ?? frame.trace_id ?? 0,
+  );
+
+  return {
+    ...normalized,
+    portId: normalized.portId ?? defaultPortId,
+    payload,
+    bytes: payload,
+    metadata: normalizeMetadata(normalized.metadata),
+    typeRef: normalized.typeRef ?? {},
+    traceToken: Number.isFinite(traceToken) ? Math.max(0, Math.trunc(traceToken)) : 0,
+  };
+}
+
+function cloneInstalledRuntimeFrame(frame = {}, defaultPortId = null) {
+  const normalized = normalizeInstalledRuntimeFrame(frame, defaultPortId);
+  return {
+    ...normalized,
+    payload: new Uint8Array(normalized.payload),
+    bytes: new Uint8Array(normalized.bytes),
+    metadata: cloneJsonCompatibleValue(normalized.metadata),
+    typeRef: cloneJsonCompatibleValue(normalized.typeRef) ?? {},
+  };
+}
+
+function envelopeQueueKey(nodeId, portId) {
+  return `${nodeId}:${portId}`;
+}
+
+function ensureEnvelopeQueue(envelopeQueues, nodeId, portId) {
+  const key = envelopeQueueKey(nodeId, portId);
+  const existing = envelopeQueues.get(key);
+  if (existing) {
+    return existing;
+  }
+  const queue = [];
+  envelopeQueues.set(key, queue);
+  return queue;
+}
+
+function applyQueueBackpressure(queue, frame, policy, queueDepth) {
+  const cap = Number(queueDepth ?? 0);
+  const bounded = cap > 0;
+  switch (policy) {
+    case BackpressurePolicy.DROP:
+      if (!bounded || queue.length < cap) {
+        queue.push(frame);
+      }
+      return;
+    case BackpressurePolicy.LATEST:
+    case BackpressurePolicy.COALESCE:
+      if (!bounded || queue.length < cap) {
+        queue.push(frame);
+      } else {
+        queue.splice(0, queue.length, frame);
+      }
+      return;
+    case BackpressurePolicy.BLOCK_REQUEST:
+      if (bounded && queue.length >= cap) {
+        throw new Error("Backpressure queue is full.");
+      }
+      queue.push(frame);
+      return;
+    case BackpressurePolicy.DRAIN_TO_EMPTY:
+    case BackpressurePolicy.QUEUE:
+    default:
+      if (bounded && queue.length >= cap) {
+        queue.shift();
+      }
+      queue.push(frame);
+  }
+}
+
+function snapshotEnvelopeQueues(envelopeQueues) {
+  const snapshot = {};
+  for (const [key, queue] of envelopeQueues.entries()) {
+    if (queue.length === 0) {
+      continue;
+    }
+    const separatorIndex = key.indexOf(":");
+    const nodeId =
+      separatorIndex >= 0 ? key.slice(0, separatorIndex) : key;
+    const portId =
+      separatorIndex >= 0 ? key.slice(separatorIndex + 1) : "";
+    if (!snapshot[nodeId]) {
+      snapshot[nodeId] = {};
+    }
+    snapshot[nodeId][portId] = queue.length;
+  }
+  return snapshot;
+}
+
+function translateDrainOptions(options = {}) {
+  return {
+    frameBudget: Number(options.frameBudget ?? options.frame_budget ?? 1),
+    outputStreamCap: Number(
+      options.outputStreamCap ?? options.output_stream_cap ?? 16,
+    ),
+    maxIterations: Number(
+      options.maxIterations ?? options.max_iterations ?? options.maxInvocations ?? 1024,
+    ),
+  };
+}
+
+function buildCompiledFrameInput(frame = {}) {
+  return {
+    typeRef: frame.typeRef ?? {},
+    alignment: frame.alignment ?? 8,
+    streamId: frame.streamId ?? 0,
+    sequence: frame.sequence ?? 0,
+    traceToken: frame.traceToken ?? 0,
+    endOfStream: frame.endOfStream ?? false,
+    bytes: frame.bytes ?? frame.payload ?? new Uint8Array(),
+  };
+}
+
+function resolveInstalledFlowDeploymentPlan(program, options = {}) {
+  return createFlowDeploymentPlan(program, {
+    deploymentPlan: options.deploymentPlan ?? null,
+    pluginId: options.pluginId ?? null,
+    version: options.version ?? null,
+    environmentId: options.environmentId ?? null,
+    scheduleBindingMode: options.scheduleBindingMode,
+    serviceBindingMode: options.serviceBindingMode,
+    delegatedServiceBaseUrl: options.delegatedServiceBaseUrl,
+    defaultHttpAuthPolicyId: options.defaultHttpAuthPolicyId,
+    httpAdapter: options.httpAdapter,
+    timezone: options.timezone,
+  });
+}
+
+function resolveHostProfiles(hostPlan, programId) {
+  if (!hostPlan) {
+    return [];
+  }
+  const normalizedPlan = normalizeHostedRuntimePlan(hostPlan);
+  const matchingRuntimes = normalizedPlan.runtimes.filter(
+    (runtime) => !runtime.programId || runtime.programId === programId,
+  );
+  if (matchingRuntimes.length === 0) {
+    return [
+      {
+        runtimeId: normalizedPlan.hostId,
+        hostId: normalizedPlan.hostId,
+        hostKind: normalizedPlan.hostKind,
+        adapter: normalizedPlan.adapter,
+        engine: normalizedPlan.engine,
+      },
+    ];
+  }
+  return matchingRuntimes.map((runtime) => ({
+    runtimeId: runtime.runtimeId,
+    hostId: normalizedPlan.hostId,
+    hostKind: normalizedPlan.hostKind,
+    adapter: runtime.adapter ?? normalizedPlan.adapter,
+    engine: runtime.engine ?? normalizedPlan.engine,
+  }));
+}
+
+function assertInstalledArtifactRuntimeTargets({
+  artifact,
+  program,
+  hostPlan = null,
+} = {}) {
+  const runtimeTargets = listCompiledArtifactRuntimeTargets(artifact);
+  if (runtimeTargets.length === 0 || !hostPlan) {
+    return;
+  }
+  for (const profile of resolveHostProfiles(hostPlan, program?.programId ?? null)) {
+    const compatibility = evaluateHostedRuntimeTargetSupport({
+      hostKind: profile.hostKind,
+      adapter: profile.adapter,
+      engine: profile.engine,
+      runtimeTargets,
+    });
+    if (!compatibility.ok) {
+      throw new Error(
+        `Installed flow host cannot start runtime "${profile.runtimeId}" on host "${profile.hostId}" because embedded runtimeTargets ${runtimeTargets.join(", ")} require ${compatibility.unsupportedTargets.join(", ")} support.`,
+      );
+    }
+  }
+}
+
+async function compileInstalledFlowArtifact({
+  program,
+  manifests = [],
+  registry = null,
+  artifactOptions = {},
+} = {}) {
+  const explicitArtifact =
+    artifactOptions.artifact ??
+    artifactOptions.compiledArtifact ??
+    artifactOptions.serializedArtifact ??
+    null;
+  if (explicitArtifact) {
+    return resolveCompiledArtifactInput(explicitArtifact);
+  }
+
+  if (typeof artifactOptions.compileArtifact === "function") {
+    return normalizeCompiledArtifact(
+      await artifactOptions.compileArtifact({
+        program,
+        manifests,
+        registry,
+        metadata: artifactOptions.metadata ?? null,
+      }),
+    );
+  }
+
+  let compiler = artifactOptions.compiler ?? null;
+  let emception = artifactOptions.emception ?? null;
+  let ownsSession = false;
+  let workingDirectory = normalizeString(
+    artifactOptions.workingDirectory,
+    null,
+  );
+
+  if (!compiler) {
+    if (!emception) {
+      workingDirectory =
+        workingDirectory ?? `/working/sdn-flow-installed-${randomUUID()}`;
+      const sessionFactory =
+        artifactOptions.emceptionSessionFactory ?? createSdkEmceptionSession;
+      emception = await sessionFactory({
+        workingDirectory,
+      });
+      ownsSession = true;
+    }
+    compiler = new EmceptionCompilerAdapter({
+      emception,
+      artifactCatalog: artifactOptions.artifactCatalog,
+      manifestBuilder:
+        artifactOptions.manifestBuilder ??
+        (({ program: manifestProgram, metadata, dependencies }) =>
+          buildDefaultFlowManifestBuffer({
+            program: manifestProgram,
+            manifests,
+            registry,
+            dependencies,
+            deploymentPlan: metadata?.deploymentPlan ?? null,
+            hostPlan: metadata?.hostPlan ?? null,
+            runtimeTargets: metadata?.runtimeTargets ?? null,
+            pluginId: metadata?.pluginId ?? null,
+            version: metadata?.version ?? null,
+          })),
+      outputName: artifactOptions.outputName ?? "installed-flow-runtime",
+      sourceGenerator: artifactOptions.sourceGenerator,
+    });
+  }
+
+  try {
+    return normalizeCompiledArtifact(
+      await compiler.compile({
+        program,
+        metadata: {
+          outputName: artifactOptions.outputName ?? "installed-flow-runtime",
+          workingDirectory,
+          deploymentPlan: artifactOptions.deploymentPlan ?? null,
+          hostPlan: artifactOptions.hostPlan ?? null,
+          runtimeTargets: artifactOptions.runtimeTargets ?? null,
+          pluginId:
+            artifactOptions.pluginId ?? program?.programId ?? null,
+          version: artifactOptions.version ?? program?.version ?? null,
+        },
+      }),
+    );
+  } finally {
+    if (ownsSession && emception) {
+      try {
+        if (typeof emception.removeDirectory === "function" && workingDirectory) {
+          await emception.removeDirectory(workingDirectory);
+        }
+      } finally {
+        if (typeof emception.dispose === "function") {
+          await emception.dispose();
+        }
+      }
+    }
+  }
+}
+
+async function bindInstalledCompiledRuntimeHost({
+  artifact,
+  handlers,
+  runtimeOptions = {},
+} = {}) {
+  const instantiateArtifact =
+    typeof artifact?.loaderModule === "string" && artifact.loaderModule.length > 0
+      ? (moduleBytes, imports) =>
+          instantiateArtifactWithLoaderModule(
+            artifact.loaderModule,
+            moduleBytes,
+            imports,
+          )
+      : runtimeOptions.instantiateArtifact ?? WebAssembly.instantiate;
+  const createCompiledHost =
+    runtimeOptions.createCompiledHost ?? bindCompiledFlowRuntimeHost;
+
+  return createCompiledHost({
+    artifact,
+    handlers,
+    dependencyInvoker: runtimeOptions.dependencyInvoker ?? null,
+    dependencyStreamBridge: runtimeOptions.dependencyStreamBridge ?? null,
+    artifactImports: runtimeOptions.artifactImports ?? {},
+    dependencyImports: runtimeOptions.dependencyImports ?? {},
+    instantiateArtifact,
+    instantiateDependency:
+      runtimeOptions.instantiateDependency ?? WebAssembly.instantiate,
+  });
+}
+
+async function disposeInstalledCompiledRuntime(runtimeState = null) {
+  if (!runtimeState?.runtimeHost) {
+    return;
+  }
+  try {
+    if (typeof runtimeState.runtimeHost.resetRuntimeState === "function") {
+      runtimeState.runtimeHost.resetRuntimeState();
+    }
+  } catch {
+    // Ignore best-effort cleanup errors during runtime replacement.
+  }
+  try {
+    if (typeof runtimeState.runtimeHost.destroyDependencies === "function") {
+      await runtimeState.runtimeHost.destroyDependencies();
+    }
+  } catch {
+    // Ignore best-effort dependency cleanup failures.
+  }
+}
+
 export function createInstalledFlowHostedRuntimePlan(options = {}) {
   const program = normalizeProgram(options.program ?? {});
   const requirements = summarizeProgramRequirements({
@@ -421,6 +831,14 @@ export function createInstalledFlowHostedRuntimePlan(options = {}) {
         dependsOn: options.dependsOn ?? [],
         requiredCapabilities:
           options.requiredCapabilities ?? requirements.capabilities,
+        runtimeTargets:
+          options.runtimeTargets ??
+          inferFlowRuntimeTargets({
+            program,
+            requirements,
+            hostPlan: options.hostPlan ?? null,
+            deploymentPlan: options.deploymentPlan ?? null,
+          }),
         bindings: options.bindings ?? [],
       },
     ],
@@ -432,23 +850,6 @@ export function createInstalledFlowHost(options = {}) {
   const sinkEvents = [];
   const userOnSinkOutput =
     options.onSinkOutput ?? options.runtimeOptions?.onSinkOutput ?? null;
-  const runtime =
-    options.runtime ??
-    new FlowRuntime({
-      registry,
-      ...(options.runtimeOptions ?? {}),
-      onSinkOutput(event) {
-        const sinkEvent = {
-          index: sinkEvents.length,
-          ...event,
-        };
-        sinkEvents.push(sinkEvent);
-        if (typeof userOnSinkOutput === "function") {
-          userOnSinkOutput(sinkEvent);
-        }
-      },
-    });
-
   let started = false;
   let discoveredPackages = [];
   let loadedPackages = [];
@@ -456,6 +857,63 @@ export function createInstalledFlowHost(options = {}) {
     options.program !== undefined && options.program !== null
       ? normalizeProgram(options.program)
       : null;
+  let runtimeState = null;
+
+  function emitSinkEvent(event = {}) {
+    const sinkEvent = {
+      index: sinkEvents.length,
+      ...event,
+    };
+    sinkEvents.push(sinkEvent);
+    if (typeof userOnSinkOutput === "function") {
+      userOnSinkOutput(sinkEvent);
+    }
+    return sinkEvent;
+  }
+
+  const runtime = {
+    getProgram() {
+      return runtimeState?.program ?? program ?? null;
+    },
+    getArtifact() {
+      return runtimeState?.artifact ?? null;
+    },
+    getDeploymentPlan() {
+      return runtimeState?.deploymentPlan ?? null;
+    },
+    enqueueTriggerFrames(triggerId, frames) {
+      if (!runtimeState) {
+        throw new Error(
+          "Installed flow host has no compiled runtime. Call start() first.",
+        );
+      }
+      return runtimeState.enqueueTriggerFrames(triggerId, frames);
+    },
+    enqueueNodeFrames() {
+      throw new Error(
+        "Installed flow host only supports trigger ingress for compiled runtime execution.",
+      );
+    },
+    drain(drainOptions = {}) {
+      if (!runtimeState) {
+        throw new Error(
+          "Installed flow host has no compiled runtime. Call start() first.",
+        );
+      }
+      return runtimeState.drain(drainOptions);
+    },
+    isIdle() {
+      return runtimeState ? runtimeState.isIdle() : true;
+    },
+    inspectQueues() {
+      return runtimeState ? runtimeState.inspectQueues() : {};
+    },
+    resetRuntimeState() {
+      if (runtimeState?.runtimeHost?.resetRuntimeState) {
+        runtimeState.runtimeHost.resetRuntimeState();
+      }
+    },
+  };
 
   function dedupePackages(pluginPackages) {
     const packagesByPluginId = new Map();
@@ -500,6 +958,9 @@ export function createInstalledFlowHost(options = {}) {
       programId: runtime.getProgram()?.programId ?? program?.programId ?? null,
       discoveredPackages: discoveredPackages.map((item) => item.pluginId),
       registeredPluginIds: registry.listPlugins().map((item) => item.pluginId),
+      runtimeTargets: runtimeState?.artifact
+        ? listCompiledArtifactRuntimeTargets(runtimeState.artifact)
+        : [],
     };
   }
 
@@ -592,6 +1053,247 @@ export function createInstalledFlowHost(options = {}) {
       });
     }
 
+    const nextDeploymentPlan = nextProgram
+      ? resolveInstalledFlowDeploymentPlan(nextProgram, {
+          ...options,
+          ...refreshOptions,
+          deploymentPlan:
+            refreshOptions.deploymentPlan ?? options.deploymentPlan ?? null,
+        })
+      : null;
+
+    let nextRuntimeState = null;
+    if (nextProgram) {
+      const nextArtifact = await compileInstalledFlowArtifact({
+        program: nextProgram,
+        manifests: nextLoadedPackages.map((loaded) => loaded.manifest),
+        registry: validationRegistry,
+        artifactOptions: {
+          ...options,
+          ...refreshOptions,
+          artifact:
+            refreshOptions.artifact ??
+            options.artifact ??
+            refreshOptions.compiledArtifact ??
+            options.compiledArtifact ??
+            refreshOptions.serializedArtifact ??
+            options.serializedArtifact ??
+            null,
+          deploymentPlan: nextDeploymentPlan,
+          hostPlan: refreshOptions.hostPlan ?? options.hostPlan ?? null,
+          runtimeTargets:
+            refreshOptions.runtimeTargets ??
+            options.runtimeTargets ??
+            nextProgram.runtimeTargets,
+          pluginId:
+            refreshOptions.pluginId ??
+            options.pluginId ??
+            nextProgram.programId ??
+            null,
+          version:
+            refreshOptions.version ??
+            options.version ??
+            nextProgram.version ??
+            null,
+        },
+      });
+
+      assertInstalledArtifactRuntimeTargets({
+        artifact: nextArtifact,
+        program: nextProgram,
+        hostPlan: refreshOptions.hostPlan ?? options.hostPlan ?? null,
+      });
+
+      nextRuntimeState = {
+        program: nextProgram,
+        artifact: nextArtifact,
+        deploymentPlan: nextDeploymentPlan,
+        registry: validationRegistry,
+        triggerBindings: groupBy(
+          nextProgram.triggerBindings,
+          (binding) => binding.triggerId,
+        ),
+        edgesBySource: groupBy(
+          nextProgram.edges,
+          (edge) => `${edge.fromNodeId}:${edge.fromPortId}`,
+        ),
+        envelopeQueues: new Map(),
+        runtimeHost: null,
+        enqueueEnvelope(nodeId, portId, frame, backpressurePolicy, queueDepth) {
+          const queue = ensureEnvelopeQueue(this.envelopeQueues, nodeId, portId);
+          applyQueueBackpressure(queue, frame, backpressurePolicy, queueDepth);
+        },
+        consumeInvocationInputs(nodeId, inputs = []) {
+          return (Array.isArray(inputs) ? inputs : []).map((input) => {
+            const queue =
+              nodeId && input?.portId
+                ? ensureEnvelopeQueue(this.envelopeQueues, nodeId, input.portId)
+                : null;
+            const envelope = queue?.shift() ?? null;
+            const payload =
+              input?.bytes instanceof Uint8Array
+                ? input.bytes
+                : normalizePayloadBytes(input?.bytes) ?? new Uint8Array();
+            return {
+              ...normalizeInstalledRuntimeFrame(
+                {
+                  ...input,
+                  payload,
+                  bytes: payload,
+                },
+                input?.portId ?? null,
+              ),
+              payload,
+              bytes: payload,
+              metadata:
+                cloneJsonCompatibleValue(envelope?.metadata) ?? null,
+              typeRef: cloneJsonCompatibleValue(envelope?.typeRef) ?? {},
+              traceId: envelope?.traceId ?? null,
+            };
+          });
+        },
+        routeInvocationOutputs(nodeId, outputs = []) {
+          for (const output of Array.isArray(outputs) ? outputs : []) {
+            const normalizedOutput = cloneInstalledRuntimeFrame(output);
+            const sourceKey = `${nodeId}:${normalizedOutput.portId}`;
+            const edges = this.edgesBySource.get(sourceKey) ?? [];
+            if (edges.length === 0) {
+              emitSinkEvent({
+                nodeId,
+                frame: normalizedOutput,
+              });
+              continue;
+            }
+            for (const edge of edges) {
+              this.enqueueEnvelope(
+                edge.toNodeId,
+                edge.toPortId,
+                {
+                  ...cloneInstalledRuntimeFrame(
+                    normalizedOutput,
+                    edge.toPortId,
+                  ),
+                  portId: edge.toPortId,
+                },
+                edge.backpressurePolicy,
+                edge.queueDepth,
+              );
+            }
+          }
+        },
+        enqueueTriggerFrames(triggerId, frames) {
+          const bindings = this.triggerBindings.get(triggerId) ?? [];
+          if (bindings.length === 0) {
+            throw new Error(
+              `Trigger "${triggerId}" is not bound to any node input.`,
+            );
+          }
+          const triggerIndex = this.program.triggers.findIndex(
+            (trigger) => trigger.triggerId === triggerId,
+          );
+          if (triggerIndex < 0) {
+            throw new Error(`Unknown trigger "${triggerId}".`);
+          }
+          for (const frameInput of Array.isArray(frames) ? frames : [frames]) {
+            const normalizedFrame = normalizeInstalledRuntimeFrame(frameInput);
+            for (const binding of bindings) {
+              this.enqueueEnvelope(
+                binding.targetNodeId,
+                binding.targetPortId,
+                {
+                  ...cloneInstalledRuntimeFrame(
+                    normalizedFrame,
+                    binding.targetPortId,
+                  ),
+                  portId: binding.targetPortId,
+                },
+                binding.backpressurePolicy,
+                binding.queueDepth,
+              );
+            }
+            this.runtimeHost.enqueueTriggerFrame(
+              triggerIndex,
+              buildCompiledFrameInput(normalizedFrame),
+            );
+          }
+        },
+        async drain(drainOptions = {}) {
+          const result = await this.runtimeHost.drain(
+            translateDrainOptions(drainOptions),
+          );
+          return {
+            invocations: result.iterations ?? 0,
+            yielded: result.maxIterationsReached === true,
+            idle: result.idle,
+            executions: result.executions ?? [],
+            maxIterationsReached: result.maxIterationsReached === true,
+          };
+        },
+        isIdle() {
+          for (const queue of this.envelopeQueues.values()) {
+            if (queue.length > 0) {
+              return false;
+            }
+          }
+          const readyNodeSymbol = this.runtimeHost?.resolvedByRole?.readyNodeSymbol;
+          if (typeof readyNodeSymbol !== "function") {
+            return true;
+          }
+          return (Number(readyNodeSymbol() ?? 0xffffffff) >>> 0) === 0xffffffff;
+        },
+        inspectQueues() {
+          return snapshotEnvelopeQueues(this.envelopeQueues);
+        },
+      };
+
+      const handlers = {};
+      for (const pluginRecord of validationRegistry.listPlugins()) {
+        for (const methodId of pluginRecord.methods.keys()) {
+          handlers[`${pluginRecord.pluginId}:${methodId}`] = async ({
+            pluginId,
+            methodId: invokedMethodId,
+            dispatchDescriptor,
+            inputs = [],
+            outputStreamCap = 0,
+          }) => {
+            const nodeId = dispatchDescriptor?.nodeId ?? null;
+            const adaptedInputs = nextRuntimeState.consumeInvocationInputs(
+              nodeId,
+              inputs,
+            );
+            const result = await validationRegistry.invoke({
+              pluginId,
+              methodId: invokedMethodId,
+              inputs: adaptedInputs,
+              outputStreamCap,
+              context: {
+                nodeId,
+                programId: nextProgram.programId,
+              },
+            });
+            nextRuntimeState.routeInvocationOutputs(nodeId, result.outputs ?? []);
+            return result;
+          };
+        }
+      }
+
+      nextRuntimeState.runtimeHost =
+        refreshOptions.runtimeHost ??
+        options.runtimeHost ??
+        options.runtime ??
+        (await bindInstalledCompiledRuntimeHost({
+          artifact: nextArtifact,
+          handlers,
+          runtimeOptions: {
+            ...options.runtimeOptions,
+            ...refreshOptions.runtimeOptions,
+            ...options,
+            ...refreshOptions,
+          },
+        }));
+    }
+
+    const previousRuntimeState = runtimeState;
     for (const pluginId of managedPluginIds) {
       registry.unregisterPlugin(pluginId);
     }
@@ -606,12 +1308,11 @@ export function createInstalledFlowHost(options = {}) {
     discoveredPackages = nextDiscoveredPackages;
     loadedPackages = nextLoadedPackages;
     program = nextProgram;
-    if (program) {
-      runtime.loadProgram(program);
-    }
+    runtimeState = nextRuntimeState;
     if (refreshOptions.clearSinkOutputs === true) {
       sinkEvents.splice(0, sinkEvents.length);
     }
+    await disposeInstalledCompiledRuntime(previousRuntimeState);
     started = true;
 
     return buildStartupSummary();
@@ -629,6 +1330,12 @@ export function createInstalledFlowHost(options = {}) {
     runtime,
     getProgram() {
       return runtime.getProgram() ?? program;
+    },
+    getArtifact() {
+      return runtime.getArtifact();
+    },
+    getDeploymentPlan() {
+      return runtime.getDeploymentPlan();
     },
     getLoadedPackages() {
       return loadedPackages.map((item) => item.pluginPackage);
@@ -650,9 +1357,6 @@ export function createInstalledFlowHost(options = {}) {
     },
     loadProgram(nextProgram) {
       program = normalizeProgram(nextProgram);
-      if (started) {
-        return runtime.loadProgram(program);
-      }
       return program;
     },
     enqueueTriggerFrames(triggerId, frames) {
@@ -706,19 +1410,89 @@ export function createInstalledFlowService(options = {}) {
     return getProgram().triggers.filter((trigger) => trigger.kind === kind);
   }
 
+  function getDeploymentPlan() {
+    return (
+      host.getDeploymentPlan?.() ??
+      resolveInstalledFlowDeploymentPlan(getProgram(), {
+        ...options,
+        deploymentPlan: options.deploymentPlan ?? null,
+      })
+    );
+  }
+
+  function listLocalScheduleBindings() {
+    return (getDeploymentPlan()?.scheduleBindings ?? []).filter(
+      (binding) =>
+        (binding?.bindingMode ?? DeploymentBindingMode.LOCAL) ===
+        DeploymentBindingMode.LOCAL,
+    );
+  }
+
+  function listScheduleBindings() {
+    return getDeploymentPlan()?.scheduleBindings ?? [];
+  }
+
+  function listLocalServiceBindings() {
+    return (getDeploymentPlan()?.serviceBindings ?? []).filter(
+      (binding) =>
+        (binding?.bindingMode ?? DeploymentBindingMode.LOCAL) ===
+        DeploymentBindingMode.LOCAL,
+    );
+  }
+
+  function listServiceBindings() {
+    return getDeploymentPlan()?.serviceBindings ?? [];
+  }
+
   function resolveHttpTrigger(request = {}) {
     const program = getProgram();
     const requestedTriggerId = normalizeString(request.triggerId, null);
     const requestedPath = normalizeString(request.path, null);
-    const trigger = program.triggers.find((candidate) => {
+    const requestedMethod = (
+      normalizeString(request.method, "GET") ?? "GET"
+    ).toUpperCase();
+    const serviceBindings = listServiceBindings();
+    const localServiceBindings = listLocalServiceBindings();
+    const localBindingsByTriggerId = new Map(
+      localServiceBindings.map((binding) => [binding.triggerId, binding]),
+    );
+    let trigger = program.triggers.find((candidate) => {
       if (candidate.kind !== TriggerKind.HTTP_REQUEST) {
+        return false;
+      }
+      const binding = localBindingsByTriggerId.get(candidate.triggerId);
+      if (serviceBindings.length > 0 && !binding) {
         return false;
       }
       if (requestedTriggerId) {
         return candidate.triggerId === requestedTriggerId;
       }
-      return normalizeString(candidate.source, null) === requestedPath;
+      const routePath =
+        normalizeString(binding?.routePath, null) ??
+        normalizeString(candidate.source, null);
+      if (routePath !== requestedPath) {
+        return false;
+      }
+      if (!binding?.method) {
+        return true;
+      }
+      return binding.method.toUpperCase() === requestedMethod;
     });
+    if (!trigger && !requestedTriggerId && requestedPath) {
+      trigger = program.triggers.find((candidate) => {
+        if (candidate.kind !== TriggerKind.HTTP_REQUEST) {
+          return false;
+        }
+        const binding = localBindingsByTriggerId.get(candidate.triggerId);
+        if (serviceBindings.length > 0 && !binding) {
+          return false;
+        }
+        const routePath =
+          normalizeString(binding?.routePath, null) ??
+          normalizeString(candidate.source, null);
+        return routePath === requestedPath;
+      });
+    }
     if (!trigger) {
       throw new Error(
         `No HTTP trigger matches ${requestedTriggerId ?? requestedPath ?? "<unknown>"}.`,
@@ -767,32 +1541,74 @@ export function createInstalledFlowService(options = {}) {
   }
 
   function listTimerTriggers() {
+    const activeTriggerIds = new Set(
+      Array.from(timerHandles.values()).map((record) => record.triggerId),
+    );
     return listTriggersByKind(TriggerKind.TIMER).map((trigger) => ({
       triggerId: trigger.triggerId,
       source: trigger.source,
       defaultIntervalMs: trigger.defaultIntervalMs,
       description: trigger.description,
-      active: timerHandles.has(trigger.triggerId),
+      active: activeTriggerIds.has(trigger.triggerId),
     }));
   }
 
   function listHttpRoutes() {
-    return listTriggersByKind(TriggerKind.HTTP_REQUEST).map((trigger) => ({
-      triggerId: trigger.triggerId,
-      path: trigger.source ?? null,
-      description: trigger.description,
-    }));
+    const localBindingsByTriggerId = new Map(
+      listLocalServiceBindings().map((binding) => [binding.triggerId, binding]),
+    );
+    const serviceBindings = listServiceBindings();
+    return listTriggersByKind(TriggerKind.HTTP_REQUEST)
+      .filter(
+        (trigger) =>
+          serviceBindings.length === 0 ||
+          localBindingsByTriggerId.has(trigger.triggerId),
+      )
+      .map((trigger) => ({
+        triggerId: trigger.triggerId,
+        path:
+          localBindingsByTriggerId.get(trigger.triggerId)?.routePath ??
+          trigger.source ??
+          null,
+        description: trigger.description,
+      }));
   }
 
   function startTimerServices() {
     if (setIntervalFn === null || clearIntervalFn === null) {
       return;
     }
-    for (const trigger of listTriggersByKind(TriggerKind.TIMER)) {
-      if (timerHandles.has(trigger.triggerId)) {
+    const timerTriggersById = new Map(
+      listTriggersByKind(TriggerKind.TIMER).map((trigger) => [
+        trigger.triggerId,
+        trigger,
+      ]),
+    );
+    const scheduleBindings = listScheduleBindings();
+    const localScheduleBindings = listLocalScheduleBindings();
+    const scheduleRecords =
+      scheduleBindings.length > 0
+        ? localScheduleBindings
+        : listTriggersByKind(TriggerKind.TIMER).map((trigger) => ({
+            scheduleId: trigger.triggerId,
+            triggerId: trigger.triggerId,
+            intervalMs: trigger.defaultIntervalMs,
+          }));
+
+    for (const schedule of scheduleRecords) {
+      const trigger = timerTriggersById.get(schedule.triggerId);
+      if (!trigger) {
         continue;
       }
-      const intervalMs = Number(trigger.defaultIntervalMs ?? 0);
+      const timerHandleKey = schedule.scheduleId ?? trigger.triggerId;
+      if (timerHandles.has(timerHandleKey)) {
+        continue;
+      }
+      const configuredIntervalMs = Number(schedule.intervalMs ?? 0);
+      const intervalMs =
+        Number.isFinite(configuredIntervalMs) && configuredIntervalMs > 0
+          ? configuredIntervalMs
+          : Number(trigger.defaultIntervalMs ?? 0);
       if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
         continue;
       }
@@ -807,8 +1623,9 @@ export function createInstalledFlowService(options = {}) {
           }
         });
       }, normalizedIntervalMs);
-      timerHandles.set(trigger.triggerId, {
+      timerHandles.set(timerHandleKey, {
         handle,
+        triggerId: trigger.triggerId,
         intervalMs: normalizedIntervalMs,
       });
     }

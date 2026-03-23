@@ -578,3 +578,109 @@ test("installed flow service can refresh installed packages and timer bindings",
   assert.deepEqual(Array.from(outputs[0].frame.payload), [2]);
   assert.equal(outputs[0].frame.metadata.triggerId, "tock");
 });
+
+test("installed flow service only auto-starts locally bound schedules", async () => {
+  const scheduledIntervals = [];
+  const service = createInstalledFlowService({
+    program: {
+      programId: "com.digitalarsenal.examples.delegated-timer-service",
+      nodes: [],
+      edges: [],
+      triggers: [
+        {
+          triggerId: "tick",
+          kind: "timer",
+          defaultIntervalMs: 250,
+        },
+      ],
+      triggerBindings: [],
+      requiredPlugins: [],
+    },
+    deploymentPlan: {
+      pluginId: "com.digitalarsenal.examples.delegated-timer-service",
+      version: "1.0.0",
+      scheduleBindings: [
+        {
+          scheduleId: "schedule-tick",
+          triggerId: "tick",
+          bindingMode: "delegated",
+          scheduleKind: "interval",
+          intervalMs: 250,
+        },
+      ],
+      serviceBindings: [],
+      inputBindings: [],
+      publicationBindings: [],
+      authPolicies: [],
+      protocolInstallations: [],
+    },
+    discover: false,
+    setIntervalFn(callback, intervalMs) {
+      scheduledIntervals.push({ callback, intervalMs });
+      return { callback, intervalMs };
+    },
+    clearIntervalFn() {},
+  });
+
+  const startup = await service.start();
+
+  assert.equal(scheduledIntervals.length, 0);
+  assert.deepEqual(startup.timerTriggers, [
+    {
+      triggerId: "tick",
+      source: null,
+      defaultIntervalMs: 250,
+      description: null,
+      active: false,
+    },
+  ]);
+});
+
+test("installed flow service rejects delegated HTTP bindings from the local host path", async () => {
+  const service = createInstalledFlowService({
+    program: {
+      programId: "com.digitalarsenal.examples.delegated-http-service",
+      nodes: [],
+      edges: [],
+      triggers: [
+        {
+          triggerId: "download",
+          kind: "http-request",
+          source: "/download",
+        },
+      ],
+      triggerBindings: [],
+      requiredPlugins: [],
+    },
+    deploymentPlan: {
+      pluginId: "com.digitalarsenal.examples.delegated-http-service",
+      version: "1.0.0",
+      scheduleBindings: [],
+      serviceBindings: [
+        {
+          serviceId: "service-download",
+          triggerId: "download",
+          bindingMode: "delegated",
+          serviceKind: "http-server",
+          routePath: "/download",
+          method: "POST",
+        },
+      ],
+      inputBindings: [],
+      publicationBindings: [],
+      authPolicies: [],
+      protocolInstallations: [],
+    },
+    discover: false,
+  });
+
+  await service.start();
+
+  await assert.rejects(
+    service.handleHttpRequest({
+      path: "/download",
+      method: "POST",
+    }),
+    /No HTTP trigger matches/,
+  );
+});
