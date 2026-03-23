@@ -1,4 +1,5 @@
 import { DrainPolicy } from "./constants.js";
+import { payloadTypeRefsMatch } from "space-data-module-sdk";
 import { normalizeFrame, normalizeManifest } from "./normalize.js";
 
 function groupFramesByPort(frames) {
@@ -34,44 +35,7 @@ function buildPortMap(ports) {
 }
 
 function typeMatches(acceptedType, frameType) {
-  if (!acceptedType) {
-    return false;
-  }
-  if (acceptedType.acceptsAnyFlatbuffer === true) {
-    return true;
-  }
-  if (!frameType) {
-    return false;
-  }
-  if (
-    acceptedType.schemaName &&
-    acceptedType.schemaName !== frameType.schemaName
-  ) {
-    return false;
-  }
-  if (
-    acceptedType.fileIdentifier &&
-    acceptedType.fileIdentifier !== frameType.fileIdentifier
-  ) {
-    return false;
-  }
-  if (
-    Array.isArray(acceptedType.schemaHash) &&
-    acceptedType.schemaHash.length > 0
-  ) {
-    if (
-      !Array.isArray(frameType.schemaHash) ||
-      frameType.schemaHash.length !== acceptedType.schemaHash.length
-    ) {
-      return false;
-    }
-    for (let index = 0; index < acceptedType.schemaHash.length; index += 1) {
-      if (acceptedType.schemaHash[index] !== frameType.schemaHash[index]) {
-        return false;
-      }
-    }
-  }
-  return true;
+  return payloadTypeRefsMatch(acceptedType, frameType);
 }
 
 function portAcceptsFrame(port, frame) {

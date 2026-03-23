@@ -1,8 +1,9 @@
 export {
   deserializeCompiledArtifact,
-  FlowDeploymentClient,
   normalizeCompiledArtifact,
   resolveCompiledArtifactEnvelope,
   resolveCompiledArtifactInput,
   serializeCompiledArtifact,
-} from "./FlowDeploymentClient.js";
+} from "./compiledArtifact.js";
+export { createFlowDeploymentPlan } from "./deploymentPlan.js";
+export { FlowDeploymentClient } from "./FlowDeploymentClient.js";

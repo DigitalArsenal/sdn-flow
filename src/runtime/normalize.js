@@ -1,11 +1,15 @@
 import {
   BackpressurePolicy,
-  DefaultManifestExports,
   DrainPolicy,
   ExternalInterfaceDirection,
   NodeKind,
   TriggerKind,
 } from "./constants.js";
+import {
+  DefaultInvokeExports,
+  DefaultManifestExports,
+  InvokeSurface,
+} from "space-data-module-sdk/runtime";
 
 function normalizeString(value, fallback = null) {
   if (value === null || value === undefined) {
@@ -17,6 +21,83 @@ function normalizeString(value, fallback = null) {
 
 function normalizeArray(values) {
   return Array.isArray(values) ? values : [];
+}
+
+function normalizeInvokeSurface(value, fallback = null) {
+  const normalized = normalizeString(value, null);
+  if (
+    normalized === InvokeSurface.DIRECT ||
+    normalized === InvokeSurface.COMMAND
+  ) {
+    return normalized;
+  }
+  return fallback;
+}
+
+function normalizeDependencyInvokeSurface(dependency = {}) {
+  const explicitSurface = normalizeInvokeSurface(
+    dependency.invokeSurface ?? dependency.invoke_surface,
+    null,
+  );
+  if (explicitSurface) {
+    return explicitSurface;
+  }
+  const declaredSurfaces = normalizeArray(
+    dependency.invokeSurfaces ?? dependency.invoke_surfaces,
+  )
+    .map((surface) => normalizeInvokeSurface(surface, null))
+    .filter(Boolean);
+  if (declaredSurfaces.includes(InvokeSurface.DIRECT)) {
+    return InvokeSurface.DIRECT;
+  }
+  if (declaredSurfaces.includes(InvokeSurface.COMMAND)) {
+    return InvokeSurface.COMMAND;
+  }
+  return InvokeSurface.DIRECT;
+}
+
+function normalizeDependencyRuntimeExports(dependency = {}) {
+  const runtimeExports =
+    dependency.runtimeExports ?? dependency.runtime_exports ?? {};
+  const invokeSurface = normalizeDependencyInvokeSurface(dependency);
+  const directInvokeDefaults =
+    invokeSurface === InvokeSurface.DIRECT
+      ? {
+          mallocSymbol: DefaultInvokeExports.allocSymbol,
+          freeSymbol: DefaultInvokeExports.freeSymbol,
+          streamInvokeSymbol: DefaultInvokeExports.invokeSymbol,
+        }
+      : {
+          mallocSymbol: null,
+          freeSymbol: null,
+          streamInvokeSymbol: null,
+        };
+  return {
+    initSymbol: normalizeString(
+      runtimeExports.initSymbol ?? runtimeExports.init_symbol,
+      null,
+    ),
+    destroySymbol: normalizeString(
+      runtimeExports.destroySymbol ?? runtimeExports.destroy_symbol,
+      null,
+    ),
+    mallocSymbol:
+      normalizeString(
+        runtimeExports.mallocSymbol ?? runtimeExports.malloc_symbol,
+        null,
+      ) ?? directInvokeDefaults.mallocSymbol,
+    freeSymbol:
+      normalizeString(
+        runtimeExports.freeSymbol ?? runtimeExports.free_symbol,
+        null,
+      ) ?? directInvokeDefaults.freeSymbol,
+    streamInvokeSymbol:
+      normalizeString(
+        runtimeExports.streamInvokeSymbol ??
+          runtimeExports.stream_invoke_symbol,
+        null,
+      ) ?? directInvokeDefaults.streamInvokeSymbol,
+  };
 }
 
 function normalizeTypeRef(typeRef = {}) {
@@ -32,6 +113,42 @@ function normalizeTypeRef(typeRef = {}) {
     schemaHash: normalizeArray(typeRef.schemaHash ?? typeRef.schema_hash),
     acceptsAnyFlatbuffer:
       typeRef.acceptsAnyFlatbuffer ?? typeRef.accepts_any_flatbuffer ?? false,
+    wireFormat: normalizeString(
+      typeRef.wireFormat ?? typeRef.wire_format,
+      null,
+    ),
+    rootTypeName: normalizeString(
+      typeRef.rootTypeName ?? typeRef.root_type_name,
+      null,
+    ),
+    fixedStringLength: Number.isFinite(
+      Number(typeRef.fixedStringLength ?? typeRef.fixed_string_length),
+    )
+      ? Math.max(
+          0,
+          Math.trunc(
+            Number(typeRef.fixedStringLength ?? typeRef.fixed_string_length),
+          ),
+        )
+      : null,
+    byteLength: Number.isFinite(
+      Number(typeRef.byteLength ?? typeRef.byte_length),
+    )
+      ? Math.max(
+          0,
+          Math.trunc(Number(typeRef.byteLength ?? typeRef.byte_length)),
+        )
+      : null,
+    requiredAlignment: Number.isFinite(
+      Number(typeRef.requiredAlignment ?? typeRef.required_alignment),
+    )
+      ? Math.max(
+          0,
+          Math.trunc(
+            Number(typeRef.requiredAlignment ?? typeRef.required_alignment),
+          ),
+        )
+      : null,
   };
 }
 
@@ -131,37 +248,7 @@ function normalizeArtifactDependency(dependency = {}) {
           null,
         ) ?? DefaultManifestExports.pluginSizeSymbol,
     },
-    runtimeExports: {
-      initSymbol:
-        normalizeString(
-          dependency.runtimeExports?.initSymbol ??
-            dependency.runtime_exports?.init_symbol,
-          null,
-        ) ?? "plugin_init",
-      destroySymbol:
-        normalizeString(
-          dependency.runtimeExports?.destroySymbol ??
-            dependency.runtime_exports?.destroy_symbol,
-          null,
-        ) ?? "plugin_destroy",
-      mallocSymbol:
-        normalizeString(
-          dependency.runtimeExports?.mallocSymbol ??
-            dependency.runtime_exports?.malloc_symbol,
-          null,
-        ) ?? "malloc",
-      freeSymbol:
-        normalizeString(
-          dependency.runtimeExports?.freeSymbol ??
-            dependency.runtime_exports?.free_symbol,
-          null,
-        ) ?? "free",
-      streamInvokeSymbol: normalizeString(
-        dependency.runtimeExports?.streamInvokeSymbol ??
-          dependency.runtime_exports?.stream_invoke_symbol,
-        null,
-      ),
-    },
+    runtimeExports: normalizeDependencyRuntimeExports(dependency),
     metadata:
       dependency.metadata && typeof dependency.metadata === "object"
         ? { ...dependency.metadata }

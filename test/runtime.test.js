@@ -3,17 +3,26 @@ import assert from "node:assert/strict";
 
 import {
   BackpressurePolicy,
+  DefaultInvokeExports,
+  DefaultManifestExports,
   DrainPolicy,
   FlowRuntime,
+  InvokeSurface,
   MethodRegistry,
+  normalizeArtifactDependency,
 } from "../src/index.js";
 
-function createTypeRef(schemaName = "OMM.fbs", fileIdentifier = "OMM ") {
+function createTypeRef(
+  schemaName = "OMM.fbs",
+  fileIdentifier = "OMM ",
+  overrides = {},
+) {
   return {
     schemaName,
     fileIdentifier,
     schemaHash: [1, 2, 3, 4],
     acceptsAnyFlatbuffer: false,
+    ...overrides,
   };
 }
 
@@ -271,4 +280,144 @@ test("registered plugins can be removed and cleared from the runtime registry", 
   });
   registry.clear();
   assert.deepEqual(registry.listPlugins(), []);
+});
+
+test("runtime preserves aligned type metadata and does not treat aligned bytes as plain flatbuffers", async () => {
+  const alignedTypeRef = createTypeRef("StateVector.fbs", "STVC", {
+    wireFormat: "aligned-binary",
+    rootTypeName: "StateVector",
+    byteLength: 64,
+    requiredAlignment: 16,
+  });
+  const regularManifest = {
+    ...createManifest(),
+    methods: [
+      {
+        ...createManifest().methods[0],
+        inputPorts: [
+          {
+            ...createManifest().methods[0].inputPorts[0],
+            acceptedTypeSets: [
+              {
+                setId: "state-vector",
+                allowedTypes: [createTypeRef("StateVector.fbs", "STVC")],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+  const regularOnlyRegistry = new MethodRegistry();
+  regularOnlyRegistry.registerPlugin({
+    manifest: regularManifest,
+    handlers: {
+      process: ({ inputs }) => ({
+        outputs: inputs.map((frame) => ({ ...frame, portId: "out" })),
+        backlogRemaining: 0,
+        yielded: false,
+      }),
+    },
+  });
+
+  await assert.rejects(
+    regularOnlyRegistry.invoke({
+      pluginId: regularManifest.pluginId,
+      methodId: "process",
+      inputs: [
+        createFrame(1, {
+          typeRef: alignedTypeRef,
+        }),
+      ],
+    }),
+    /rejected frame type "StateVector\.fbs"/,
+  );
+
+  const dualFormatInputsSeen = [];
+  const dualFormatRegistry = new MethodRegistry();
+  dualFormatRegistry.registerPlugin({
+    manifest: {
+      ...regularManifest,
+      methods: [
+        {
+          ...regularManifest.methods[0],
+          inputPorts: [
+            {
+              ...regularManifest.methods[0].inputPorts[0],
+              acceptedTypeSets: [
+                {
+                  setId: "state-vector",
+                  allowedTypes: [
+                    createTypeRef("StateVector.fbs", "STVC"),
+                    alignedTypeRef,
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    handlers: {
+      process: ({ inputs }) => {
+        dualFormatInputsSeen.push(inputs[0].typeRef);
+        return {
+          outputs: inputs.map((frame) => ({ ...frame, portId: "out" })),
+          backlogRemaining: 0,
+          yielded: false,
+        };
+      },
+    },
+  });
+
+  const result = await dualFormatRegistry.invoke({
+    pluginId: regularManifest.pluginId,
+    methodId: "process",
+    inputs: [
+      createFrame(1, {
+        typeRef: alignedTypeRef,
+      }),
+    ],
+  });
+
+  assert.equal(dualFormatInputsSeen[0].wireFormat, "aligned-binary");
+  assert.equal(dualFormatInputsSeen[0].rootTypeName, "StateVector");
+  assert.equal(dualFormatInputsSeen[0].byteLength, 64);
+  assert.equal(dualFormatInputsSeen[0].requiredAlignment, 16);
+  assert.equal(result.outputs[0].typeRef.wireFormat, "aligned-binary");
+});
+
+test("artifact dependency normalization uses SDK direct invoke defaults", () => {
+  const normalized = normalizeArtifactDependency({
+    dependencyId: "dep-runtime",
+    pluginId: "com.digitalarsenal.runtime.test",
+  });
+
+  assert.deepEqual(normalized.manifestExports, {
+    bytesSymbol: DefaultManifestExports.pluginBytesSymbol,
+    sizeSymbol: DefaultManifestExports.pluginSizeSymbol,
+  });
+  assert.deepEqual(normalized.runtimeExports, {
+    initSymbol: null,
+    destroySymbol: null,
+    mallocSymbol: DefaultInvokeExports.allocSymbol,
+    freeSymbol: DefaultInvokeExports.freeSymbol,
+    streamInvokeSymbol: DefaultInvokeExports.invokeSymbol,
+  });
+});
+
+test("artifact dependency normalization does not force direct invoke defaults for command-only dependencies", () => {
+  const normalized = normalizeArtifactDependency({
+    dependencyId: "dep-command",
+    pluginId: "com.digitalarsenal.runtime.command",
+    invokeSurface: InvokeSurface.COMMAND,
+  });
+
+  assert.deepEqual(normalized.runtimeExports, {
+    initSymbol: null,
+    destroySymbol: null,
+    mallocSymbol: null,
+    freeSymbol: null,
+    streamInvokeSymbol: null,
+  });
 });

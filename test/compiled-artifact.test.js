@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  createFlowDeploymentPlan,
   deserializeCompiledArtifact,
   FlowDeploymentClient,
   normalizeCompiledArtifact,
@@ -64,6 +65,8 @@ test("compiled artifacts normalize extended runtime descriptor exports", async (
       dispatch_host_invocation_symbol:
         "sdn_flow_dispatch_next_ready_node_with_host",
       drain_with_host_dispatch_symbol: "sdn_flow_drain_with_host_dispatch",
+      editor_metadata_json_symbol: "sdn_flow_get_editor_metadata_json",
+      editor_metadata_size_symbol: "sdn_flow_get_editor_metadata_size",
       enqueue_trigger_frame_symbol: "sdn_flow_enqueue_trigger_frame",
       enqueue_edge_frame_symbol: "sdn_flow_enqueue_edge_frame",
       external_interface_descriptors_symbol:
@@ -118,6 +121,14 @@ test("compiled artifacts normalize extended runtime descriptor exports", async (
   assert.equal(
     artifact.runtimeExports.drainWithHostDispatchSymbol,
     "sdn_flow_drain_with_host_dispatch",
+  );
+  assert.equal(
+    artifact.runtimeExports.editorMetadataJsonSymbol,
+    "sdn_flow_get_editor_metadata_json",
+  );
+  assert.equal(
+    artifact.runtimeExports.editorMetadataSizeSymbol,
+    "sdn_flow_get_editor_metadata_size",
   );
   assert.equal(
     artifact.runtimeExports.enqueueTriggerFrameSymbol,
@@ -183,6 +194,28 @@ test("deployment payloads can be resolved into compiled runtime artifacts", asyn
   });
   const deployment = await client.prepareDeployment({
     artifact,
+    deploymentPlan: createFlowDeploymentPlan({
+      programId: "flow.artifact.deployment",
+      version: "0.1.0",
+      triggers: [
+        {
+          triggerId: "trigger-http-in-1",
+          kind: "http-request",
+          source: "/catalog",
+        },
+      ],
+      editor: {
+        nodes: {
+          "http-in-1": {
+            type: "http in",
+            config: {
+              method: "get",
+              url: "/catalog",
+            },
+          },
+        },
+      },
+    }),
     target: {
       kind: "local",
       runtimeId: "runtime-deploy-test",
@@ -190,6 +223,7 @@ test("deployment payloads can be resolved into compiled runtime artifacts", asyn
     },
   });
 
+  assert.equal(deployment.payload.deploymentPlan.serviceBindings.length, 1);
   const resolved = await resolveCompiledArtifactInput(deployment);
 
   assert.equal(resolved.programId, artifact.programId);
