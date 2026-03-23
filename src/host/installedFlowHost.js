@@ -55,6 +55,27 @@ function normalizeStringArray(values) {
     .filter((value) => value !== null);
 }
 
+function normalizeBooleanLike(value, fallback = false) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number") {
+    return value !== 0;
+  }
+  const normalized = normalizeString(value, null);
+  if (!normalized) {
+    return fallback;
+  }
+  const lowered = normalized.toLowerCase();
+  if (["1", "true", "yes", "on"].includes(lowered)) {
+    return true;
+  }
+  if (["0", "false", "no", "off"].includes(lowered)) {
+    return false;
+  }
+  return fallback;
+}
+
 async function fileExists(filePath) {
   try {
     await access(filePath);
@@ -72,8 +93,62 @@ function isObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function normalizeHeaderRecord(headers) {
+  if (!headers) {
+    return {};
+  }
+  const entries =
+    typeof headers.forEach === "function"
+      ? (() => {
+          const headerEntries = [];
+          headers.forEach((value, key) => {
+            headerEntries.push([key, value]);
+          });
+          return headerEntries;
+        })()
+      : Array.isArray(headers)
+        ? headers
+        : isObject(headers)
+          ? Object.entries(headers)
+          : [];
+  const normalized = {};
+  for (const [key, value] of entries) {
+    const headerName = normalizeString(key, null);
+    if (!headerName || value === null || value === undefined) {
+      continue;
+    }
+    normalized[headerName.toLowerCase()] = Array.isArray(value)
+      ? value.map((item) => String(item)).join(", ")
+      : String(value);
+  }
+  return normalized;
+}
+
 function toSortedUniqueStrings(values) {
   return Array.from(new Set(normalizeStringArray(values))).sort();
+}
+
+function normalizeBindingMode(value, fallback = DeploymentBindingMode.LOCAL) {
+  const normalized = normalizeString(value, null)?.toLowerCase();
+  if (
+    normalized === DeploymentBindingMode.LOCAL ||
+    normalized === DeploymentBindingMode.DELEGATED
+  ) {
+    return normalized;
+  }
+  return fallback;
+}
+
+function createHttpStatusError(statusCode, message, options = {}) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  if (options.code) {
+    error.code = options.code;
+  }
+  if (options.headers) {
+    error.headers = options.headers;
+  }
+  return error;
 }
 
 function normalizeMetadata(value) {
@@ -1420,28 +1495,421 @@ export function createInstalledFlowService(options = {}) {
     );
   }
 
-  function listLocalScheduleBindings() {
-    return (getDeploymentPlan()?.scheduleBindings ?? []).filter(
+  function filterBindingsByMode(bindings, mode) {
+    return (Array.isArray(bindings) ? bindings : []).filter(
       (binding) =>
-        (binding?.bindingMode ?? DeploymentBindingMode.LOCAL) ===
-        DeploymentBindingMode.LOCAL,
+        normalizeBindingMode(
+          binding?.bindingMode,
+          DeploymentBindingMode.LOCAL,
+        ) === mode,
+    );
+  }
+
+  function listScheduleBindingsFromPlan(deploymentPlan) {
+    return deploymentPlan?.scheduleBindings ?? [];
+  }
+
+  function listServiceBindingsFromPlan(deploymentPlan) {
+    return deploymentPlan?.serviceBindings ?? [];
+  }
+
+  function listAuthPoliciesFromPlan(deploymentPlan) {
+    return deploymentPlan?.authPolicies ?? [];
+  }
+
+  function listPublicationBindingsFromPlan(deploymentPlan) {
+    return deploymentPlan?.publicationBindings ?? [];
+  }
+
+  function listInputBindingsFromPlan(deploymentPlan) {
+    return deploymentPlan?.inputBindings ?? [];
+  }
+
+  function listProtocolInstallationsFromPlan(deploymentPlan) {
+    return deploymentPlan?.protocolInstallations ?? [];
+  }
+
+  function listLocalScheduleBindings() {
+    return filterBindingsByMode(
+      listScheduleBindingsFromPlan(getDeploymentPlan()),
+      DeploymentBindingMode.LOCAL,
     );
   }
 
   function listScheduleBindings() {
-    return getDeploymentPlan()?.scheduleBindings ?? [];
+    return listScheduleBindingsFromPlan(getDeploymentPlan());
   }
 
   function listLocalServiceBindings() {
-    return (getDeploymentPlan()?.serviceBindings ?? []).filter(
-      (binding) =>
-        (binding?.bindingMode ?? DeploymentBindingMode.LOCAL) ===
-        DeploymentBindingMode.LOCAL,
+    return filterBindingsByMode(
+      listServiceBindingsFromPlan(getDeploymentPlan()),
+      DeploymentBindingMode.LOCAL,
     );
   }
 
   function listServiceBindings() {
-    return getDeploymentPlan()?.serviceBindings ?? [];
+    return listServiceBindingsFromPlan(getDeploymentPlan());
+  }
+
+  function resolveLocalAuthPoliciesForServiceBinding(
+    serviceBinding,
+    deploymentPlan = getDeploymentPlan(),
+  ) {
+    if (!serviceBinding) {
+      return [];
+    }
+    const authPolicies = listAuthPoliciesFromPlan(deploymentPlan);
+    const authPoliciesById = new Map(
+      authPolicies
+        .filter((policy) => typeof policy?.policyId === "string")
+        .map((policy) => [policy.policyId, policy]),
+    );
+    const resolvedPolicies = [];
+    const seenPolicyIds = new Set();
+    const serviceId = normalizeString(serviceBinding.serviceId, null);
+    const referencedPolicyId = normalizeString(serviceBinding.authPolicyId, null);
+
+    if (referencedPolicyId) {
+      const referencedPolicy = authPoliciesById.get(referencedPolicyId);
+      if (!referencedPolicy) {
+        throw new Error(
+          `Installed flow service cannot resolve auth policy "${referencedPolicyId}" for local service binding "${serviceBinding.serviceId}".`,
+        );
+      }
+      if (
+        normalizeBindingMode(
+          referencedPolicy.bindingMode,
+          DeploymentBindingMode.LOCAL,
+        ) !== DeploymentBindingMode.LOCAL
+      ) {
+        throw new Error(
+          `Installed flow service cannot enforce delegated auth policy "${referencedPolicyId}" on local service binding "${serviceBinding.serviceId}".`,
+        );
+      }
+      resolvedPolicies.push(referencedPolicy);
+      seenPolicyIds.add(referencedPolicy.policyId);
+    }
+
+    for (const policy of filterBindingsByMode(
+      authPolicies,
+      DeploymentBindingMode.LOCAL,
+    )) {
+      const targetKind = normalizeString(policy.targetKind, null)?.toLowerCase();
+      if (targetKind !== "service" && targetKind !== "http-service") {
+        continue;
+      }
+      const targetId = normalizeString(policy.targetId, null);
+      if (targetId && serviceId && targetId !== serviceId) {
+        continue;
+      }
+      if (seenPolicyIds.has(policy.policyId)) {
+        continue;
+      }
+      resolvedPolicies.push(policy);
+      seenPolicyIds.add(policy.policyId);
+    }
+
+    return resolvedPolicies;
+  }
+
+  function resolveHttpRequestSecurityContext(request = {}) {
+    const headers = normalizeHeaderRecord(request.headers);
+    const metadata = normalizeMetadata(request.metadata);
+    const forwardedProtocol = normalizeString(
+      headers["x-forwarded-proto"] ?? headers["x-sdn-forwarded-proto"],
+      null,
+    )?.toLowerCase();
+    const metadataUrl =
+      normalizeString(
+        metadata.url ?? metadata.href ?? metadata.origin ?? request.url,
+        null,
+      ) ?? null;
+    let requestProtocol = null;
+    if (metadataUrl) {
+      try {
+        requestProtocol = new URL(metadataUrl).protocol.replace(/:$/, "");
+      } catch {
+        requestProtocol = null;
+      }
+    }
+
+    return {
+      peerId:
+        normalizeString(
+          metadata.peerId ??
+            metadata.peer_id ??
+            headers["x-sdn-peer-id"] ??
+            headers["x-peer-id"],
+          null,
+        ) ?? null,
+      serverKey:
+        normalizeString(
+          metadata.serverKey ??
+            metadata.server_key ??
+            headers["x-sdn-server-key"] ??
+            headers["x-server-key"],
+          null,
+        ) ?? null,
+      entityId:
+        normalizeString(
+          metadata.entityId ??
+            metadata.entity_id ??
+            headers["x-sdn-entity-id"] ??
+            headers["x-entity-id"],
+          null,
+        ) ?? null,
+      signedRequest: normalizeBooleanLike(
+        metadata.signedRequest ??
+          metadata.signed_request ??
+          headers["x-sdn-signed-request"] ??
+          headers["x-signed-request"],
+        false,
+      ),
+      encryptedTransport:
+        normalizeBooleanLike(
+          metadata.encryptedTransport ??
+            metadata.encrypted_transport ??
+            headers["x-sdn-encrypted-transport"],
+          false,
+        ) ||
+        forwardedProtocol === "https" ||
+        forwardedProtocol === "wss" ||
+        requestProtocol === "https" ||
+        requestProtocol === "wss",
+    };
+  }
+
+  function assertLocalHttpRequestAuthorized(serviceBinding, request = {}) {
+    const authPolicies = resolveLocalAuthPoliciesForServiceBinding(serviceBinding);
+    if (authPolicies.length === 0) {
+      return;
+    }
+    const securityContext = resolveHttpRequestSecurityContext(request);
+
+    for (const authPolicy of authPolicies) {
+      if (
+        authPolicy.requireEncryptedTransport &&
+        !securityContext.encryptedTransport
+      ) {
+        throw createHttpStatusError(
+          403,
+          `HTTP service "${serviceBinding.serviceId}" requires encrypted transport by auth policy "${authPolicy.policyId}".`,
+          {
+            code: "encrypted-transport-required",
+          },
+        );
+      }
+      if (authPolicy.requireSignedRequests && !securityContext.signedRequest) {
+        throw createHttpStatusError(
+          403,
+          `HTTP service "${serviceBinding.serviceId}" requires signed requests by auth policy "${authPolicy.policyId}".`,
+          {
+            code: "signed-request-required",
+          },
+        );
+      }
+      if (
+        authPolicy.allowPeerIds.length > 0 &&
+        !authPolicy.allowPeerIds.includes(securityContext.peerId ?? "")
+      ) {
+        throw createHttpStatusError(
+          403,
+          `HTTP service "${serviceBinding.serviceId}" rejected an unapproved peer id under auth policy "${authPolicy.policyId}".`,
+          {
+            code: "peer-id-not-approved",
+          },
+        );
+      }
+      if (
+        authPolicy.allowServerKeys.length > 0 &&
+        !authPolicy.allowServerKeys.includes(securityContext.serverKey ?? "")
+      ) {
+        throw createHttpStatusError(
+          403,
+          `HTTP service "${serviceBinding.serviceId}" rejected an unapproved server key under auth policy "${authPolicy.policyId}".`,
+          {
+            code: "server-key-not-approved",
+          },
+        );
+      }
+      if (
+        authPolicy.allowEntityIds.length > 0 &&
+        !authPolicy.allowEntityIds.includes(securityContext.entityId ?? "")
+      ) {
+        throw createHttpStatusError(
+          403,
+          `HTTP service "${serviceBinding.serviceId}" rejected an unapproved entity id under auth policy "${authPolicy.policyId}".`,
+          {
+            code: "entity-id-not-approved",
+          },
+        );
+      }
+    }
+  }
+
+  function buildDeploymentBindingSummary(deploymentPlan = getDeploymentPlan()) {
+    return {
+      schedules: {
+        local: cloneJsonCompatibleValue(
+          filterBindingsByMode(
+            listScheduleBindingsFromPlan(deploymentPlan),
+            DeploymentBindingMode.LOCAL,
+          ),
+        ),
+        delegated: cloneJsonCompatibleValue(
+          filterBindingsByMode(
+            listScheduleBindingsFromPlan(deploymentPlan),
+            DeploymentBindingMode.DELEGATED,
+          ),
+        ),
+      },
+      services: {
+        local: cloneJsonCompatibleValue(
+          filterBindingsByMode(
+            listServiceBindingsFromPlan(deploymentPlan),
+            DeploymentBindingMode.LOCAL,
+          ),
+        ),
+        delegated: cloneJsonCompatibleValue(
+          filterBindingsByMode(
+            listServiceBindingsFromPlan(deploymentPlan),
+            DeploymentBindingMode.DELEGATED,
+          ),
+        ),
+      },
+      authPolicies: {
+        local: cloneJsonCompatibleValue(
+          filterBindingsByMode(
+            listAuthPoliciesFromPlan(deploymentPlan),
+            DeploymentBindingMode.LOCAL,
+          ),
+        ),
+        delegated: cloneJsonCompatibleValue(
+          filterBindingsByMode(
+            listAuthPoliciesFromPlan(deploymentPlan),
+            DeploymentBindingMode.DELEGATED,
+          ),
+        ),
+      },
+      publications: {
+        local: cloneJsonCompatibleValue(
+          filterBindingsByMode(
+            listPublicationBindingsFromPlan(deploymentPlan),
+            DeploymentBindingMode.LOCAL,
+          ),
+        ),
+        delegated: cloneJsonCompatibleValue(
+          filterBindingsByMode(
+            listPublicationBindingsFromPlan(deploymentPlan),
+            DeploymentBindingMode.DELEGATED,
+          ),
+        ),
+      },
+      inputBindings: cloneJsonCompatibleValue(
+        listInputBindingsFromPlan(deploymentPlan),
+      ),
+      protocolInstallations: cloneJsonCompatibleValue(
+        listProtocolInstallationsFromPlan(deploymentPlan),
+      ),
+    };
+  }
+
+  function assertSupportedLocalBindings(deploymentPlan = getDeploymentPlan()) {
+    const localScheduleBindings = filterBindingsByMode(
+      listScheduleBindingsFromPlan(deploymentPlan),
+      DeploymentBindingMode.LOCAL,
+    );
+    for (const scheduleBinding of localScheduleBindings) {
+      if (!normalizeString(scheduleBinding.triggerId, null)) {
+        throw new Error(
+          `Installed flow service cannot auto-start local schedule binding "${scheduleBinding.scheduleId}" because method-target schedules are not supported in the local host path.`,
+        );
+      }
+    }
+
+    const localServiceBindings = filterBindingsByMode(
+      listServiceBindingsFromPlan(deploymentPlan),
+      DeploymentBindingMode.LOCAL,
+    );
+    const localServiceIds = new Set(
+      localServiceBindings
+        .map((binding) => normalizeString(binding.serviceId, null))
+        .filter(Boolean),
+    );
+    for (const serviceBinding of localServiceBindings) {
+      if (
+        normalizeString(serviceBinding.serviceKind, "")?.toLowerCase() !==
+        "http-server"
+      ) {
+        throw new Error(
+          `Installed flow service cannot host local service binding "${serviceBinding.serviceId}" because only http-server bindings are supported in the local host path.`,
+        );
+      }
+      if (!normalizeString(serviceBinding.triggerId, null)) {
+        throw new Error(
+          `Installed flow service cannot host local service binding "${serviceBinding.serviceId}" without a triggerId.`,
+        );
+      }
+      resolveLocalAuthPoliciesForServiceBinding(serviceBinding, deploymentPlan);
+    }
+
+    for (const authPolicy of filterBindingsByMode(
+      listAuthPoliciesFromPlan(deploymentPlan),
+      DeploymentBindingMode.LOCAL,
+    )) {
+      const targetKind = normalizeString(authPolicy.targetKind, "")?.toLowerCase();
+      if (targetKind !== "service" && targetKind !== "http-service") {
+        throw new Error(
+          `Installed flow service cannot enforce local auth policy "${authPolicy.policyId}" for targetKind "${authPolicy.targetKind}".`,
+        );
+      }
+      const targetId = normalizeString(authPolicy.targetId, null);
+      if (targetId && !localServiceIds.has(targetId)) {
+        throw new Error(
+          `Installed flow service cannot enforce local auth policy "${authPolicy.policyId}" because targetId "${targetId}" is not a local HTTP service binding.`,
+        );
+      }
+      if (authPolicy.walletProfileId || authPolicy.trustMapId) {
+        throw new Error(
+          `Installed flow service cannot enforce local auth policy "${authPolicy.policyId}" because walletProfileId/trustMapId resolution is not implemented in the local host path.`,
+        );
+      }
+    }
+
+    const localPublicationBindings = filterBindingsByMode(
+      listPublicationBindingsFromPlan(deploymentPlan),
+      DeploymentBindingMode.LOCAL,
+    );
+    if (localPublicationBindings.length > 0) {
+      throw new Error(
+        `Installed flow service cannot host local publicationBindings: ${localPublicationBindings
+          .map((binding) => binding.publicationId)
+          .join(", ")}.`,
+      );
+    }
+
+    const inputBindings = listInputBindingsFromPlan(deploymentPlan);
+    if (inputBindings.length > 0) {
+      throw new Error(
+        `Installed flow service cannot host deploymentPlan.inputBindings yet: ${inputBindings
+          .map((binding) => binding.bindingId)
+          .join(", ")}.`,
+      );
+    }
+
+    const protocolInstallations = listProtocolInstallationsFromPlan(
+      deploymentPlan,
+    );
+    if (protocolInstallations.length > 0) {
+      throw new Error(
+        `Installed flow service cannot host deploymentPlan.protocolInstallations yet: ${protocolInstallations
+          .map(
+            (installation) =>
+              installation.protocolId ?? installation.wireId ?? "protocol",
+          )
+          .join(", ")}.`,
+      );
+    }
   }
 
   function resolveHttpTrigger(request = {}) {
@@ -1494,11 +1962,18 @@ export function createInstalledFlowService(options = {}) {
       });
     }
     if (!trigger) {
-      throw new Error(
+      throw createHttpStatusError(
+        404,
         `No HTTP trigger matches ${requestedTriggerId ?? requestedPath ?? "<unknown>"}.`,
+        {
+          code: "http-trigger-not-found",
+        },
       );
     }
-    return trigger;
+    return {
+      trigger,
+      binding: localBindingsByTriggerId.get(trigger.triggerId) ?? null,
+    };
   }
 
   async function dispatchTriggerFrames(triggerId, frames) {
@@ -1529,13 +2004,22 @@ export function createInstalledFlowService(options = {}) {
   }
 
   async function handleHttpRequest(request = {}) {
-    const trigger = resolveHttpTrigger(request);
+    const { trigger, binding } = resolveHttpTrigger(request);
+    if (binding) {
+      assertLocalHttpRequestAuthorized(binding, request);
+    }
     const response = await dispatchTriggerFrames(trigger.triggerId, [
       buildHttpRequestTriggerFrame(trigger, request),
     ]);
     return {
       triggerId: trigger.triggerId,
       route: trigger.source ?? null,
+      serviceId: binding?.serviceId ?? null,
+      authPolicies: binding
+        ? resolveLocalAuthPoliciesForServiceBinding(binding).map(
+            (policy) => policy.policyId,
+          )
+        : [],
       ...response,
     };
   }
@@ -1645,6 +2129,7 @@ export function createInstalledFlowService(options = {}) {
   return {
     host,
     async start() {
+      assertSupportedLocalBindings();
       const startup = await host.start();
       if (!started) {
         if (options.autoStartTimers !== false) {
@@ -1656,12 +2141,14 @@ export function createInstalledFlowService(options = {}) {
         ...startup,
         timerTriggers: listTimerTriggers(),
         httpRoutes: listHttpRoutes(),
+        deploymentBindings: buildDeploymentBindingSummary(),
       };
     },
     async refresh(refreshOptions = {}) {
       const restartTimers = started && options.autoStartTimers !== false;
       stopTimerServices();
       const refreshResult = await host.refreshPlugins(refreshOptions);
+      assertSupportedLocalBindings();
       if (restartTimers) {
         startTimerServices();
       }
@@ -1669,6 +2156,7 @@ export function createInstalledFlowService(options = {}) {
         ...refreshResult,
         timerTriggers: listTimerTriggers(),
         httpRoutes: listHttpRoutes(),
+        deploymentBindings: buildDeploymentBindingSummary(),
       };
     },
     stop() {
@@ -1680,11 +2168,15 @@ export function createInstalledFlowService(options = {}) {
     handleHttpRequest,
     listTimerTriggers,
     listHttpRoutes,
+    getDeploymentBindingSummary() {
+      return buildDeploymentBindingSummary();
+    },
     getServiceSummary() {
       return {
         started,
         timerTriggers: listTimerTriggers(),
         httpRoutes: listHttpRoutes(),
+        deploymentBindings: buildDeploymentBindingSummary(),
       };
     },
   };

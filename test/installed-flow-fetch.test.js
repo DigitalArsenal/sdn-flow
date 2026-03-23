@@ -141,3 +141,123 @@ test("createFetchResponse defaults to 204 when a flow emits no HTTP response fra
   assert.equal(response.status, 204);
   assert.equal(await response.text(), "");
 });
+
+test("installed flow fetch handler converts auth policy failures into HTTP error responses", async () => {
+  const handler = createInstalledFlowFetchHandler({
+    program: {
+      programId: "com.digitalarsenal.examples.fetch-auth-service",
+      nodes: [
+        {
+          nodeId: "responder",
+          pluginId: "com.digitalarsenal.examples.memory.fetch-auth",
+          methodId: "serve_http_request",
+        },
+      ],
+      edges: [],
+      triggers: [
+        {
+          triggerId: "secure-download",
+          kind: "http-request",
+          source: "/secure-download",
+        },
+      ],
+      triggerBindings: [
+        {
+          triggerId: "secure-download",
+          targetNodeId: "responder",
+          targetPortId: "request",
+        },
+      ],
+      requiredPlugins: ["com.digitalarsenal.examples.memory.fetch-auth"],
+    },
+    deploymentPlan: {
+      pluginId: "com.digitalarsenal.examples.fetch-auth-service",
+      version: "1.0.0",
+      scheduleBindings: [],
+      serviceBindings: [
+        {
+          serviceId: "service-secure-download",
+          triggerId: "secure-download",
+          bindingMode: "local",
+          serviceKind: "http-server",
+          routePath: "/secure-download",
+          method: "GET",
+          authPolicyId: "approved-keys",
+        },
+      ],
+      inputBindings: [],
+      publicationBindings: [],
+      authPolicies: [
+        {
+          policyId: "approved-keys",
+          bindingMode: "local",
+          targetKind: "service",
+          targetId: "service-secure-download",
+          allowServerKeys: ["ed25519:approved"],
+          requireSignedRequests: true,
+          requireEncryptedTransport: true,
+        },
+      ],
+      protocolInstallations: [],
+    },
+    discover: false,
+    pluginPackages: [
+      {
+        manifest: {
+          pluginId: "com.digitalarsenal.examples.memory.fetch-auth",
+          name: "In-Memory Fetch Auth",
+          version: "1.0.0",
+          pluginFamily: "responder",
+          methods: [
+            {
+              methodId: "serve_http_request",
+              inputPorts: [{ portId: "request", required: true }],
+              outputPorts: [{ portId: "response" }],
+              maxBatch: 8,
+              drainPolicy: "drain-to-empty",
+            },
+          ],
+        },
+        handlers: {
+          serve_http_request({ inputs }) {
+            return {
+              outputs: inputs.map((frame) => ({
+                ...frame,
+                portId: "response",
+                metadata: {
+                  statusCode: 200,
+                },
+              })),
+              backlogRemaining: 0,
+              yielded: false,
+            };
+          },
+        },
+      },
+    ],
+  });
+
+  const rejected = await handler(
+    new Request("https://example.test/secure-download", {
+      method: "GET",
+      headers: {
+        "x-sdn-server-key": "ed25519:approved",
+      },
+    }),
+  );
+
+  assert.equal(rejected.status, 403);
+  assert.match(await rejected.text(), /signed requests/i);
+
+  const accepted = await handler(
+    new Request("https://example.test/secure-download", {
+      method: "GET",
+      headers: {
+        "x-sdn-server-key": "ed25519:approved",
+        "x-sdn-signed-request": "1",
+      },
+    }),
+  );
+
+  assert.equal(accepted.status, 200);
+});

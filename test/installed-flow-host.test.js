@@ -684,3 +684,316 @@ test("installed flow service rejects delegated HTTP bindings from the local host
     /No HTTP trigger matches/,
   );
 });
+
+test("installed flow service enforces local HTTP auth policies from the deployment plan", async () => {
+  const service = createInstalledFlowService({
+    program: {
+      programId: "com.digitalarsenal.examples.authenticated-http-service",
+      nodes: [
+        {
+          nodeId: "responder",
+          pluginId: "com.digitalarsenal.examples.memory.auth-http",
+          methodId: "serve_http_request",
+        },
+      ],
+      edges: [],
+      triggers: [
+        {
+          triggerId: "secure-download",
+          kind: "http-request",
+          source: "/secure-download",
+        },
+      ],
+      triggerBindings: [
+        {
+          triggerId: "secure-download",
+          targetNodeId: "responder",
+          targetPortId: "request",
+        },
+      ],
+      requiredPlugins: ["com.digitalarsenal.examples.memory.auth-http"],
+    },
+    deploymentPlan: {
+      pluginId: "com.digitalarsenal.examples.authenticated-http-service",
+      version: "1.0.0",
+      scheduleBindings: [],
+      serviceBindings: [
+        {
+          serviceId: "service-secure-download",
+          triggerId: "secure-download",
+          bindingMode: "local",
+          serviceKind: "http-server",
+          routePath: "/secure-download",
+          method: "GET",
+          authPolicyId: "approved-keys",
+        },
+      ],
+      inputBindings: [],
+      publicationBindings: [],
+      authPolicies: [
+        {
+          policyId: "approved-keys",
+          bindingMode: "local",
+          targetKind: "service",
+          targetId: "service-secure-download",
+          allowServerKeys: ["ed25519:approved"],
+          requireSignedRequests: true,
+          requireEncryptedTransport: true,
+        },
+      ],
+      protocolInstallations: [],
+    },
+    discover: false,
+    pluginPackages: [
+      {
+        manifest: {
+          pluginId: "com.digitalarsenal.examples.memory.auth-http",
+          name: "In-Memory Auth HTTP",
+          version: "1.0.0",
+          pluginFamily: "responder",
+          methods: [
+            {
+              methodId: "serve_http_request",
+              inputPorts: [{ portId: "request", required: true }],
+              outputPorts: [{ portId: "response" }],
+              maxBatch: 8,
+              drainPolicy: "drain-to-empty",
+            },
+          ],
+        },
+        handlers: {
+          serve_http_request({ inputs }) {
+            return {
+              outputs: inputs.map((frame) => ({
+                ...frame,
+                portId: "response",
+                metadata: {
+                  ...frame.metadata,
+                  statusCode: 200,
+                },
+              })),
+              backlogRemaining: 0,
+              yielded: false,
+            };
+          },
+        },
+      },
+    ],
+  });
+
+  const startup = await service.start();
+  assert.equal(startup.deploymentBindings.authPolicies.local.length, 1);
+
+  await assert.rejects(
+    service.handleHttpRequest({
+      path: "/secure-download",
+      method: "GET",
+      headers: {
+        "x-sdn-server-key": "ed25519:approved",
+      },
+      metadata: {
+        url: "https://example.test/secure-download",
+      },
+    }),
+    (error) => {
+      assert.equal(error.statusCode, 403);
+      assert.match(error.message, /signed requests/i);
+      return true;
+    },
+  );
+
+  const response = await service.handleHttpRequest({
+    path: "/secure-download",
+    method: "GET",
+    headers: {
+      "x-sdn-server-key": "ed25519:approved",
+      "x-sdn-signed-request": "1",
+    },
+    metadata: {
+      url: "https://example.test/secure-download",
+    },
+  });
+
+  assert.equal(response.serviceId, "service-secure-download");
+  assert.deepEqual(response.authPolicies, ["approved-keys"]);
+  assert.equal(response.outputs[0].frame.metadata.statusCode, 200);
+});
+
+test("installed flow service exposes delegated deployment bindings explicitly", async () => {
+  const service = createInstalledFlowService({
+    program: {
+      programId: "com.digitalarsenal.examples.delegated-binding-summary",
+      nodes: [],
+      edges: [],
+      triggers: [
+        {
+          triggerId: "tick",
+          kind: "timer",
+          defaultIntervalMs: 250,
+        },
+        {
+          triggerId: "download",
+          kind: "http-request",
+          source: "/download",
+        },
+      ],
+      triggerBindings: [],
+      requiredPlugins: [],
+    },
+    deploymentPlan: {
+      pluginId: "com.digitalarsenal.examples.delegated-binding-summary",
+      version: "1.0.0",
+      scheduleBindings: [
+        {
+          scheduleId: "schedule-tick",
+          triggerId: "tick",
+          bindingMode: "delegated",
+          scheduleKind: "interval",
+          intervalMs: 250,
+        },
+      ],
+      serviceBindings: [
+        {
+          serviceId: "service-download",
+          triggerId: "download",
+          bindingMode: "delegated",
+          serviceKind: "http-server",
+          routePath: "/download",
+          method: "GET",
+          authPolicyId: "gateway-auth",
+        },
+      ],
+      inputBindings: [],
+      publicationBindings: [
+        {
+          publicationId: "publication-catalog",
+          bindingMode: "delegated",
+          sourceKind: "node-output",
+          sourceNodeId: "publisher",
+          topic: "catalog/items",
+        },
+      ],
+      authPolicies: [
+        {
+          policyId: "gateway-auth",
+          bindingMode: "delegated",
+          targetKind: "service",
+          targetId: "service-download",
+          allowServerKeys: ["ed25519:gateway"],
+        },
+      ],
+      protocolInstallations: [],
+    },
+    discover: false,
+  });
+
+  const startup = await service.start();
+
+  assert.equal(startup.deploymentBindings.schedules.local.length, 0);
+  assert.equal(startup.deploymentBindings.schedules.delegated.length, 1);
+  assert.equal(startup.deploymentBindings.services.delegated[0].serviceId, "service-download");
+  assert.equal(startup.deploymentBindings.authPolicies.delegated[0].policyId, "gateway-auth");
+  assert.equal(
+    startup.deploymentBindings.publications.delegated[0].publicationId,
+    "publication-catalog",
+  );
+});
+
+test("installed flow service rejects unsupported local publication bindings", async () => {
+  const service = createInstalledFlowService({
+    program: {
+      programId: "com.digitalarsenal.examples.local-publication-service",
+      nodes: [],
+      edges: [],
+      triggers: [],
+      triggerBindings: [],
+      requiredPlugins: [],
+    },
+    deploymentPlan: {
+      pluginId: "com.digitalarsenal.examples.local-publication-service",
+      version: "1.0.0",
+      scheduleBindings: [],
+      serviceBindings: [],
+      inputBindings: [],
+      publicationBindings: [
+        {
+          publicationId: "publication-local",
+          bindingMode: "local",
+          sourceKind: "node-output",
+          sourceNodeId: "publisher",
+          topic: "catalog/items",
+        },
+      ],
+      authPolicies: [],
+      protocolInstallations: [],
+    },
+    discover: false,
+  });
+
+  await assert.rejects(service.start(), /local publicationBindings/i);
+});
+
+test("installed flow service rejects unsupported input and protocol deployment bindings", async () => {
+  const inputBoundService = createInstalledFlowService({
+    program: {
+      programId: "com.digitalarsenal.examples.input-bound-service",
+      nodes: [],
+      edges: [],
+      triggers: [],
+      triggerBindings: [],
+      requiredPlugins: [],
+    },
+    deploymentPlan: {
+      pluginId: "com.digitalarsenal.examples.input-bound-service",
+      version: "1.0.0",
+      scheduleBindings: [],
+      serviceBindings: [],
+      inputBindings: [
+        {
+          bindingId: "input-pubsub",
+          targetMethodId: "consume_input",
+          targetInputPortId: "request",
+          sourceKind: "pubsub",
+          topic: "catalog/items",
+        },
+      ],
+      publicationBindings: [],
+      authPolicies: [],
+      protocolInstallations: [],
+    },
+    discover: false,
+  });
+
+  await assert.rejects(inputBoundService.start(), /inputBindings/i);
+
+  const protocolBoundService = createInstalledFlowService({
+    program: {
+      programId: "com.digitalarsenal.examples.protocol-bound-service",
+      nodes: [],
+      edges: [],
+      triggers: [],
+      triggerBindings: [],
+      requiredPlugins: [],
+    },
+    deploymentPlan: {
+      pluginId: "com.digitalarsenal.examples.protocol-bound-service",
+      version: "1.0.0",
+      scheduleBindings: [],
+      serviceBindings: [],
+      inputBindings: [],
+      publicationBindings: [],
+      authPolicies: [],
+      protocolInstallations: [
+        {
+          protocolId: "/com.digitalarsenal/catalog/1.0.0",
+          wireId: "catalog-wire",
+          transportKind: "http",
+          role: "handle",
+        },
+      ],
+    },
+    discover: false,
+  });
+
+  await assert.rejects(protocolBoundService.start(), /protocolInstallations/i);
+});

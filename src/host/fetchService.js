@@ -203,6 +203,28 @@ export function createFetchResponse(result, options = {}) {
   });
 }
 
+function createFetchErrorResponse(error) {
+  const statusCode = Number(error?.statusCode ?? error?.status ?? 500);
+  const status =
+    Number.isInteger(statusCode) && statusCode >= 400 && statusCode <= 599
+      ? statusCode
+      : 500;
+  const headers = normalizeHeadersInit(error?.headers ?? {});
+  if (!headers.has("content-type")) {
+    headers.set("content-type", "text/plain; charset=utf-8");
+  }
+  const message =
+    typeof error?.message === "string" && error.message.length > 0
+      ? error.message
+      : status === 500
+        ? "Internal Server Error"
+        : "Request failed";
+  return new Response(message, {
+    status,
+    headers,
+  });
+}
+
 export function createInstalledFlowFetchHandler(options = {}) {
   const service = options.service ?? createInstalledFlowService(options);
   const requestMapper = options.requestMapper ?? normalizeFetchRequest;
@@ -214,13 +236,25 @@ export function createInstalledFlowFetchHandler(options = {}) {
       ...options,
       context,
     });
-    const result = await service.handleHttpRequest(mappedRequest);
-    return responseMapper(result, {
-      request,
-      context,
-      service,
-      ...options,
-    });
+    try {
+      const result = await service.handleHttpRequest(mappedRequest);
+      return responseMapper(result, {
+        request,
+        context,
+        service,
+        ...options,
+      });
+    } catch (error) {
+      const statusCode = Number(error?.statusCode ?? error?.status);
+      if (
+        Number.isInteger(statusCode) &&
+        statusCode >= 400 &&
+        statusCode <= 599
+      ) {
+        return createFetchErrorResponse(error);
+      }
+      throw error;
+    }
   };
 
   handler.service = service;
