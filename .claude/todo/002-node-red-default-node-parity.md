@@ -62,9 +62,11 @@ Status: active
 ## Required Work
 
 1. Inventory
-   - [ ] Build a checked-in parity matrix covering every shipped node.
-   - [ ] Mark current implementation state:
+   - [x] Build a checked-in parity matrix covering every shipped node. See
+         `docs/node-red-parity-matrix.md`.
+   - [x] Mark current implementation state:
          editor-only, JS runtime, compiled runtime, delegated.
+         See `docs/node-red-parity-matrix.md`.
 
 2. Compiled implementations
    - [ ] Move remaining deterministic node semantics into compiled C++/WASM.
