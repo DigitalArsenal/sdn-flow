@@ -315,6 +315,354 @@ test("CSV OMM query service example runs through the reference harness end-to-en
   });
 });
 
+test("Space weather publisher example summarizes scheduled ingest, archive download, PNM, and REST query requirements", async () => {
+  const flow = await readJson(
+    "../examples/flows/space-weather-publisher/flow.json",
+  );
+  const manifests = await Promise.all([
+    readJson("../examples/plugins/http-fetcher/manifest.json"),
+    readJson("../examples/plugins/filesystem-writer/manifest.json"),
+    readJson("../examples/plugins/flatsql-store/manifest.json"),
+    readJson("../examples/plugins/pnm-notifier/manifest.json"),
+    readJson("../examples/plugins/sql-http-bridge/manifest.json"),
+    readJson("../examples/plugins/https-file-server/manifest.json"),
+  ]);
+
+  const session = new FlowDesignerSession({ program: flow });
+  const summary = session.inspectRequirements({ manifests });
+
+  assert.deepEqual(summary.capabilities, [
+    "filesystem",
+    "http",
+    "protocol_dial",
+    "storage_adapter",
+    "storage_query",
+    "storage_write",
+  ]);
+  assert.equal(summary.artifactDependencies.length, 6);
+  assert.equal(
+    summary.externalInterfaces.some(
+      (item) =>
+        item.kind === "http" &&
+        item.direction === "output" &&
+        item.resource ===
+          "https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json",
+    ),
+    true,
+  );
+  assert.equal(
+    summary.externalInterfaces.some(
+      (item) =>
+        item.kind === "filesystem" &&
+        item.resource === "file:///var/lib/sdn/space-weather/k-index",
+    ),
+    true,
+  );
+  assert.equal(
+    summary.externalInterfaces.some(
+      (item) =>
+        item.kind === "protocol" &&
+        item.protocolId === "/sds/pnm/1.0.0",
+    ),
+    true,
+  );
+  assert.equal(
+    summary.externalInterfaces.some(
+      (item) =>
+        item.kind === "http" &&
+        item.direction === "input" &&
+        item.path === "/space-weather/k-index/query",
+    ),
+    true,
+  );
+  assert.equal(
+    summary.externalInterfaces.some(
+      (item) =>
+        item.kind === "http" &&
+        item.direction === "input" &&
+        item.path === "/space-weather/k-index/latest",
+    ),
+    true,
+  );
+});
+
+test("Space weather publisher example runs through the reference harness end-to-end", async () => {
+  const flow = await readJson(
+    "../examples/flows/space-weather-publisher/flow.json",
+  );
+  const manifests = {
+    fetcher: await readJson("../examples/plugins/http-fetcher/manifest.json"),
+    writer: await readJson("../examples/plugins/filesystem-writer/manifest.json"),
+    flatsql: await readJson("../examples/plugins/flatsql-store/manifest.json"),
+    pnm: await readJson("../examples/plugins/pnm-notifier/manifest.json"),
+    bridge: await readJson("../examples/plugins/sql-http-bridge/manifest.json"),
+    fileServer: await readJson(
+      "../examples/plugins/https-file-server/manifest.json",
+    ),
+  };
+
+  const registry = new MethodRegistry();
+  const storedRecords = new Map();
+  const archivedRecords = [];
+  const notifications = [];
+
+  registry.registerPlugin({
+    manifest: manifests.fetcher,
+    handlers: {
+      fetch_records: ({ inputs }) => ({
+        outputs: inputs.flatMap(() => [
+          frame("records", "AlignedRecordBatch.fbs", "RECS", {
+            timeTag: "2026-03-24T00:00:00Z",
+            kp: 4.67,
+            source: "noaa-swpc",
+            product: "planetary-k-index",
+          }),
+          frame("records", "AlignedRecordBatch.fbs", "RECS", {
+            timeTag: "2026-03-24T03:00:00Z",
+            kp: 6.33,
+            source: "noaa-swpc",
+            product: "planetary-k-index",
+          }),
+        ]),
+        backlogRemaining: 0,
+        yielded: false,
+      }),
+    },
+  });
+
+  registry.registerPlugin({
+    manifest: manifests.writer,
+    handlers: {
+      write_records: ({ inputs }) => {
+        archivedRecords.push(...inputs.map((input) => input.payload));
+        return { outputs: [], backlogRemaining: 0, yielded: false };
+      },
+    },
+  });
+
+  registry.registerPlugin({
+    manifest: manifests.flatsql,
+    handlers: {
+      upsert_records: ({ inputs }) => {
+        const outputs = [];
+        for (const input of inputs) {
+          storedRecords.set(input.payload.timeTag, input.payload);
+          outputs.push(
+            frame(
+              "stored",
+              "StoredRecordRef.fbs",
+              "STRF",
+              {
+                timeTag: input.payload.timeTag,
+                kp: input.payload.kp,
+              },
+              {
+                sequence: input.sequence,
+                traceId: input.traceId,
+              },
+            ),
+          );
+        }
+        return { outputs, backlogRemaining: 0, yielded: false };
+      },
+      query_sql: ({ inputs }) => {
+        const request = inputs.at(-1)?.payload ?? {};
+        const minKp = Number(request.params?.minKp ?? request.minKp ?? 0);
+        const rows = Array.from(storedRecords.values()).filter(
+          (record) => Number(record.kp) >= minKp,
+        );
+        return {
+          outputs: [
+            frame("rows", "SqlQueryResult.fbs", "SQLR", {
+              rows,
+            }),
+          ],
+          backlogRemaining: 0,
+          yielded: false,
+        };
+      },
+      query_objects_within_radius: () => ({
+        outputs: [
+          frame("matches", "ProximitySelection.fbs", "PRXY", {
+            matches: [],
+          }),
+        ],
+        backlogRemaining: 0,
+        yielded: false,
+      }),
+    },
+  });
+
+  registry.registerPlugin({
+    manifest: manifests.pnm,
+    handlers: {
+      send_notification: ({ inputs }) => {
+        notifications.push(...inputs.map((input) => input.payload));
+        return { outputs: [], backlogRemaining: 0, yielded: false };
+      },
+    },
+  });
+
+  registry.registerPlugin({
+    manifest: manifests.bridge,
+    handlers: {
+      build_sql_query_from_http_request: ({ inputs }) => ({
+        outputs: inputs.map((input) =>
+          frame("query", "SqlQueryRequest.fbs", "SQLQ", {
+            sql: "SELECT * FROM space_weather WHERE kp >= :minKp",
+            params: {
+              minKp: Number(input.payload.minKp ?? 0),
+            },
+          }),
+        ),
+        backlogRemaining: 0,
+        yielded: false,
+      }),
+      build_http_response_from_rows: ({ inputs }) => ({
+        outputs: inputs.map((input) =>
+          frame(
+            "response",
+            "HttpResponse.fbs",
+            "HRSP",
+            JSON.stringify(input.payload),
+            {
+              traceId: input.traceId,
+            },
+          ),
+        ).map((output) => ({
+          ...output,
+          metadata: {
+            statusCode: 200,
+            responseHeaders: {
+              "content-type": "application/json",
+            },
+          },
+        })),
+        backlogRemaining: 0,
+        yielded: false,
+      }),
+    },
+  });
+
+  registry.registerPlugin({
+    manifest: manifests.fileServer,
+    handlers: {
+      serve_http_request: ({ inputs }) => ({
+        outputs: inputs.map((input) =>
+          frame(
+            "response",
+            "HttpResponse.fbs",
+            "HRSP",
+            JSON.stringify({
+              records: archivedRecords,
+            }),
+            {
+              traceId: input.traceId,
+            },
+          ),
+        ).map((output) => ({
+          ...output,
+          metadata: {
+            statusCode: 200,
+            responseHeaders: {
+              "content-type": "application/json",
+            },
+          },
+        })),
+        backlogRemaining: 0,
+        yielded: false,
+      }),
+    },
+  });
+
+  const runtime = new FlowRuntime({ registry });
+  runtime.loadProgram(flow);
+  runtime.enqueueTriggerFrames("sync-space-weather", [
+    frame("trigger", "TimerTick.fbs", "TICK", {
+      at: "2026-03-24T00:00:00.000Z",
+    }),
+  ]);
+  const syncResult = await runtime.drain();
+
+  assert.equal(syncResult.idle, true);
+  assert.equal(storedRecords.size, 2);
+  assert.equal(archivedRecords.length, 2);
+  assert.deepEqual(notifications, [
+    {
+      timeTag: "2026-03-24T00:00:00Z",
+      kp: 4.67,
+    },
+    {
+      timeTag: "2026-03-24T03:00:00Z",
+      kp: 6.33,
+    },
+  ]);
+
+  const querySinkOutputs = [];
+  const queryRuntime = new FlowRuntime({
+    registry,
+    onSinkOutput(event) {
+      querySinkOutputs.push(event);
+    },
+  });
+  queryRuntime.loadProgram(flow);
+  queryRuntime.enqueueTriggerFrames("query-http", [
+    frame("request", "HttpRequest.fbs", "HREQ", {
+      minKp: 5,
+    }),
+  ]);
+  const queryResult = await queryRuntime.drain();
+
+  assert.equal(queryResult.idle, true);
+  assert.equal(querySinkOutputs.length, 1);
+  assert.equal(querySinkOutputs[0].nodeId, "respond-query");
+  assert.deepEqual(JSON.parse(querySinkOutputs[0].frame.payload), {
+    rows: [
+      {
+        timeTag: "2026-03-24T03:00:00Z",
+        kp: 6.33,
+        source: "noaa-swpc",
+        product: "planetary-k-index",
+      },
+    ],
+  });
+
+  const downloadSinkOutputs = [];
+  const downloadRuntime = new FlowRuntime({
+    registry,
+    onSinkOutput(event) {
+      downloadSinkOutputs.push(event);
+    },
+  });
+  downloadRuntime.loadProgram(flow);
+  downloadRuntime.enqueueTriggerFrames("download-http", [
+    frame("request", "HttpRequest.fbs", "HREQ", {
+      path: "/space-weather/k-index/latest",
+    }),
+  ]);
+  const downloadResult = await downloadRuntime.drain();
+
+  assert.equal(downloadResult.idle, true);
+  assert.equal(downloadSinkOutputs.length, 1);
+  assert.equal(downloadSinkOutputs[0].nodeId, "serve-archive");
+  assert.deepEqual(JSON.parse(downloadSinkOutputs[0].frame.payload), {
+    records: [
+      {
+        timeTag: "2026-03-24T00:00:00Z",
+        kp: 4.67,
+        source: "noaa-swpc",
+        product: "planetary-k-index",
+      },
+      {
+        timeTag: "2026-03-24T03:00:00Z",
+        kp: 6.33,
+        source: "noaa-swpc",
+        product: "planetary-k-index",
+      },
+    ],
+  });
+});
+
 test("ISS proximity OEM example summarizes external requirements for the visual editor", async () => {
   const flow = await readJson("../examples/flows/iss-proximity-oem/flow.json");
   const manifests = await Promise.all([

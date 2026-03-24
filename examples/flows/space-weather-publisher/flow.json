@@ -1,0 +1,324 @@
+{
+  "programId": "com.digitalarsenal.examples.space-weather-publisher",
+  "name": "Space Weather Publisher",
+  "version": "0.1.0",
+  "description": "Polls NOAA SWPC space-weather data on a schedule, archives the records to disk, emits SDS PNM notifications, and serves both archive downloads and FlatSQL REST queries.",
+  "runtimeTargets": [
+    "wasmedge"
+  ],
+  "nodes": [
+    {
+      "nodeId": "fetch-space-weather",
+      "pluginId": "com.digitalarsenal.flow.http-fetcher",
+      "methodId": "fetch_records",
+      "kind": "ingest",
+      "drainPolicy": "drain-until-yield"
+    },
+    {
+      "nodeId": "store-space-weather",
+      "pluginId": "com.digitalarsenal.flatsql.store",
+      "methodId": "upsert_records",
+      "kind": "storage",
+      "drainPolicy": "drain-until-yield"
+    },
+    {
+      "nodeId": "archive-space-weather",
+      "pluginId": "com.digitalarsenal.flow.filesystem-writer",
+      "methodId": "write_records",
+      "kind": "sink",
+      "drainPolicy": "drain-until-yield"
+    },
+    {
+      "nodeId": "notify-space-weather",
+      "pluginId": "com.digitalarsenal.flow.pnm-notifier",
+      "methodId": "send_notification",
+      "kind": "publisher",
+      "drainPolicy": "drain-until-yield"
+    },
+    {
+      "nodeId": "build-query",
+      "pluginId": "com.digitalarsenal.flow.sql-http-bridge",
+      "methodId": "build_sql_query_from_http_request",
+      "kind": "bridge",
+      "drainPolicy": "drain-until-yield"
+    },
+    {
+      "nodeId": "query-space-weather",
+      "pluginId": "com.digitalarsenal.flatsql.store",
+      "methodId": "query_sql",
+      "kind": "query",
+      "drainPolicy": "drain-until-yield"
+    },
+    {
+      "nodeId": "respond-query",
+      "pluginId": "com.digitalarsenal.flow.sql-http-bridge",
+      "methodId": "build_http_response_from_rows",
+      "kind": "responder",
+      "drainPolicy": "drain-until-yield"
+    },
+    {
+      "nodeId": "serve-archive",
+      "pluginId": "com.digitalarsenal.flow.https-file-server",
+      "methodId": "serve_http_request",
+      "kind": "responder",
+      "drainPolicy": "drain-until-yield"
+    }
+  ],
+  "edges": [
+    {
+      "edgeId": "fetch-to-store",
+      "fromNodeId": "fetch-space-weather",
+      "fromPortId": "records",
+      "toNodeId": "store-space-weather",
+      "toPortId": "records",
+      "backpressurePolicy": "queue",
+      "queueDepth": 256
+    },
+    {
+      "edgeId": "fetch-to-archive",
+      "fromNodeId": "fetch-space-weather",
+      "fromPortId": "records",
+      "toNodeId": "archive-space-weather",
+      "toPortId": "records",
+      "backpressurePolicy": "queue",
+      "queueDepth": 128
+    },
+    {
+      "edgeId": "store-to-pnm",
+      "fromNodeId": "store-space-weather",
+      "fromPortId": "stored",
+      "toNodeId": "notify-space-weather",
+      "toPortId": "message",
+      "backpressurePolicy": "queue",
+      "queueDepth": 64
+    },
+    {
+      "edgeId": "query-request-to-store",
+      "fromNodeId": "build-query",
+      "fromPortId": "query",
+      "toNodeId": "query-space-weather",
+      "toPortId": "query",
+      "backpressurePolicy": "queue",
+      "queueDepth": 64
+    },
+    {
+      "edgeId": "query-result-to-response",
+      "fromNodeId": "query-space-weather",
+      "fromPortId": "rows",
+      "toNodeId": "respond-query",
+      "toPortId": "rows",
+      "backpressurePolicy": "queue",
+      "queueDepth": 64
+    }
+  ],
+  "triggers": [
+    {
+      "triggerId": "sync-space-weather",
+      "kind": "timer",
+      "source": "sync-space-weather",
+      "defaultIntervalMs": 900000,
+      "acceptedTypes": [
+        {
+          "schemaName": "TimerTick.fbs",
+          "fileIdentifier": "TICK"
+        }
+      ],
+      "description": "Refreshes NOAA SWPC planetary K-index data every fifteen minutes."
+    },
+    {
+      "triggerId": "query-http",
+      "kind": "http-request",
+      "source": "/space-weather/k-index/query",
+      "acceptedTypes": [
+        {
+          "schemaName": "HttpRequest.fbs",
+          "fileIdentifier": "HREQ"
+        }
+      ],
+      "description": "Serves REST queries over stored space-weather records."
+    },
+    {
+      "triggerId": "download-http",
+      "kind": "http-request",
+      "source": "/space-weather/k-index/latest",
+      "acceptedTypes": [
+        {
+          "schemaName": "HttpRequest.fbs",
+          "fileIdentifier": "HREQ"
+        }
+      ],
+      "description": "Serves the latest archived aligned-binary weather snapshot over HTTPS."
+    }
+  ],
+  "triggerBindings": [
+    {
+      "triggerId": "sync-space-weather",
+      "targetNodeId": "fetch-space-weather",
+      "targetPortId": "trigger",
+      "backpressurePolicy": "latest",
+      "queueDepth": 1
+    },
+    {
+      "triggerId": "query-http",
+      "targetNodeId": "build-query",
+      "targetPortId": "request",
+      "backpressurePolicy": "queue",
+      "queueDepth": 32
+    },
+    {
+      "triggerId": "download-http",
+      "targetNodeId": "serve-archive",
+      "targetPortId": "request",
+      "backpressurePolicy": "queue",
+      "queueDepth": 32
+    }
+  ],
+  "requiredPlugins": [
+    "com.digitalarsenal.flow.http-fetcher",
+    "com.digitalarsenal.flatsql.store",
+    "com.digitalarsenal.flow.filesystem-writer",
+    "com.digitalarsenal.flow.pnm-notifier",
+    "com.digitalarsenal.flow.sql-http-bridge",
+    "com.digitalarsenal.flow.https-file-server"
+  ],
+  "externalInterfaces": [
+    {
+      "interfaceId": "noaa-space-weather-http",
+      "kind": "http",
+      "direction": "output",
+      "capability": "http",
+      "resource": "https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json",
+      "description": "Pulls the NOAA SWPC planetary K-index feed.",
+      "properties": {
+        "nodeId": "fetch-space-weather",
+        "methods": ["GET"]
+      }
+    },
+    {
+      "interfaceId": "space-weather-archive-dir",
+      "kind": "filesystem",
+      "direction": "bidirectional",
+      "capability": "filesystem",
+      "resource": "file:///var/lib/sdn/space-weather/k-index",
+      "description": "Shared archive directory written by the filesystem sink and served back through HTTPS."
+    },
+    {
+      "interfaceId": "flatsql-storage-adapter",
+      "kind": "host-service",
+      "direction": "bidirectional",
+      "capability": "storage_adapter",
+      "resource": "storage-adapter://flatsql",
+      "description": "Selects the host-backed FlatSQL adapter for persistent storage."
+    },
+    {
+      "interfaceId": "space-weather-database",
+      "kind": "database",
+      "direction": "bidirectional",
+      "capability": "storage_query",
+      "resource": "file:///var/lib/sdn/flatsql/space-weather.db",
+      "description": "Persistent FlatSQL backing store for synchronized space-weather records."
+    },
+    {
+      "interfaceId": "space-weather-query-http",
+      "kind": "http",
+      "direction": "input",
+      "capability": "http",
+      "resource": "/space-weather/k-index/query",
+      "path": "/space-weather/k-index/query",
+      "description": "REST query endpoint over the stored space-weather data."
+    },
+    {
+      "interfaceId": "space-weather-download-http",
+      "kind": "http",
+      "direction": "input",
+      "capability": "http",
+      "resource": "/space-weather/k-index/latest",
+      "path": "/space-weather/k-index/latest",
+      "description": "HTTPS endpoint that returns the latest archived aligned-binary weather snapshot."
+    },
+    {
+      "interfaceId": "pnm-protocol",
+      "kind": "protocol",
+      "direction": "output",
+      "capability": "protocol_dial",
+      "resource": "/sds/pnm/1.0.0",
+      "protocolId": "/sds/pnm/1.0.0",
+      "description": "Notifies peer SDN nodes after each synchronized weather refresh."
+    }
+  ],
+  "artifactDependencies": [
+    {
+      "dependencyId": "http-fetcher-signed",
+      "pluginId": "com.digitalarsenal.flow.http-fetcher",
+      "version": "1.0.0",
+      "artifactUri": "signed://plugins/http-fetcher/1.0.0",
+      "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "signature": "ed25519:demo-http-fetcher-signature",
+      "signerPublicKey": "ed25519:demo-signer-1",
+      "requiredCapabilities": [
+        "http"
+      ]
+    },
+    {
+      "dependencyId": "flatsql-store-signed",
+      "pluginId": "com.digitalarsenal.flatsql.store",
+      "version": "1.1.0",
+      "artifactUri": "signed://plugins/flatsql-store/1.1.0",
+      "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "signature": "ed25519:demo-flatsql-signature",
+      "signerPublicKey": "ed25519:demo-signer-1",
+      "requiredCapabilities": [
+        "storage_query",
+        "storage_write",
+        "storage_adapter"
+      ]
+    },
+    {
+      "dependencyId": "filesystem-writer-signed",
+      "pluginId": "com.digitalarsenal.flow.filesystem-writer",
+      "version": "1.0.0",
+      "artifactUri": "signed://plugins/filesystem-writer/1.0.0",
+      "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "signature": "ed25519:demo-filesystem-writer-signature",
+      "signerPublicKey": "ed25519:demo-signer-1",
+      "requiredCapabilities": [
+        "filesystem"
+      ]
+    },
+    {
+      "dependencyId": "pnm-notifier-signed",
+      "pluginId": "com.digitalarsenal.flow.pnm-notifier",
+      "version": "1.0.0",
+      "artifactUri": "signed://plugins/pnm-notifier/1.0.0",
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "signature": "ed25519:demo-pnm-notifier-signature",
+      "signerPublicKey": "ed25519:demo-signer-1",
+      "requiredCapabilities": [
+        "protocol_dial"
+      ]
+    },
+    {
+      "dependencyId": "sql-http-bridge-signed",
+      "pluginId": "com.digitalarsenal.flow.sql-http-bridge",
+      "version": "1.0.0",
+      "artifactUri": "signed://plugins/sql-http-bridge/1.0.0",
+      "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "signature": "ed25519:demo-sql-http-bridge-signature",
+      "signerPublicKey": "ed25519:demo-signer-1",
+      "requiredCapabilities": []
+    },
+    {
+      "dependencyId": "https-file-server-signed",
+      "pluginId": "com.digitalarsenal.flow.https-file-server",
+      "version": "1.0.0",
+      "artifactUri": "signed://plugins/https-file-server/1.0.0",
+      "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+      "signature": "ed25519:demo-https-file-server-signature",
+      "signerPublicKey": "ed25519:demo-signer-1",
+      "requiredCapabilities": [
+        "http",
+        "filesystem"
+      ]
+    }
+  ]
+}

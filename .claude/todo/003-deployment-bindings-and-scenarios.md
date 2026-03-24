@@ -44,10 +44,10 @@ Status: active
    - [ ] Pull the data and apply user-configured pin/retention policy.
 
 3. Scheduled space weather publisher
-   - [ ] Poll an upstream site on a schedule.
-   - [ ] Publish space-weather records plus a PNM.
-   - [ ] Keep pullable FlatBuffer data on disk.
-   - [ ] Expose the same data through FlatSQL REST queries.
+   - [x] Poll an upstream site on a schedule.
+   - [x] Publish space-weather records plus a PNM.
+   - [x] Keep pullable FlatBuffer data on disk.
+   - [x] Expose the same data through FlatSQL REST queries.
 
 4. Authenticated REST and IPFS services
    - [ ] Reject requests from unapproved keys.
