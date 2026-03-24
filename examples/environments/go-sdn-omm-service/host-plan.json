@@ -28,6 +28,21 @@
           "description": "HTTPS listener for downloading the latest synchronized catalog."
         },
         {
+          "bindingId": "ipfs-publish",
+          "direction": "dial",
+          "transport": "same-app",
+          "url": "ipfs://publish-and-pin",
+          "required": true,
+          "description": "Outbound IPFS publish-and-pin host service backed by the official Kubo Go RPC client.",
+          "implementation": {
+            "kind": "rpc-client",
+            "clientPackage": "github.com/ipfs/kubo/client/rpc",
+            "constructor": "rpc.NewURLApiWithClient",
+            "apiBaseUrl": "http://127.0.0.1:5001/api/v0",
+            "operations": ["put", "pin"]
+          }
+        },
+        {
           "bindingId": "pnm-outbound",
           "direction": "dial",
           "transport": "sdn-protocol",

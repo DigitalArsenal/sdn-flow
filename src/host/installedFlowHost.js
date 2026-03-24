@@ -1320,6 +1320,7 @@ function createHostedBindingsForDirection({
   audience = null,
   description = null,
   required = true,
+  implementation = null,
 } = {}) {
   return {
     bindingId: `${bindingIdPrefix}:${direction}`,
@@ -1330,7 +1331,70 @@ function createHostedBindingsForDirection({
     url,
     required,
     description,
+    ...(implementation ? { implementation } : {}),
   };
+}
+
+function resolveHostedBindingImplementation(
+  externalInterface = {},
+  { engine } = {},
+) {
+  if (externalInterface.kind !== ExternalInterfaceKind.HOST_SERVICE) {
+    return null;
+  }
+
+  const resource = normalizeString(externalInterface.resource, null);
+  const capability = normalizeString(externalInterface.capability, null);
+  const properties = isObject(externalInterface.properties)
+    ? externalInterface.properties
+    : {};
+  const explicitImplementation = isObject(properties.implementation)
+    ? { ...properties.implementation }
+    : {};
+  const apiBaseUrl =
+    normalizeString(explicitImplementation.apiBaseUrl, null) ??
+    normalizeString(properties.apiBaseUrl, null);
+  const operations = toSortedUniqueStrings(
+    explicitImplementation.operations ?? properties.operations,
+  );
+  const isIpfsBinding =
+    capability === "ipfs" ||
+    normalizeString(explicitImplementation.clientPackage, null) !== null ||
+    (resource?.startsWith("ipfs://") ?? false);
+
+  if (!isIpfsBinding) {
+    return Object.keys(explicitImplementation).length > 0
+      ? explicitImplementation
+      : null;
+  }
+
+  const clientPackage =
+    normalizeString(explicitImplementation.clientPackage, null) ??
+    "github.com/ipfs/kubo/client/rpc";
+  const constructor =
+    normalizeString(explicitImplementation.constructor, null) ??
+    (apiBaseUrl ? "rpc.NewURLApiWithClient" : "rpc.NewLocalApi");
+  const implementation = {
+    kind: normalizeString(explicitImplementation.kind, null) ?? "rpc-client",
+    clientPackage,
+    constructor,
+  };
+
+  if (apiBaseUrl) {
+    implementation.apiBaseUrl = apiBaseUrl;
+  }
+  if (operations.length > 0) {
+    implementation.operations = operations;
+  }
+  if (
+    engine === HostedRuntimeEngine.GO ||
+    normalizeString(explicitImplementation.notes, null)
+  ) {
+    implementation.notes =
+      normalizeString(explicitImplementation.notes, null) ??
+      "Back this IPFS host service with the official Kubo Go RPC client.";
+  }
+  return implementation;
 }
 
 function createHostedBindingsForExternalInterface(
@@ -1359,6 +1423,9 @@ function createHostedBindingsForExternalInterface(
     normalizeString(externalInterface.interfaceId, null) ??
     `${runtimeId}:${externalInterface.kind}`;
   const required = externalInterface.required !== false;
+  const implementation = resolveHostedBindingImplementation(externalInterface, {
+    engine,
+  });
 
   switch (externalInterface.kind) {
     case ExternalInterfaceKind.TIMER:
@@ -1381,6 +1448,7 @@ function createHostedBindingsForExternalInterface(
             noun: "scheduler binding",
           }),
           required,
+          implementation,
         }),
       ];
     }
@@ -1429,6 +1497,7 @@ function createHostedBindingsForExternalInterface(
                 : "HTTP outbound binding",
           }),
           required,
+          implementation,
         }),
       );
     }
@@ -1479,6 +1548,7 @@ function createHostedBindingsForExternalInterface(
                   : "protocol dial binding",
             }),
             required,
+            implementation,
           }),
         );
       }
@@ -1506,6 +1576,7 @@ function createHostedBindingsForExternalInterface(
             noun: `${externalInterface.kind} binding`,
           }),
           required,
+          implementation,
         }),
       );
     }
@@ -1531,6 +1602,7 @@ function createHostedBindingsForExternalInterface(
             noun: `${externalInterface.kind} binding`,
           }),
           required,
+          implementation,
         }),
       );
     }

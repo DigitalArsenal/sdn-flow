@@ -126,6 +126,9 @@ export function normalizeHostedBinding(binding = {}) {
       .join(":");
 
   const normalizedSecurity = normalizeHostedBindingSecurity(binding);
+  const normalizedImplementation = isPlainObject(binding.implementation)
+    ? cloneJsonCompatibleValue(binding.implementation)
+    : null;
 
   return {
     bindingId: bindingId || `${direction}:${transport}`,
@@ -145,6 +148,9 @@ export function normalizeHostedBinding(binding = {}) {
     required: normalizeBoolean(binding.required, true),
     description: normalizeString(binding.description, null),
     ...(normalizedSecurity ? { security: normalizedSecurity } : {}),
+    ...(normalizedImplementation
+      ? { implementation: normalizedImplementation }
+      : {}),
   };
 }
 

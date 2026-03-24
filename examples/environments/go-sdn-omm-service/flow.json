@@ -211,7 +211,16 @@
       "direction": "output",
       "capability": "ipfs",
       "resource": "ipfs://publish-and-pin",
-      "description": "Publishes synchronized artifacts to IPFS and requests pinning."
+      "description": "Publishes synchronized artifacts to IPFS and requests pinning.",
+      "properties": {
+        "operations": ["put", "pin"],
+        "implementation": {
+          "kind": "rpc-client",
+          "clientPackage": "github.com/ipfs/kubo/client/rpc",
+          "constructor": "rpc.NewURLApiWithClient",
+          "apiBaseUrl": "http://127.0.0.1:5001/api/v0"
+        }
+      }
     },
     {
       "interfaceId": "pnm-protocol",

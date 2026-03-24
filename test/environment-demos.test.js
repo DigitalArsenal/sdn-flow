@@ -121,7 +121,9 @@ test("go demo declares HTTP, FlatSQL, IPFS, and SDS protocol requirements", asyn
       summary,
       (item) =>
         item.kind === "host-service" &&
-        item.resource === "ipfs://publish-and-pin",
+        item.resource === "ipfs://publish-and-pin" &&
+        item.properties?.implementation?.clientPackage ===
+          "github.com/ipfs/kubo/client/rpc",
     ),
     true,
   );
@@ -200,7 +202,20 @@ test("environment host plans summarize the intended host adapters and bindings",
   assert.equal(jsSummary.transports.includes("http"), true);
   assert.equal(goSummary.engine, "go");
   assert.equal(goSummary.transports.includes("http"), true);
+  assert.equal(goSummary.transports.includes("same-app"), true);
   assert.equal(goSummary.transports.includes("sdn-protocol"), true);
+  assert.equal(
+    goSummary.bindings.some(
+      (binding) =>
+        binding.bindingId === "ipfs-publish" &&
+        binding.transport === "same-app" &&
+        binding.url === "ipfs://publish-and-pin" &&
+        binding.implementation?.clientPackage ===
+          "github.com/ipfs/kubo/client/rpc" &&
+        binding.implementation?.apiBaseUrl === "http://127.0.0.1:5001/api/v0",
+    ),
+    true,
+  );
   assert.equal(wasmedgeSummary.adapter, "host-internal");
   assert.equal(wasmedgeSummary.engine, "wasi");
   assert.equal(wasmedgeSummary.transports.includes("direct"), true);

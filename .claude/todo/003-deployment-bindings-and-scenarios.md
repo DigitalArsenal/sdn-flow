@@ -25,6 +25,8 @@ Status: active
 
 - [ ] Enforce approved-key trust mappings uniformly at request time.
 - [ ] Use `hd-wasm-wallet` trust material for REST and IPFS/protocol services.
+- [x] Model Go-hosted IPFS bindings against the official Kubo RPC client instead
+      of the SDN proxy path.
 - [x] Keep hosted protocol identity in the manifest and concrete routing in the
       deployment plan.
 - [x] Apply regular FlatBuffer versus aligned-binary negotiation consistently

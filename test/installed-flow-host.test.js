@@ -600,6 +600,54 @@ test("installed flow hosted runtime plans derive explicit delegated scheduler, H
   );
 });
 
+test("installed flow hosted runtime plans describe Go IPFS host services with official Kubo RPC metadata", () => {
+  const plan = createInstalledFlowHostedRuntimePlan({
+    engine: HostedRuntimeEngine.GO,
+    hostKind: "go-sdn",
+    adapter: HostedRuntimeAdapter.GO_SDN,
+    program: {
+      programId: "com.digitalarsenal.examples.go-ipfs-binding-plan",
+      nodes: [],
+      edges: [],
+      triggers: [],
+      triggerBindings: [],
+      requiredPlugins: [],
+      externalInterfaces: [
+        {
+          interfaceId: "ipfs-publish",
+          kind: "host-service",
+          direction: "output",
+          capability: "ipfs",
+          resource: "ipfs://publish-and-pin",
+          description: "Publishes synchronized artifacts to IPFS and requests pinning.",
+          properties: {
+            operations: ["pin", "put"],
+            implementation: {
+              apiBaseUrl: "http://127.0.0.1:5001/api/v0",
+            },
+          },
+        },
+      ],
+    },
+  });
+  const summary = summarizeHostedRuntimePlan(plan);
+  const binding = summary.bindings.find(
+    (item) => item.bindingId === "ipfs-publish:dial",
+  );
+
+  assert.ok(binding);
+  assert.equal(binding.transport, "same-app");
+  assert.equal(binding.url, "ipfs://publish-and-pin");
+  assert.deepEqual(binding.implementation, {
+    kind: "rpc-client",
+    clientPackage: "github.com/ipfs/kubo/client/rpc",
+    constructor: "rpc.NewURLApiWithClient",
+    apiBaseUrl: "http://127.0.0.1:5001/api/v0",
+    operations: ["pin", "put"],
+    notes: "Back this IPFS host service with the official Kubo Go RPC client.",
+  });
+});
+
 test("installed flow service auto-starts timer triggers with positive intervals", async () => {
   const scheduledIntervals = [];
   const clearedHandles = [];
