@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
 
 import {
   bindCompiledFlowRuntimeHost,
@@ -12,6 +13,11 @@ import {
   handlers as basicPropagatorHandlers,
   manifest as basicPropagatorManifest,
 } from "../examples/plugins/basic-propagator/plugin.js";
+
+async function readJson(relativePath) {
+  const url = new URL(relativePath, import.meta.url);
+  return JSON.parse(await fs.readFile(url, "utf8"));
+}
 
 function createTestFrame(payload, overrides = {}) {
   return {
@@ -31,6 +37,31 @@ function createTestFrame(payload, overrides = {}) {
     sequence: overrides.sequence ?? 1,
     payload,
   };
+}
+
+function createNoopPluginPackage(manifest) {
+  const handlers = {};
+  for (const method of manifest.methods ?? []) {
+    if (!method?.methodId) {
+      continue;
+    }
+    handlers[method.methodId] = () => ({
+      outputs: [],
+      backlogRemaining: 0,
+      yielded: false,
+    });
+  }
+  return {
+    manifest,
+    handlers,
+  };
+}
+
+function stripArtifactDependencies(manifest) {
+  const clone = JSON.parse(JSON.stringify(manifest));
+  delete clone.artifactDependencies;
+  delete clone.artifact_dependencies;
+  return clone;
 }
 
 function buildStandaloneWorkspace() {
@@ -181,11 +212,151 @@ function buildBrowserWorkspace() {
   };
 }
 
+async function buildWasmedgeServerWorkspace() {
+  const flow = stripArtifactDependencies(
+    await readJson(
+    "../examples/flows/csv-omm-query-service/flow.json",
+    ),
+  );
+  const [httpFetcherManifest, flatsqlStoreManifest, sqlHttpBridgeManifest] =
+    await Promise.all([
+      readJson("../examples/plugins/http-fetcher/manifest.json"),
+      readJson("../examples/plugins/flatsql-store/manifest.json"),
+      readJson("../examples/plugins/sql-http-bridge/manifest.json"),
+    ]);
+
+  return {
+    workspaceId: "parity-wasmedge-server",
+    program: flow,
+    deploymentPlan: {
+      pluginId: flow.programId,
+      version: flow.version,
+      scheduleBindings: [],
+      serviceBindings: [],
+      inputBindings: [
+        {
+          bindingId: "query-http-binding",
+          interfaceId: "query-http",
+          targetPluginId: "com.digitalarsenal.flow.sql-http-bridge",
+          targetMethodId: "build_sql_query_from_http_request",
+          targetInputPortId: "request",
+          sourceKind: "catalog-sync",
+          description: "Local HTTP query ingress for the WasmEdge server profile.",
+        },
+      ],
+      publicationBindings: [],
+      authPolicies: [],
+      protocolInstallations: [],
+    },
+    hostPlan: {
+      hostId: "wasmedge-server-host",
+      hostKind: "wasmedge",
+      adapter: "host-internal",
+      engine: "wasi",
+      runtimes: [
+        {
+          runtimeId: "wasmedge-server",
+          kind: "flow",
+          programId: flow.programId,
+          startupPhase: "session",
+          autoStart: true,
+          execution: "compiled-wasm",
+          authority: "local",
+          adapter: "host-internal",
+          requiredCapabilities: ["http", "storage_query"],
+          runtimeTargets: ["wasmedge"],
+          bindings: [
+            {
+              bindingId: "query-http-listener",
+              direction: "listen",
+              transport: "http",
+              url: "http://127.0.0.1:4171/catalog/omm/query",
+            },
+          ],
+        },
+      ],
+    },
+    pluginPackages: [
+      createNoopPluginPackage(stripArtifactDependencies(httpFetcherManifest)),
+      createNoopPluginPackage(stripArtifactDependencies(flatsqlStoreManifest)),
+      createNoopPluginPackage(stripArtifactDependencies(sqlHttpBridgeManifest)),
+    ],
+  };
+}
+
+async function buildWasmedgeUdpWorkspace() {
+  const flow = stripArtifactDependencies(
+    await readJson(
+    "../examples/environments/wasmedge-udp-spooler/flow.json",
+    ),
+  );
+  const udpSpoolerManifest = await readJson(
+    "../examples/plugins/udp-spooler/manifest.json",
+  );
+
+  return {
+    workspaceId: "parity-wasmedge-udp",
+    program: flow,
+    deploymentPlan: {
+      pluginId: flow.programId,
+      version: flow.version,
+      scheduleBindings: [],
+      serviceBindings: [],
+      inputBindings: [
+        {
+          bindingId: "udp-packet-ready-binding",
+          interfaceId: "udp-socket",
+          targetPluginId: "com.digitalarsenal.flow.udp-spooler",
+          targetMethodId: "spool_packets",
+          targetInputPortId: "packet",
+          sourceKind: "catalog-sync",
+          description: "Local UDP ingress for the WasmEdge guest-network profile.",
+        },
+      ],
+      publicationBindings: [],
+      authPolicies: [],
+      protocolInstallations: [],
+    },
+    hostPlan: {
+      hostId: "wasmedge-udp-host",
+      hostKind: "wasmedge",
+      adapter: "host-internal",
+      engine: "wasi",
+      runtimes: [
+        {
+          runtimeId: "wasmedge-udp",
+          kind: "flow",
+          programId: flow.programId,
+          startupPhase: "session",
+          autoStart: true,
+          execution: "compiled-wasm",
+          authority: "local",
+          adapter: "host-internal",
+          requiredCapabilities: ["network", "filesystem"],
+          runtimeTargets: ["wasmedge"],
+          bindings: [
+            {
+              bindingId: "udp-ingest-direct",
+              direction: "listen",
+              transport: "direct",
+              url: "udp://0.0.0.0:40123",
+            },
+          ],
+        },
+      ],
+    },
+    pluginPackages: [
+      createNoopPluginPackage(stripArtifactDependencies(udpSpoolerManifest)),
+    ],
+  };
+}
+
 async function compileWorkspace(workspace) {
   const host = createInstalledFlowHost({
     allowLiveProgramCompilation: true,
     program: workspace.program,
     hostPlan: workspace.hostPlan,
+    deploymentPlan: workspace.deploymentPlan,
     pluginPackages: workspace.pluginPackages,
     discover: false,
   });
@@ -196,6 +367,58 @@ async function compileWorkspace(workspace) {
     serializedArtifact: serializeCompiledArtifact(host.getArtifact()),
   };
 }
+
+test("wasmedge server example reuses compiled artifacts on a WasmEdge host plan", async () => {
+  const workspace = await compileWorkspace(
+    await buildWasmedgeServerWorkspace(),
+  );
+  const host = createInstalledFlowHost({
+    program: workspace.program,
+    serializedArtifact: workspace.serializedArtifact,
+    deploymentPlan: workspace.deploymentPlan,
+    hostPlan: workspace.hostPlan,
+    pluginPackages: workspace.pluginPackages,
+    discover: false,
+  });
+
+  const startup = await host.start();
+  const deploymentPlan = host.getDeploymentPlan();
+
+  assert.equal(startup.started, true);
+  assert.equal(startup.programId, workspace.program.programId);
+  assert.deepEqual(startup.runtimeTargets, ["wasmedge"]);
+  assert.deepEqual(
+    deploymentPlan.inputBindings.map(
+      (binding) => binding.bindingId,
+    ),
+    ["query-http-binding"],
+  );
+});
+
+test("wasmedge guest-network example reuses compiled artifacts on a WasmEdge host plan", async () => {
+  const workspace = await compileWorkspace(await buildWasmedgeUdpWorkspace());
+  const host = createInstalledFlowHost({
+    program: workspace.program,
+    serializedArtifact: workspace.serializedArtifact,
+    deploymentPlan: workspace.deploymentPlan,
+    hostPlan: workspace.hostPlan,
+    pluginPackages: workspace.pluginPackages,
+    discover: false,
+  });
+
+  const startup = await host.start();
+  const deploymentPlan = host.getDeploymentPlan();
+
+  assert.equal(startup.started, true);
+  assert.equal(startup.programId, workspace.program.programId);
+  assert.deepEqual(startup.runtimeTargets, ["wasmedge"]);
+  assert.deepEqual(
+    deploymentPlan.inputBindings.map(
+      (binding) => binding.bindingId,
+    ),
+    ["udp-packet-ready-binding"],
+  );
+});
 
 test("compiled artifacts stay compatible across standalone and runtime-host profiles", async () => {
   const workspace = await compileWorkspace(buildStandaloneWorkspace());
