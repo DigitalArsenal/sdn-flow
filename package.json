@@ -62,7 +62,7 @@
   },
   "dependencies": {
     "hd-wallet-wasm": "^2.0.1",
-    "space-data-module-sdk": "0.2.8"
+    "space-data-module-sdk": "0.2.9"
   },
   "devDependencies": {
     "@node-red/editor-client": "^4.1.7",

@@ -748,6 +748,178 @@ function resolveInstalledFlowDeploymentPlan(program, options = {}) {
   });
 }
 
+function buildSyntheticInputBindingTriggerId(bindingId) {
+  return `__sdn_input_binding__:${bindingId}`;
+}
+
+function resolveMethodInputPorts(registry, node) {
+  if (!registry || !node) {
+    return [];
+  }
+  const methodDescriptor = registry.getMethod(node.pluginId, node.methodId);
+  return Array.isArray(methodDescriptor?.method?.inputPorts)
+    ? methodDescriptor.method.inputPorts
+    : [];
+}
+
+function listAllowedTypesForPort(port = {}) {
+  const typeRefs = [];
+  const seen = new Set();
+  for (const typeSet of Array.isArray(port?.acceptedTypeSets)
+    ? port.acceptedTypeSets
+    : []) {
+    for (const allowedType of Array.isArray(typeSet?.allowedTypes)
+      ? typeSet.allowedTypes
+      : []) {
+      const clonedTypeRef = cloneJsonCompatibleValue(allowedType) ?? {};
+      const key = JSON.stringify(clonedTypeRef);
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      typeRefs.push(clonedTypeRef);
+    }
+  }
+  return typeRefs;
+}
+
+function listProgramNodesMatchingInputBinding(program, binding) {
+  const targetMethodId = normalizeString(binding?.targetMethodId, null);
+  const targetPluginId = normalizeString(binding?.targetPluginId, null);
+  if (!targetMethodId) {
+    return [];
+  }
+  return (program?.nodes ?? []).filter((node) => {
+    if (node.methodId !== targetMethodId) {
+      return false;
+    }
+    if (targetPluginId && node.pluginId !== targetPluginId) {
+      return false;
+    }
+    return true;
+  });
+}
+
+function prepareProgramInputBindingRoutes({
+  program,
+  deploymentPlan,
+  registry,
+} = {}) {
+  const normalizedProgram = normalizeProgram(program ?? {});
+  const inputBindings = Array.isArray(deploymentPlan?.inputBindings)
+    ? deploymentPlan.inputBindings
+    : [];
+  if (inputBindings.length === 0) {
+    return {
+      compiledProgram: normalizedProgram,
+      inputBindingRoutes: [],
+    };
+  }
+
+  const existingTriggerIds = new Set(
+    (normalizedProgram.triggers ?? [])
+      .map((trigger) => normalizeString(trigger?.triggerId, null))
+      .filter(Boolean),
+  );
+  const syntheticTriggers = [];
+  const syntheticTriggerBindings = [];
+  const inputBindingRoutes = [];
+
+  for (const binding of inputBindings) {
+    const bindingId = normalizeString(binding?.bindingId, null);
+    if (!bindingId) {
+      continue;
+    }
+    const triggerId = buildSyntheticInputBindingTriggerId(bindingId);
+    if (existingTriggerIds.has(triggerId)) {
+      throw new Error(
+        `Installed flow host cannot synthesize input binding "${bindingId}" because trigger id "${triggerId}" already exists.`,
+      );
+    }
+    existingTriggerIds.add(triggerId);
+
+    const targetInputPortId = normalizeString(binding?.targetInputPortId, null);
+    const matchingNodes = listProgramNodesMatchingInputBinding(
+      normalizedProgram,
+      binding,
+    );
+    const targetNodes = matchingNodes.map((node) => {
+      const inputPorts = resolveMethodInputPorts(registry, node);
+      const inputPort =
+        inputPorts.find((port) => port?.portId === targetInputPortId) ?? null;
+      return {
+        nodeId: node.nodeId,
+        pluginId: node.pluginId,
+        methodId: node.methodId,
+        targetInputPortId,
+        inputPortFound: inputPort !== null,
+        acceptedTypes: inputPort ? listAllowedTypesForPort(inputPort) : [],
+      };
+    });
+    const acceptedTypes = [];
+    const acceptedTypeKeys = new Set();
+    for (const targetNode of targetNodes) {
+      for (const acceptedType of targetNode.acceptedTypes) {
+        const key = JSON.stringify(acceptedType);
+        if (acceptedTypeKeys.has(key)) {
+          continue;
+        }
+        acceptedTypeKeys.add(key);
+        acceptedTypes.push(cloneJsonCompatibleValue(acceptedType) ?? {});
+      }
+    }
+
+    syntheticTriggers.push({
+      triggerId,
+      kind: TriggerKind.MANUAL,
+      source: bindingId,
+      acceptedTypes,
+      description:
+        normalizeString(binding?.description, null) ??
+        `Deployment input binding ${bindingId}.`,
+      metadata: {
+        synthetic: true,
+        inputBindingId: bindingId,
+        sourceKind: normalizeString(binding?.sourceKind, null),
+      },
+    });
+    for (const targetNode of targetNodes) {
+      if (!targetNode.inputPortFound || !targetNode.targetInputPortId) {
+        continue;
+      }
+      syntheticTriggerBindings.push({
+        triggerId,
+        targetNodeId: targetNode.nodeId,
+        targetPortId: targetNode.targetInputPortId,
+      });
+    }
+
+    inputBindingRoutes.push({
+      bindingId,
+      triggerId,
+      sourceKind: normalizeString(binding?.sourceKind, null),
+      targetMethodId: normalizeString(binding?.targetMethodId, null),
+      targetPluginId: normalizeString(binding?.targetPluginId, null),
+      targetInputPortId,
+      description: normalizeString(binding?.description, null),
+      acceptedTypes,
+      targetNodes,
+    });
+  }
+
+  return {
+    compiledProgram: normalizeProgram({
+      ...normalizedProgram,
+      triggers: [...normalizedProgram.triggers, ...syntheticTriggers],
+      triggerBindings: [
+        ...normalizedProgram.triggerBindings,
+        ...syntheticTriggerBindings,
+      ],
+    }),
+    inputBindingRoutes,
+  };
+}
+
 function resolveHostProfiles(hostPlan, programId) {
   if (!hostPlan) {
     return [];
@@ -1498,6 +1670,9 @@ export function createInstalledFlowHost(options = {}) {
     getProgram() {
       return runtimeState?.program ?? program ?? null;
     },
+    getCompiledProgram() {
+      return runtimeState?.compiledProgram ?? null;
+    },
     getArtifact() {
       return runtimeState?.artifact ?? null;
     },
@@ -1684,11 +1859,24 @@ export function createInstalledFlowHost(options = {}) {
             refreshOptions.deploymentPlan ?? options.deploymentPlan ?? null,
         })
       : null;
+    const {
+      compiledProgram: nextCompiledProgram,
+      inputBindingRoutes,
+    } = nextProgram
+      ? prepareProgramInputBindingRoutes({
+          program: nextProgram,
+          deploymentPlan: nextDeploymentPlan,
+          registry: validationRegistry,
+        })
+      : {
+          compiledProgram: null,
+          inputBindingRoutes: [],
+        };
 
     let nextRuntimeState = null;
     if (nextProgram) {
       const nextArtifact = await compileInstalledFlowArtifact({
-        program: nextProgram,
+        program: nextCompiledProgram,
         manifests: nextLoadedPackages.map((loaded) => loaded.manifest),
         registry: validationRegistry,
         artifactOptions: {
@@ -1729,15 +1917,17 @@ export function createInstalledFlowHost(options = {}) {
 
       nextRuntimeState = {
         program: nextProgram,
+        compiledProgram: nextCompiledProgram,
         artifact: nextArtifact,
         deploymentPlan: nextDeploymentPlan,
+        inputBindingRoutes,
         registry: validationRegistry,
         triggerBindings: groupBy(
-          nextProgram.triggerBindings,
+          nextCompiledProgram.triggerBindings,
           (binding) => binding.triggerId,
         ),
         edgesBySource: groupBy(
-          nextProgram.edges,
+          nextCompiledProgram.edges,
           (edge) => `${edge.fromNodeId}:${edge.fromPortId}`,
         ),
         envelopeQueues: new Map(),
@@ -1815,7 +2005,7 @@ export function createInstalledFlowHost(options = {}) {
               `Trigger "${triggerId}" is not bound to any node input.`,
             );
           }
-          const triggerIndex = this.program.triggers.findIndex(
+          const triggerIndex = this.compiledProgram.triggers.findIndex(
             (trigger) => trigger.triggerId === triggerId,
           );
           if (triggerIndex < 0) {
@@ -1968,6 +2158,9 @@ export function createInstalledFlowHost(options = {}) {
     },
     getDeploymentPlan() {
       return runtime.getDeploymentPlan();
+    },
+    getInputBindingRoutes() {
+      return cloneJsonCompatibleValue(runtimeState?.inputBindingRoutes ?? []);
     },
     getLoadedPackages() {
       return loadedPackages.map((item) => item.pluginPackage);
@@ -2162,6 +2355,12 @@ export function createInstalledFlowService(options = {}) {
 
   function listProtocolInstallationsFromPlan(deploymentPlan) {
     return deploymentPlan?.protocolInstallations ?? [];
+  }
+
+  function listInputBindingRoutes() {
+    return Array.isArray(host.getInputBindingRoutes?.())
+      ? host.getInputBindingRoutes()
+      : [];
   }
 
   function listLocalScheduleBindings() {
@@ -2759,6 +2958,16 @@ export function createInstalledFlowService(options = {}) {
     return getProgram().nodes.filter((candidate) => candidate.methodId === methodId);
   }
 
+  function resolveMethodInputPorts(node) {
+    if (!node) {
+      return [];
+    }
+    const methodDescriptor = host.registry?.getMethod(node.pluginId, node.methodId);
+    return Array.isArray(methodDescriptor?.method?.inputPorts)
+      ? methodDescriptor.method.inputPorts
+      : [];
+  }
+
   function resolveMethodOutputPorts(node) {
     if (!node) {
       return [];
@@ -3041,13 +3250,32 @@ export function createInstalledFlowService(options = {}) {
       }
     }
 
-    const inputBindings = listInputBindingsFromPlan(deploymentPlan);
-    if (inputBindings.length > 0) {
-      throw new Error(
-        `Installed flow service cannot host deploymentPlan.inputBindings yet: ${inputBindings
-          .map((binding) => binding.bindingId)
-          .join(", ")}.`,
+    const inputBindingRoutesById = new Map(
+      listInputBindingRoutes().map((route) => [route.bindingId, route]),
+    );
+    for (const binding of listInputBindingsFromPlan(deploymentPlan)) {
+      const bindingId = normalizeString(binding?.bindingId, null);
+      const route = bindingId ? inputBindingRoutesById.get(bindingId) : null;
+      if (!route) {
+        throw new Error(
+          `Installed flow service cannot host input binding "${bindingId ?? "binding"}" because no matching program nodes were compiled for target method "${binding?.targetMethodId ?? "<unknown>"}".`,
+        );
+      }
+      if (route.targetNodes.length === 0) {
+        throw new Error(
+          `Installed flow service cannot host input binding "${bindingId}" because no program nodes match target method "${binding.targetMethodId}".`,
+        );
+      }
+      const missingPortTargets = route.targetNodes.filter(
+        (targetNode) => targetNode.inputPortFound !== true,
       );
+      if (missingPortTargets.length > 0) {
+        throw new Error(
+          `Installed flow service cannot host input binding "${bindingId}" because target input port "${binding.targetInputPortId}" is not declared on node ${missingPortTargets
+            .map((targetNode) => `"${targetNode.nodeId}"`)
+            .join(", ")}.`,
+        );
+      }
     }
 
     const protocolInstallations = listProtocolInstallationsFromPlan(
@@ -3300,6 +3528,57 @@ export function createInstalledFlowService(options = {}) {
     });
   }
 
+  function listInputBindingFrames(frames) {
+    if (Array.isArray(frames) && frames.length > 0) {
+      return frames;
+    }
+    if (frames && typeof frames === "object") {
+      return [frames];
+    }
+    return [{}];
+  }
+
+  function resolveInputBindingRoute(bindingId) {
+    const normalizedBindingId = normalizeString(bindingId, null);
+    const route =
+      normalizedBindingId === null
+        ? null
+        : listInputBindingRoutes().find(
+            (candidate) => candidate.bindingId === normalizedBindingId,
+          ) ?? null;
+    if (!route) {
+      throw createHttpStatusError(
+        404,
+        `No local input binding matches "${normalizedBindingId ?? "binding"}".`,
+        {
+          code: "input-binding-not-found",
+        },
+      );
+    }
+    return route;
+  }
+
+  function buildInputBindingFrame(route, input = {}) {
+    const bindingId = normalizeString(route?.bindingId, null);
+    const traceId =
+      normalizeString(input.traceId, null) ??
+      `input:${bindingId ?? "binding"}:${Date.now()}`;
+    return normalizeFrame({
+      typeRef: input.typeRef ?? route?.acceptedTypes?.[0] ?? {},
+      traceId,
+      streamId: Number(input.streamId ?? 0),
+      sequence: Number(input.sequence ?? 0),
+      payload: input.payload ?? input.body ?? null,
+      metadata: {
+        interfaceId: bindingId,
+        inputBindingId: bindingId,
+        inputBindingSourceKind: normalizeString(route?.sourceKind, null),
+        description: normalizeString(route?.description, null),
+        ...(normalizeMetadata(input.metadata) ?? {}),
+      },
+    });
+  }
+
   async function dispatchTriggerFrames(triggerId, frames) {
     await host.start();
     await assertSupportedLocalBindings();
@@ -3309,6 +3588,28 @@ export function createInstalledFlowService(options = {}) {
     const drainResult = await host.drain(options.drainOptions);
     return {
       triggerId,
+      outputs: host.getSinkOutputsSince(startIndex),
+      publications: publicationEvents.slice(startPublicationIndex),
+      ...drainResult,
+    };
+  }
+
+  async function dispatchInputBindingFrames(bindingId, frames) {
+    await host.start();
+    await assertSupportedLocalBindings();
+    const route = resolveInputBindingRoute(bindingId);
+    const startIndex = host.getSinkEventCount();
+    const startPublicationIndex = publicationEvents.length;
+    host.enqueueTriggerFrames(
+      route.triggerId,
+      listInputBindingFrames(frames).map((frame) =>
+        buildInputBindingFrame(route, frame),
+      ),
+    );
+    const drainResult = await host.drain(options.drainOptions);
+    return {
+      bindingId: route.bindingId,
+      triggerId: route.triggerId,
       outputs: host.getSinkOutputsSince(startIndex),
       publications: publicationEvents.slice(startPublicationIndex),
       ...drainResult,
@@ -3580,6 +3881,7 @@ export function createInstalledFlowService(options = {}) {
       stopTimerServices();
       started = false;
     },
+    dispatchInputBindingFrames,
     dispatchTriggerFrames,
     dispatchTimerTrigger,
     handleHttpRequest,

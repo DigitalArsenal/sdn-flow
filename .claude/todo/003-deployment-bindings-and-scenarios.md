@@ -11,7 +11,7 @@ Status: active
   - [x] `authPolicies`
   - [x] `publicationBindings`
   - [x] `protocolInstallations`
-  - `inputBindings`
+  - [x] `inputBindings`
 - [x] Persist deployment plans with archived artifacts and bundles, not only in
       transient deploy payloads.
 - [x] Make browser/server delegated bindings explicit for:

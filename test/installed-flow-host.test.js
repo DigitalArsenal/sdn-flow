@@ -1431,7 +1431,120 @@ test("installed flow service captures local publication bindings from trigger in
   assert.equal(service.getPublicationEventCount(), 0);
 });
 
-test("installed flow service rejects unsupported input deployment bindings", async () => {
+test("installed flow service dispatches local input bindings by bindingId", async () => {
+  const seenInputs = [];
+  const inputBoundService = createInstalledFlowService({
+    program: {
+      programId: "com.digitalarsenal.examples.input-bound-ingress",
+      nodes: [
+        {
+          nodeId: "consumer",
+          pluginId: "com.digitalarsenal.examples.memory.input-consumer",
+          methodId: "consume_input",
+        },
+      ],
+      edges: [],
+      triggers: [],
+      triggerBindings: [],
+      requiredPlugins: ["com.digitalarsenal.examples.memory.input-consumer"],
+    },
+    deploymentPlan: {
+      pluginId: "com.digitalarsenal.examples.input-bound-ingress",
+      version: "1.0.0",
+      scheduleBindings: [],
+      serviceBindings: [],
+      inputBindings: [
+        {
+          bindingId: "catalog-feed",
+          targetPluginId: "com.digitalarsenal.examples.memory.input-consumer",
+          targetMethodId: "consume_input",
+          targetInputPortId: "request",
+          sourceKind: "catalog-sync",
+          description: "Catalog feed ingress",
+        },
+      ],
+      publicationBindings: [],
+      authPolicies: [],
+      protocolInstallations: [],
+    },
+    discover: false,
+    pluginPackages: [
+      {
+        manifest: {
+          pluginId: "com.digitalarsenal.examples.memory.input-consumer",
+          name: "In-Memory Input Consumer",
+          version: "1.0.0",
+          pluginFamily: "analysis",
+          methods: [
+            {
+              methodId: "consume_input",
+              inputPorts: [
+                {
+                  portId: "request",
+                  acceptedTypeSets: [
+                    {
+                      allowedTypes: [
+                        {
+                          schemaName: "CatalogRecord.fbs",
+                          fileIdentifier: "CTLG",
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+              outputPorts: [{ portId: "published" }],
+              maxBatch: 8,
+              drainPolicy: "drain-to-empty",
+            },
+          ],
+        },
+        handlers: {
+          consume_input({ inputs }) {
+            seenInputs.push(inputs[0]);
+            return {
+              outputs: inputs.map((frame) => ({
+                ...frame,
+                portId: "published",
+              })),
+              backlogRemaining: 0,
+              yielded: false,
+            };
+          },
+        },
+      },
+    ],
+  });
+
+  const startup = await inputBoundService.start();
+  const response = await inputBoundService.dispatchInputBindingFrames(
+    "catalog-feed",
+    [
+      {
+        streamId: 1,
+        sequence: 1,
+        payload: new Uint8Array([1, 2, 3]),
+      },
+    ],
+  );
+
+  assert.deepEqual(
+    startup.deploymentBindings.inputBindings.map((binding) => binding.bindingId),
+    ["catalog-feed"],
+  );
+  assert.equal(response.bindingId, "catalog-feed");
+  assert.equal(response.triggerId, "__sdn_input_binding__:catalog-feed");
+  assert.equal(response.outputs.length, 1);
+  assert.deepEqual(Array.from(response.outputs[0].frame.payload), [1, 2, 3]);
+  assert.equal(seenInputs.length, 1);
+  assert.equal(seenInputs[0].portId, "request");
+  assert.equal(seenInputs[0].metadata.inputBindingId, "catalog-feed");
+  assert.equal(seenInputs[0].metadata.interfaceId, "catalog-feed");
+  assert.equal(seenInputs[0].typeRef.schemaName, "CatalogRecord.fbs");
+  assert.equal(seenInputs[0].typeRef.fileIdentifier, "CTLG");
+});
+
+test("installed flow service rejects input bindings without matching program nodes", async () => {
   const inputBoundService = createInstalledFlowService({
     program: {
       programId: "com.digitalarsenal.examples.input-bound-service",
@@ -1448,11 +1561,11 @@ test("installed flow service rejects unsupported input deployment bindings", asy
       serviceBindings: [],
       inputBindings: [
         {
-          bindingId: "input-pubsub",
+          bindingId: "catalog-feed",
+          targetPluginId: "com.digitalarsenal.examples.memory.input-consumer",
           targetMethodId: "consume_input",
           targetInputPortId: "request",
-          sourceKind: "pubsub",
-          topic: "catalog/items",
+          sourceKind: "catalog-sync",
         },
       ],
       publicationBindings: [],
@@ -1462,7 +1575,10 @@ test("installed flow service rejects unsupported input deployment bindings", asy
     discover: false,
   });
 
-  await assert.rejects(inputBoundService.start(), /inputBindings/i);
+  await assert.rejects(
+    inputBoundService.start(),
+    /no program nodes match target method/i,
+  );
 });
 
 test("installed flow service hosts local protocol installations by protocolId with auth enforcement", async () => {
