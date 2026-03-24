@@ -84,4 +84,7 @@ Status: active
    - [ ] Run the same flow artifacts against:
          standalone `wasi`, `wasmedge`, and delegated/browser profiles where
          applicable.
+         A bounded harness now exists in `test/profile-parity.test.js` for
+         standalone/runtime-host/delegated reuse; `wasmedge` coverage is still
+         open.
    - [ ] Keep parity regressions in CI before expanding the default node set.
