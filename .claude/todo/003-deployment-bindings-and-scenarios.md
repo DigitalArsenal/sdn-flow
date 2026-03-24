@@ -10,7 +10,7 @@ Status: active
   - [x] `serviceBindings`
   - [x] `authPolicies`
   - [x] `publicationBindings`
-  - `protocolInstallations`
+  - [x] `protocolInstallations`
   - `inputBindings`
 - [x] Persist deployment plans with archived artifacts and bundles, not only in
       transient deploy payloads.

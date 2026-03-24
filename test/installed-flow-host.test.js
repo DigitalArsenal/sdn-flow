@@ -290,6 +290,137 @@ test("installed flow host supports browser-style in-memory plugin packages", asy
   );
 });
 
+test("installed flow host defaults internal node execution to aligned-binary metadata", async () => {
+  const sinkInputFormats = [];
+  const host = createInstalledFlowHost({
+    program: {
+      programId: "com.digitalarsenal.examples.internal-aligned-host",
+      nodes: [
+        {
+          nodeId: "processor",
+          pluginId: "com.digitalarsenal.examples.memory.processor",
+          methodId: "transform",
+        },
+        {
+          nodeId: "sink",
+          pluginId: "com.digitalarsenal.examples.memory.sink",
+          methodId: "sink",
+        },
+      ],
+      edges: [
+        {
+          edgeId: "processor-to-sink",
+          fromNodeId: "processor",
+          fromPortId: "output",
+          toNodeId: "sink",
+          toPortId: "input",
+        },
+      ],
+      triggers: [
+        {
+          triggerId: "manual",
+          kind: "manual",
+        },
+      ],
+      triggerBindings: [
+        {
+          triggerId: "manual",
+          targetNodeId: "processor",
+          targetPortId: "input",
+        },
+      ],
+      requiredPlugins: [
+        "com.digitalarsenal.examples.memory.processor",
+        "com.digitalarsenal.examples.memory.sink",
+      ],
+    },
+    discover: false,
+    pluginPackages: [
+      {
+        manifest: {
+          pluginId: "com.digitalarsenal.examples.memory.processor",
+          name: "In-Memory Processor",
+          version: "1.0.0",
+          pluginFamily: "analysis",
+          methods: [
+            {
+              methodId: "transform",
+              inputPorts: [{ portId: "input", required: true }],
+              outputPorts: [{ portId: "output" }],
+              maxBatch: 8,
+              drainPolicy: "drain-to-empty",
+            },
+          ],
+        },
+        handlers: {
+          transform({ inputs }) {
+            return {
+              outputs: inputs.map((frame) => ({
+                ...frame,
+                portId: "output",
+              })),
+              backlogRemaining: 0,
+              yielded: false,
+            };
+          },
+        },
+      },
+      {
+        manifest: {
+          pluginId: "com.digitalarsenal.examples.memory.sink",
+          name: "In-Memory Sink",
+          version: "1.0.0",
+          pluginFamily: "analysis",
+          methods: [
+            {
+              methodId: "sink",
+              inputPorts: [{ portId: "input", required: true }],
+              outputPorts: [{ portId: "done" }],
+              maxBatch: 8,
+              drainPolicy: "drain-to-empty",
+            },
+          ],
+        },
+        handlers: {
+          sink({ inputs }) {
+            sinkInputFormats.push(inputs[0].typeRef?.wireFormat ?? null);
+            return {
+              outputs: inputs.map((frame) => ({
+                ...frame,
+                portId: "done",
+              })),
+              backlogRemaining: 0,
+              yielded: false,
+            };
+          },
+        },
+      },
+    ],
+  });
+
+  await host.start();
+  host.enqueueTriggerFrames("manual", [
+    {
+      portId: "input",
+      streamId: 1,
+      sequence: 1,
+      typeRef: {
+        schemaName: "CatalogRecord.fbs",
+        fileIdentifier: "CTLG",
+      },
+      payload: new Uint8Array([1, 2, 3]),
+    },
+  ]);
+  const result = await host.drain();
+  const outputs = host.getSinkOutputsSince(0);
+
+  assert.equal(result.idle, true);
+  assert.deepEqual(sinkInputFormats, ["aligned-binary"]);
+  assert.equal(outputs.length, 1);
+  assert.equal(outputs[0].frame.typeRef.wireFormat, "aligned-binary");
+  assert.equal(outputs[0].frame.typeRef.requiredAlignment, 8);
+});
+
 test("installed flow hosted runtime plans default to the Deno engine for sdn-js startup", () => {
   const plan = createInstalledFlowHostedRuntimePlan({
     program: {
@@ -460,7 +591,7 @@ test("installed flow hosted runtime plans derive explicit delegated scheduler, H
   assert.equal(
     summary.bindings.some(
       (binding) =>
-        binding.bindingId === "pnm-wire:dial" &&
+        binding.bindingId === "pnm-outbound:dial" &&
         binding.transport === "sdn-protocol" &&
         binding.protocolId === "/sds/pnm/1.0.0" &&
         binding.url === "https://node.example.test/pnm",
@@ -1300,7 +1431,7 @@ test("installed flow service captures local publication bindings from trigger in
   assert.equal(service.getPublicationEventCount(), 0);
 });
 
-test("installed flow service rejects unsupported input and protocol deployment bindings", async () => {
+test("installed flow service rejects unsupported input deployment bindings", async () => {
   const inputBoundService = createInstalledFlowService({
     program: {
       programId: "com.digitalarsenal.examples.input-bound-service",
@@ -1332,15 +1463,37 @@ test("installed flow service rejects unsupported input and protocol deployment b
   });
 
   await assert.rejects(inputBoundService.start(), /inputBindings/i);
+});
 
+test("installed flow service hosts local protocol installations by protocolId with auth enforcement", async () => {
+  const seenProtocolIds = [];
   const protocolBoundService = createInstalledFlowService({
     program: {
       programId: "com.digitalarsenal.examples.protocol-bound-service",
-      nodes: [],
+      nodes: [
+        {
+          nodeId: "responder",
+          pluginId: "com.digitalarsenal.examples.memory.protocol",
+          methodId: "handle_protocol",
+        },
+      ],
       edges: [],
-      triggers: [],
-      triggerBindings: [],
-      requiredPlugins: [],
+      triggers: [
+        {
+          triggerId: "catalog-protocol",
+          kind: "protocol-request",
+          protocolId: "/com.digitalarsenal/catalog/1.0.0",
+          source: "/com.digitalarsenal/catalog/1.0.0",
+        },
+      ],
+      triggerBindings: [
+        {
+          triggerId: "catalog-protocol",
+          targetNodeId: "responder",
+          targetPortId: "request",
+        },
+      ],
+      requiredPlugins: ["com.digitalarsenal.examples.memory.protocol"],
     },
     deploymentPlan: {
       pluginId: "com.digitalarsenal.examples.protocol-bound-service",
@@ -1349,18 +1502,123 @@ test("installed flow service rejects unsupported input and protocol deployment b
       serviceBindings: [],
       inputBindings: [],
       publicationBindings: [],
-      authPolicies: [],
+      authPolicies: [
+        {
+          policyId: "approved-protocol-peers",
+          bindingMode: "local",
+          targetKind: "protocol",
+          targetId: "/com.digitalarsenal/catalog/1.0.0",
+          allowServerKeys: ["ed25519:approved"],
+          requireSignedRequests: true,
+          requireEncryptedTransport: true,
+        },
+      ],
       protocolInstallations: [
         {
           protocolId: "/com.digitalarsenal/catalog/1.0.0",
           wireId: "catalog-wire",
           transportKind: "http",
           role: "handle",
+          serviceName: "catalog-protocol",
+          nodeInfoUrl: "https://node.example.test/catalog",
         },
       ],
     },
     discover: false,
+    pluginPackages: [
+      {
+        manifest: {
+          pluginId: "com.digitalarsenal.examples.memory.protocol",
+          name: "In-Memory Protocol",
+          version: "1.0.0",
+          pluginFamily: "responder",
+          methods: [
+            {
+              methodId: "handle_protocol",
+              inputPorts: [{ portId: "request", required: true }],
+              outputPorts: [{ portId: "response" }],
+              maxBatch: 8,
+              drainPolicy: "drain-to-empty",
+            },
+          ],
+        },
+        handlers: {
+          handle_protocol({ inputs }) {
+            seenProtocolIds.push(
+              inputs.map((frame) => frame.metadata?.protocolId ?? null),
+            );
+            return {
+              outputs: inputs.map((frame) => ({
+                ...frame,
+                portId: "response",
+              })),
+              backlogRemaining: 0,
+              yielded: false,
+            };
+          },
+        },
+      },
+    ],
   });
 
-  await assert.rejects(protocolBoundService.start(), /protocolInstallations/i);
+  const startup = await protocolBoundService.start();
+  assert.equal(startup.protocolRoutes.length, 1);
+  assert.equal(startup.protocolRoutes[0].triggerId, "catalog-protocol");
+  assert.equal(
+    startup.protocolRoutes[0].protocolId,
+    "/com.digitalarsenal/catalog/1.0.0",
+  );
+  assert.equal(startup.protocolRoutes[0].serviceName, "catalog-protocol");
+  assert.deepEqual(startup.protocolRoutes[0].authPolicies, [
+    "approved-protocol-peers",
+  ]);
+
+  await assert.rejects(
+    protocolBoundService.handleProtocolRequest({
+      protocolId: "/com.digitalarsenal/catalog/1.0.0",
+      signedRequest: true,
+      encryptedTransport: true,
+      serverKey: "ed25519:denied",
+      frames: [
+        {
+          streamId: 1,
+          sequence: 1,
+          typeRef: {
+            schemaName: "CatalogRequest.fbs",
+            fileIdentifier: "CREQ",
+          },
+          payload: new Uint8Array([1, 2, 3]),
+        },
+      ],
+    }),
+    (error) =>
+      error?.statusCode === 403 && /server key/i.test(error.message),
+  );
+
+  const response = await protocolBoundService.handleProtocolRequest({
+    protocolId: "/com.digitalarsenal/catalog/1.0.0",
+    signedRequest: true,
+    encryptedTransport: true,
+    serverKey: "ed25519:approved",
+    frames: [
+      {
+        streamId: 1,
+        sequence: 1,
+        typeRef: {
+          schemaName: "CatalogRequest.fbs",
+          fileIdentifier: "CREQ",
+        },
+        payload: new Uint8Array([4, 5, 6]),
+      },
+    ],
+  });
+
+  assert.equal(response.triggerId, "catalog-protocol");
+  assert.equal(response.protocolId, "/com.digitalarsenal/catalog/1.0.0");
+  assert.equal(response.serviceName, "catalog-protocol");
+  assert.deepEqual(response.authPolicies, ["approved-protocol-peers"]);
+  assert.equal(response.outputs.length, 1);
+  assert.deepEqual(Array.from(response.outputs[0].frame.payload), [4, 5, 6]);
+  assert.equal(response.outputs[0].frame.metadata.protocolId, "/com.digitalarsenal/catalog/1.0.0");
+  assert.deepEqual(seenProtocolIds, [["/com.digitalarsenal/catalog/1.0.0"]]);
 });

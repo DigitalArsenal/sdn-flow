@@ -40,6 +40,72 @@ function frame(portId, schemaName, fileIdentifier, payload, overrides = {}) {
   };
 }
 
+test("Flow designer requirements merge shared external interfaces by interfaceId", () => {
+  const session = new FlowDesignerSession({
+    program: {
+      programId: "com.digitalarsenal.examples.interface-identity",
+      nodes: [
+        {
+          nodeId: "catalog-source",
+          pluginId: "com.digitalarsenal.examples.catalog-source",
+          methodId: "fetch_catalog",
+        },
+      ],
+      edges: [],
+      triggers: [],
+      triggerBindings: [],
+      requiredPlugins: ["com.digitalarsenal.examples.catalog-source"],
+      externalInterfaces: [
+        {
+          interfaceId: "catalog-source",
+          kind: "http",
+          direction: "output",
+          capability: "http",
+          resource: "https://example.test/catalog",
+        },
+      ],
+    },
+  });
+
+  const summary = session.inspectRequirements({
+    manifests: [
+      {
+        pluginId: "com.digitalarsenal.examples.catalog-source",
+        name: "Catalog Source",
+        version: "1.0.0",
+        pluginFamily: "analysis",
+        capabilities: ["http"],
+        methods: [
+          {
+            methodId: "fetch_catalog",
+            inputPorts: [{ portId: "request" }],
+            outputPorts: [{ portId: "records" }],
+          },
+        ],
+        externalInterfaces: [
+          {
+            interfaceId: "catalog-source",
+            kind: "http",
+            direction: "output",
+            capability: "http",
+            resource: "https://example.test/catalog",
+            description: "Outbound catalog source",
+          },
+        ],
+      },
+    ],
+  });
+
+  const matchingInterfaces = summary.externalInterfaces.filter(
+    (item) => item.interfaceId === "catalog-source",
+  );
+  assert.equal(matchingInterfaces.length, 1);
+  assert.deepEqual(matchingInterfaces[0].owners, [
+    "plugin:com.digitalarsenal.examples.catalog-source",
+    "program",
+  ]);
+});
+
 test("CSV OMM query service example summarizes CelesTrak ingest, FlatSQL persistence, and HTTP query requirements", async () => {
   const flow = await readJson(
     "../examples/flows/csv-omm-query-service/flow.json",

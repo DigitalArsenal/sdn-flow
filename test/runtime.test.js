@@ -239,6 +239,208 @@ test("outputs route across edges into downstream nodes", async () => {
   assert.deepEqual(sinkSeen, [9]);
 });
 
+test("flow runtime defaults internal node execution to aligned-binary while preserving schema compatibility", async () => {
+  const registry = new MethodRegistry();
+  const processorInputFormats = [];
+  const sinkInputTypes = [];
+
+  registry.registerPlugin({
+    manifest: createManifest(),
+    handlers: {
+      process: ({ inputs }) => {
+        processorInputFormats.push(inputs[0].typeRef?.wireFormat ?? null);
+        return {
+          outputs: inputs.map((frame) => ({ ...frame, portId: "out" })),
+          backlogRemaining: 0,
+          yielded: false,
+        };
+      },
+    },
+  });
+  registry.registerPlugin({
+    manifest: {
+      pluginId: "com.digitalarsenal.runtime.aligned-sink",
+      methods: [
+        {
+          methodId: "sink",
+          inputPorts: [
+            {
+              portId: "in",
+              acceptedTypeSets: [
+                {
+                  setId: "orbital",
+                  allowedTypes: [createTypeRef()],
+                },
+              ],
+              minStreams: 1,
+              maxStreams: 1,
+              required: true,
+            },
+          ],
+          outputPorts: [],
+          maxBatch: 1,
+        },
+      ],
+    },
+    handlers: {
+      sink: ({ inputs }) => {
+        sinkInputTypes.push(inputs[0].typeRef);
+        return {
+          outputs: [],
+          backlogRemaining: 0,
+          yielded: false,
+        };
+      },
+    },
+  });
+
+  const runtime = new FlowRuntime({
+    registry,
+    maxInvocationsPerDrain: 16,
+  });
+  runtime.loadProgram({
+    programId: "flow.runtime.internal-aligned-default",
+    nodes: [
+      {
+        nodeId: "processor",
+        pluginId: "com.digitalarsenal.runtime.test",
+        methodId: "process",
+      },
+      {
+        nodeId: "sink",
+        pluginId: "com.digitalarsenal.runtime.aligned-sink",
+        methodId: "sink",
+      },
+    ],
+    edges: [
+      {
+        edgeId: "processor-to-sink",
+        fromNodeId: "processor",
+        fromPortId: "out",
+        toNodeId: "sink",
+        toPortId: "in",
+      },
+    ],
+    triggers: [
+      {
+        triggerId: "trigger-1",
+        kind: "manual",
+      },
+    ],
+    triggerBindings: [
+      {
+        triggerId: "trigger-1",
+        targetNodeId: "processor",
+        targetPortId: "in",
+      },
+    ],
+  });
+
+  runtime.enqueueTriggerFrames("trigger-1", [createFrame(1)]);
+  const result = await runtime.drain();
+
+  assert.equal(result.idle, true);
+  assert.deepEqual(processorInputFormats, ["aligned-binary"]);
+  assert.equal(sinkInputTypes.length, 1);
+  assert.equal(sinkInputTypes[0].wireFormat, "aligned-binary");
+  assert.equal(sinkInputTypes[0].requiredAlignment, 8);
+});
+
+test("flow runtime leaves filesystem and storage exception plugins on their declared wire format", async () => {
+  const registry = new MethodRegistry();
+  const sinkInputFormats = [];
+
+  registry.registerPlugin({
+    manifest: {
+      pluginId: "com.digitalarsenal.runtime.filesystem-sink",
+      name: "Filesystem Sink",
+      version: "0.1.0",
+      pluginFamily: "sink",
+      capabilities: ["filesystem"],
+      externalInterfaces: [
+        {
+          interfaceId: "filesystem-output",
+          kind: "filesystem",
+          direction: "output",
+          capability: "filesystem",
+          resource: "file:///tmp/runtime-test-output",
+        },
+      ],
+      methods: [
+        {
+          methodId: "write_records",
+          inputPorts: [
+            {
+              portId: "records",
+              acceptedTypeSets: [
+                {
+                  setId: "orbital",
+                  allowedTypes: [createTypeRef()],
+                },
+              ],
+              minStreams: 1,
+              maxStreams: 1,
+              required: true,
+            },
+          ],
+          outputPorts: [],
+          maxBatch: 1,
+          drainPolicy: DrainPolicy.DRAIN_UNTIL_YIELD,
+        },
+      ],
+    },
+    handlers: {
+      write_records: ({ inputs }) => {
+        sinkInputFormats.push(inputs[0].typeRef?.wireFormat ?? null);
+        return {
+          outputs: [],
+          backlogRemaining: 0,
+          yielded: false,
+        };
+      },
+    },
+  });
+
+  const runtime = new FlowRuntime({
+    registry,
+    maxInvocationsPerDrain: 16,
+  });
+  runtime.loadProgram({
+    programId: "flow.runtime.filesystem-exception",
+    nodes: [
+      {
+        nodeId: "writer",
+        pluginId: "com.digitalarsenal.runtime.filesystem-sink",
+        methodId: "write_records",
+      },
+    ],
+    edges: [],
+    triggers: [
+      {
+        triggerId: "trigger-1",
+        kind: "manual",
+      },
+    ],
+    triggerBindings: [
+      {
+        triggerId: "trigger-1",
+        targetNodeId: "writer",
+        targetPortId: "records",
+      },
+    ],
+  });
+
+  runtime.enqueueTriggerFrames("trigger-1", [
+    createFrame(1, {
+      portId: "records",
+    }),
+  ]);
+  const result = await runtime.drain();
+
+  assert.equal(result.idle, true);
+  assert.deepEqual(sinkInputFormats, [null]);
+});
+
 test("registered plugins can be removed and cleared from the runtime registry", async () => {
   const registry = new MethodRegistry();
 

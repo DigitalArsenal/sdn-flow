@@ -1,6 +1,31 @@
 import { DrainPolicy } from "./constants.js";
-import { payloadTypeRefsMatch } from "space-data-module-sdk";
+import {
+  clonePayloadTypeRef,
+  normalizePayloadWireFormatName,
+  payloadTypeRefsMatch,
+  selectPreferredPayloadTypeRef,
+} from "space-data-module-sdk";
 import { normalizeFrame, normalizeManifest } from "./normalize.js";
+
+const INTERNAL_ALIGNED_BINARY_EXCEPTION_INTERFACE_KINDS = new Set([
+  "filesystem",
+  "database",
+  "host-service",
+  "network",
+  "tcp",
+  "udp",
+  "tls",
+  "websocket",
+  "mqtt",
+]);
+
+const INTERNAL_ALIGNED_BINARY_EXCEPTION_CAPABILITIES = new Set([
+  "filesystem",
+  "network",
+  "storage_query",
+  "storage_write",
+  "storage_adapter",
+]);
 
 function groupFramesByPort(frames) {
   const grouped = new Map();
@@ -34,11 +59,41 @@ function buildPortMap(ports) {
   return map;
 }
 
-function typeMatches(acceptedType, frameType) {
+function hasMeaningfulTypeRef(typeRef = null) {
+  if (!typeRef || typeof typeRef !== "object") {
+    return false;
+  }
+  const normalized = clonePayloadTypeRef(typeRef);
+  return Boolean(
+    normalized.acceptsAnyFlatbuffer === true ||
+      normalized.schemaName ||
+      normalized.fileIdentifier ||
+      (Array.isArray(normalized.schemaHash) && normalized.schemaHash.length > 0) ||
+      normalized.schemaHash instanceof Uint8Array,
+  );
+}
+
+function cloneTypeRefWithoutWireFormat(typeRef = null) {
+  const normalized = clonePayloadTypeRef(typeRef);
+  delete normalized.wireFormat;
+  delete normalized.rootTypeName;
+  delete normalized.fixedStringLength;
+  delete normalized.byteLength;
+  delete normalized.requiredAlignment;
+  return normalized;
+}
+
+function typeMatches(acceptedType, frameType, options = {}) {
+  if (payloadTypeRefsMatch(acceptedType, frameType)) {
+    return true;
+  }
+  if (options.internalTransport !== true) {
+    return false;
+  }
   return payloadTypeRefsMatch(acceptedType, frameType);
 }
 
-function portAcceptsFrame(port, frame) {
+function portAcceptsFrame(port, frame, options = {}) {
   const acceptedTypeSets = Array.isArray(port.acceptedTypeSets)
     ? port.acceptedTypeSets
     : [];
@@ -50,7 +105,16 @@ function portAcceptsFrame(port, frame) {
       ? typeSet.allowedTypes
       : [];
     for (const acceptedType of allowedTypes) {
-      if (typeMatches(acceptedType, frame.typeRef)) {
+      if (typeMatches(acceptedType, frame.typeRef, options)) {
+        return true;
+      }
+      if (
+        options.internalTransport === true &&
+        payloadTypeRefsMatch(
+          cloneTypeRefWithoutWireFormat(acceptedType),
+          cloneTypeRefWithoutWireFormat(frame.typeRef),
+        )
+      ) {
         return true;
       }
     }
@@ -58,7 +122,56 @@ function portAcceptsFrame(port, frame) {
   return false;
 }
 
-function hydrateOutputPorts(response, method, outputStreamCap) {
+function methodUsesExternalTransportException(manifest = {}) {
+  if (
+    Array.isArray(manifest.capabilities) &&
+    manifest.capabilities.some((capability) =>
+      INTERNAL_ALIGNED_BINARY_EXCEPTION_CAPABILITIES.has(capability),
+    )
+  ) {
+    return true;
+  }
+  return Array.isArray(manifest.externalInterfaces) &&
+    manifest.externalInterfaces.some((externalInterface) =>
+      INTERNAL_ALIGNED_BINARY_EXCEPTION_INTERFACE_KINDS.has(externalInterface?.kind),
+    );
+}
+
+function coerceImplicitAlignedBinaryTypeRef(
+  typeRef = null,
+  frame = {},
+  preferredTypeRef = null,
+) {
+  const baseTypeRef = hasMeaningfulTypeRef(typeRef)
+    ? clonePayloadTypeRef(typeRef)
+    : hasMeaningfulTypeRef(preferredTypeRef)
+      ? clonePayloadTypeRef(preferredTypeRef)
+      : clonePayloadTypeRef(typeRef);
+  const explicitWireFormat = normalizePayloadWireFormatName(baseTypeRef.wireFormat);
+  if (
+    explicitWireFormat !== null ||
+    !hasMeaningfulTypeRef(baseTypeRef)
+  ) {
+    return baseTypeRef;
+  }
+  baseTypeRef.wireFormat = "aligned-binary";
+  if (baseTypeRef.requiredAlignment === undefined) {
+    const alignment = Number(frame.alignment ?? 8);
+    if (Number.isFinite(alignment) && alignment > 0) {
+      baseTypeRef.requiredAlignment = Math.max(1, Math.trunc(alignment));
+    }
+  }
+  return baseTypeRef;
+}
+
+function applyInternalTransportDefaultsToInputs(frames = []) {
+  return frames.map((frame) => ({
+    ...frame,
+    typeRef: coerceImplicitAlignedBinaryTypeRef(frame.typeRef, frame),
+  }));
+}
+
+function hydrateOutputPorts(response, method, outputStreamCap, options = {}) {
   const outputs = Array.isArray(response.outputs) ? response.outputs : [];
   if (outputStreamCap > 0 && outputs.length > outputStreamCap) {
     throw new Error(
@@ -77,6 +190,22 @@ function hydrateOutputPorts(response, method, outputStreamCap) {
     if (!frame.portId) {
       throw new Error(
         `Method "${method.methodId}" produced a frame without portId and has multiple output ports.`,
+      );
+    }
+  }
+  if (options.internalTransport === true && options.exceptionPlugin !== true) {
+    const outputPorts = buildPortMap(method.outputPorts);
+    for (const frame of outputs) {
+      const outputPort = outputPorts.get(frame.portId) ?? null;
+      const preferredTypeRef = outputPort
+        ? selectPreferredPayloadTypeRef(outputPort, {
+            preferredWireFormat: "aligned-binary",
+          })
+        : null;
+      frame.typeRef = coerceImplicitAlignedBinaryTypeRef(
+        frame.typeRef,
+        frame,
+        preferredTypeRef,
       );
     }
   }
@@ -182,10 +311,19 @@ export class MethodRegistry {
       throw new Error(`Unknown method "${pluginId}:${methodId}".`);
     }
 
+    const internalTransport = context?.internalTransport === true;
+    const exceptionPlugin = methodUsesExternalTransportException(
+      descriptor.manifest,
+    );
+
     const normalizedInputs = Array.isArray(inputs)
       ? inputs.map((frame) => normalizeFrame(frame))
       : [];
-    const inputsByPort = groupFramesByPort(normalizedInputs);
+    const adaptedInputs =
+      internalTransport && !exceptionPlugin
+        ? applyInternalTransportDefaultsToInputs(normalizedInputs)
+        : normalizedInputs;
+    const inputsByPort = groupFramesByPort(adaptedInputs);
 
     for (const [portId, port] of descriptor.inputPorts.entries()) {
       const frames = inputsByPort.get(portId) ?? [];
@@ -209,7 +347,7 @@ export class MethodRegistry {
         );
       }
       for (const frame of frames) {
-        if (!portAcceptsFrame(port, frame)) {
+        if (!portAcceptsFrame(port, frame, { internalTransport })) {
           const schemaName =
             frame.typeRef?.schemaName ??
             frame.typeRef?.fileIdentifier ??
@@ -240,14 +378,17 @@ export class MethodRegistry {
       manifest: descriptor.manifest,
       method: descriptor.method,
       plugin: descriptor.plugin,
-      inputs: normalizedInputs,
+      inputs: adaptedInputs,
       inputsByPort,
       outputStreamCap,
       drainPolicy: requestedDrainPolicy,
       context,
     });
 
-    return hydrateOutputPorts(result ?? {}, descriptor.method, outputStreamCap);
+    return hydrateOutputPorts(result ?? {}, descriptor.method, outputStreamCap, {
+      internalTransport,
+      exceptionPlugin,
+    });
   }
 
   clear() {

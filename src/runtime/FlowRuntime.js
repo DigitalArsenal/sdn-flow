@@ -207,6 +207,7 @@ export class FlowRuntime {
       context: {
         nodeId: state.node.nodeId,
         programId: this.#program.programId,
+        internalTransport: true,
       },
     });
 

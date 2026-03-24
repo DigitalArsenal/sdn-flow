@@ -1021,6 +1021,39 @@ function buildHostedBindingDescription({
   return baseDescription ? `${prefix}: ${baseDescription}` : prefix;
 }
 
+function normalizeProtocolRole(value, fallback = null) {
+  return normalizeString(value, fallback)?.toLowerCase() ?? fallback;
+}
+
+function resolveInstallationProtocolId(installation = {}) {
+  return normalizeString(installation?.protocolId, null);
+}
+
+function resolveTriggerProtocolId(trigger = {}) {
+  return (
+    normalizeString(trigger?.protocolId, null) ??
+    normalizeString(trigger?.source, null)
+  );
+}
+
+function protocolTriggerMatchesInstallation(trigger = {}, installation = {}) {
+  const installationProtocolId = resolveInstallationProtocolId(installation);
+  const triggerProtocolId = resolveTriggerProtocolId(trigger);
+  return Boolean(
+    installationProtocolId &&
+      triggerProtocolId &&
+      installationProtocolId === triggerProtocolId,
+  );
+}
+
+function listProtocolInstallationTargetIds(installation = {}) {
+  return [
+    resolveInstallationProtocolId(installation),
+    normalizeString(installation?.serviceName, null),
+    normalizeString(installation?.nodeInfoUrl, null),
+  ].filter(Boolean);
+}
+
 function extractTriggerOwners(externalInterface = {}) {
   return (Array.isArray(externalInterface.owners) ? externalInterface.owners : [])
     .filter((owner) => typeof owner === "string" && owner.startsWith("trigger:"))
@@ -1250,9 +1283,7 @@ function createHostedBindingsForExternalInterface(
         bindings.push(
           createHostedBindingsForDirection({
             externalInterface,
-            bindingIdPrefix:
-              normalizeString(matchingInstallation?.wireId, null) ??
-              bindingIdPrefix,
+            bindingIdPrefix,
             direction,
             transport: HostedRuntimeTransport.SDN_PROTOCOL,
             protocolId:
@@ -1869,6 +1900,7 @@ export function createInstalledFlowHost(options = {}) {
               context: {
                 nodeId,
                 programId: nextProgram.programId,
+                internalTransport: true,
               },
             });
             nextRuntimeState.routeInvocationOutputs(nodeId, result.outputs ?? []);
@@ -2161,6 +2193,13 @@ export function createInstalledFlowService(options = {}) {
     );
   }
 
+  function listHandleProtocolInstallations(deploymentPlan = getDeploymentPlan()) {
+    return listProtocolInstallationsFromPlan(deploymentPlan).filter(
+      (installation) =>
+        normalizeProtocolRole(installation?.role, null) === "handle",
+    );
+  }
+
   function invalidateResolvedBindingCaches() {
     walletProfileTrustCache.clear();
     verifiedBindingsPlan = null;
@@ -2366,7 +2405,42 @@ export function createInstalledFlowService(options = {}) {
     );
   }
 
-  function resolveHttpRequestSecurityContext(request = {}) {
+  function resolveLocalAuthPoliciesForProtocolInstallation(
+    installation,
+    deploymentPlan = getDeploymentPlan(),
+  ) {
+    if (!installation) {
+      return [];
+    }
+    const authPolicies = listAuthPoliciesFromPlan(deploymentPlan);
+    const installationTargetIds = new Set(
+      listProtocolInstallationTargetIds(installation),
+    );
+    return filterBindingsByMode(authPolicies, DeploymentBindingMode.LOCAL).filter(
+      (policy) => {
+        const targetKind = normalizeString(policy.targetKind, null)?.toLowerCase();
+        if (targetKind !== "protocol" && targetKind !== "protocol-service") {
+          return false;
+        }
+        const targetId = normalizeString(policy.targetId, null);
+        return !targetId || installationTargetIds.has(targetId);
+      },
+    );
+  }
+
+  function resolveEffectiveLocalAuthPoliciesForProtocolInstallation(
+    installation,
+    deploymentPlan = getDeploymentPlan(),
+  ) {
+    return resolveLocalAuthPoliciesForProtocolInstallation(
+      installation,
+      deploymentPlan,
+    ).map(
+      (policy) => resolvedLocalAuthPoliciesById.get(policy.policyId) ?? policy,
+    );
+  }
+
+  function resolveRequestSecurityContext(request = {}) {
     const headers = normalizeHeaderRecord(request.headers);
     const metadata = normalizeMetadata(request.metadata);
     const forwardedProtocol = normalizeString(
@@ -2392,6 +2466,8 @@ export function createInstalledFlowService(options = {}) {
         normalizeString(
           metadata.peerId ??
             metadata.peer_id ??
+            request.peerId ??
+            request.peer_id ??
             headers["x-sdn-peer-id"] ??
             headers["x-peer-id"],
           null,
@@ -2400,6 +2476,8 @@ export function createInstalledFlowService(options = {}) {
         normalizeString(
           metadata.serverKey ??
             metadata.server_key ??
+            request.serverKey ??
+            request.server_key ??
             headers["x-sdn-server-key"] ??
             headers["x-server-key"],
           null,
@@ -2408,6 +2486,8 @@ export function createInstalledFlowService(options = {}) {
         normalizeString(
           metadata.entityId ??
             metadata.entity_id ??
+            request.entityId ??
+            request.entity_id ??
             headers["x-sdn-entity-id"] ??
             headers["x-entity-id"],
           null,
@@ -2415,6 +2495,8 @@ export function createInstalledFlowService(options = {}) {
       signedRequest: normalizeBooleanLike(
         metadata.signedRequest ??
           metadata.signed_request ??
+          request.signedRequest ??
+          request.signed_request ??
           headers["x-sdn-signed-request"] ??
           headers["x-signed-request"],
         false,
@@ -2423,6 +2505,8 @@ export function createInstalledFlowService(options = {}) {
         normalizeBooleanLike(
           metadata.encryptedTransport ??
             metadata.encrypted_transport ??
+            request.encryptedTransport ??
+            request.encrypted_transport ??
             headers["x-sdn-encrypted-transport"],
           false,
         ) ||
@@ -2452,7 +2536,7 @@ export function createInstalledFlowService(options = {}) {
     if (authPolicies.length === 0) {
       return;
     }
-    const securityContext = resolveHttpRequestSecurityContext(request);
+    const securityContext = resolveRequestSecurityContext(request);
 
     for (const authPolicy of authPolicies) {
       if (
@@ -2510,6 +2594,86 @@ export function createInstalledFlowService(options = {}) {
         throw createHttpStatusError(
           403,
           `HTTP service "${serviceBinding.serviceId}" rejected an unapproved entity id under auth policy "${authPolicy.policyId}".`,
+          {
+            code: "entity-id-not-approved",
+          },
+        );
+      }
+    }
+  }
+
+  async function assertLocalProtocolRequestAuthorized(
+    installation,
+    request = {},
+  ) {
+    await assertSupportedLocalBindings();
+    const authPolicies =
+      resolveEffectiveLocalAuthPoliciesForProtocolInstallation(installation);
+    if (authPolicies.length === 0) {
+      return;
+    }
+    const securityContext = resolveRequestSecurityContext(request);
+    const protocolLabel =
+      normalizeString(installation?.serviceName, null) ??
+      resolveInstallationProtocolId(installation) ??
+      "protocol";
+
+    for (const authPolicy of authPolicies) {
+      if (
+        authPolicy.requireEncryptedTransport &&
+        !securityContext.encryptedTransport
+      ) {
+        throw createHttpStatusError(
+          403,
+          `Protocol service "${protocolLabel}" requires encrypted transport by auth policy "${authPolicy.policyId}".`,
+          {
+            code: "encrypted-transport-required",
+          },
+        );
+      }
+      if (authPolicy.requireSignedRequests && !securityContext.signedRequest) {
+        throw createHttpStatusError(
+          403,
+          `Protocol service "${protocolLabel}" requires signed requests by auth policy "${authPolicy.policyId}".`,
+          {
+            code: "signed-request-required",
+          },
+        );
+      }
+      if (
+        authPolicy.allowPeerIds.length > 0 &&
+        !authPolicy.allowPeerIds.includes(securityContext.peerId ?? "")
+      ) {
+        throw createHttpStatusError(
+          403,
+          `Protocol service "${protocolLabel}" rejected an unapproved peer id under auth policy "${authPolicy.policyId}".`,
+          {
+            code: "peer-id-not-approved",
+          },
+        );
+      }
+      if (
+        authPolicy.allowServerKeys.length > 0 &&
+        !isAllowedServerKey(
+          authPolicy.allowServerKeys,
+          securityContext.serverKey ?? "",
+        )
+      ) {
+        throw createHttpStatusError(
+          403,
+          `Protocol service "${protocolLabel}" rejected an unapproved server key under auth policy "${authPolicy.policyId}".`,
+          {
+            code: "server-key-not-approved",
+          },
+        );
+      }
+      if (
+        authPolicy.allowEntityIds.length > 0 &&
+        !authPolicy.allowEntityIds.includes(securityContext.entityId ?? "")
+      ) {
+        throw createHttpStatusError(
+          403,
+          `Protocol service "${protocolLabel}" rejected an unapproved entity id under auth policy "${authPolicy.policyId}".`,
           {
             code: "entity-id-not-approved",
           },
@@ -2754,21 +2918,46 @@ export function createInstalledFlowService(options = {}) {
       resolveLocalAuthPoliciesForServiceBinding(serviceBinding, deploymentPlan);
     }
 
+    const protocolTriggers = listTriggersByKind(TriggerKind.PROTOCOL_REQUEST);
+    const localHandleProtocolInstallations =
+      listHandleProtocolInstallations(deploymentPlan);
+    const localProtocolTargetIds = new Set(
+      protocolTriggers
+        .map((trigger) => resolveTriggerProtocolId(trigger))
+        .filter(Boolean),
+    );
+    for (const installation of localHandleProtocolInstallations) {
+      for (const targetId of listProtocolInstallationTargetIds(installation)) {
+        localProtocolTargetIds.add(targetId);
+      }
+    }
+
     const nextResolvedLocalAuthPoliciesById = new Map();
     for (const authPolicy of filterBindingsByMode(
       listAuthPoliciesFromPlan(deploymentPlan),
       DeploymentBindingMode.LOCAL,
     )) {
       const targetKind = normalizeString(authPolicy.targetKind, "")?.toLowerCase();
-      if (targetKind !== "service" && targetKind !== "http-service") {
+      if (
+        targetKind !== "service" &&
+        targetKind !== "http-service" &&
+        targetKind !== "protocol" &&
+        targetKind !== "protocol-service"
+      ) {
         throw new Error(
           `Installed flow service cannot enforce local auth policy "${authPolicy.policyId}" for targetKind "${authPolicy.targetKind}".`,
         );
       }
       const targetId = normalizeString(authPolicy.targetId, null);
-      if (targetId && !localServiceIds.has(targetId)) {
+      if (targetKind === "service" || targetKind === "http-service") {
+        if (targetId && !localServiceIds.has(targetId)) {
+          throw new Error(
+            `Installed flow service cannot enforce local auth policy "${authPolicy.policyId}" because targetId "${targetId}" is not a local HTTP service binding.`,
+          );
+        }
+      } else if (targetId && !localProtocolTargetIds.has(targetId)) {
         throw new Error(
-          `Installed flow service cannot enforce local auth policy "${authPolicy.policyId}" because targetId "${targetId}" is not a local HTTP service binding.`,
+          `Installed flow service cannot enforce local auth policy "${authPolicy.policyId}" because targetId "${targetId}" is not a local protocol surface.`,
         );
       }
       nextResolvedLocalAuthPoliciesById.set(
@@ -2864,15 +3053,19 @@ export function createInstalledFlowService(options = {}) {
     const protocolInstallations = listProtocolInstallationsFromPlan(
       deploymentPlan,
     );
-    if (protocolInstallations.length > 0) {
-      throw new Error(
-        `Installed flow service cannot host deploymentPlan.protocolInstallations yet: ${protocolInstallations
-          .map(
-            (installation) =>
-              installation.protocolId ?? installation.wireId ?? "protocol",
-          )
-          .join(", ")}.`,
-      );
+    for (const installation of protocolInstallations) {
+      if (normalizeProtocolRole(installation?.role, null) !== "handle") {
+        continue;
+      }
+      if (
+        !protocolTriggers.some((trigger) =>
+          protocolTriggerMatchesInstallation(trigger, installation),
+        )
+      ) {
+        throw new Error(
+          `Installed flow service cannot host local protocol installation "${resolveInstallationProtocolId(installation) ?? "protocol"}" because no matching protocol-request trigger is present in the program.`,
+        );
+      }
     }
 
     resolvedLocalAuthPoliciesById = nextResolvedLocalAuthPoliciesById;
@@ -2943,6 +3136,170 @@ export function createInstalledFlowService(options = {}) {
     };
   }
 
+  function protocolInstallationMatchesRequest(installation, request = {}) {
+    const requestedProtocolId = normalizeString(request.protocolId, null);
+    const requestedServiceName = normalizeString(request.serviceName, null);
+    const requestedNodeInfoUrl = normalizeString(request.nodeInfoUrl, null);
+    if (
+      requestedProtocolId &&
+      resolveInstallationProtocolId(installation) !== requestedProtocolId
+    ) {
+      return false;
+    }
+    if (
+      requestedServiceName &&
+      normalizeString(installation?.serviceName, null) !== requestedServiceName
+    ) {
+      return false;
+    }
+    if (
+      requestedNodeInfoUrl &&
+      normalizeString(installation?.nodeInfoUrl, null) !== requestedNodeInfoUrl
+    ) {
+      return false;
+    }
+    return true;
+  }
+
+  function resolveProtocolTrigger(request = {}) {
+    const protocolTriggers = listTriggersByKind(TriggerKind.PROTOCOL_REQUEST);
+    const requestedTriggerId = normalizeString(request.triggerId, null);
+    const requestedProtocolId = normalizeString(request.protocolId, null);
+    const handleInstallations = listHandleProtocolInstallations();
+    const matchingInstallations =
+      handleInstallations.length > 0
+        ? handleInstallations.filter((installation) =>
+            protocolInstallationMatchesRequest(installation, request),
+          )
+        : [];
+
+    if (handleInstallations.length > 0 && matchingInstallations.length === 0) {
+      throw createHttpStatusError(
+        404,
+        `No local protocol installation matches "${requestedProtocolId ?? requestedTriggerId ?? "request"}".`,
+        {
+          code: "protocol-installation-not-found",
+        },
+      );
+    }
+
+    const candidateTriggers = protocolTriggers.filter((trigger) => {
+      if (requestedTriggerId && trigger.triggerId !== requestedTriggerId) {
+        return false;
+      }
+      if (
+        requestedProtocolId &&
+        resolveTriggerProtocolId(trigger) !== requestedProtocolId
+      ) {
+        return false;
+      }
+      if (matchingInstallations.length === 0) {
+        return true;
+      }
+      return matchingInstallations.some((installation) =>
+        protocolTriggerMatchesInstallation(trigger, installation),
+      );
+    });
+
+    if (candidateTriggers.length === 0) {
+      throw createHttpStatusError(
+        404,
+        `No local protocol trigger matches "${requestedProtocolId ?? requestedTriggerId ?? "request"}".`,
+        {
+          code: "protocol-trigger-not-found",
+        },
+      );
+    }
+    if (!requestedTriggerId && candidateTriggers.length > 1) {
+      throw createHttpStatusError(
+        400,
+        `Protocol request "${requestedProtocolId ?? "request"}" matches multiple local triggers. Specify triggerId explicitly.`,
+        {
+          code: "protocol-trigger-ambiguous",
+        },
+      );
+    }
+
+    const trigger = candidateTriggers[0];
+    return {
+      trigger,
+      installation:
+        matchingInstallations.find((installation) =>
+          protocolTriggerMatchesInstallation(trigger, installation),
+        ) ?? {
+          protocolId: resolveTriggerProtocolId(trigger),
+        },
+    };
+  }
+
+  function listProtocolRequestFrames(request = {}) {
+    if (Array.isArray(request.frames) && request.frames.length > 0) {
+      return request.frames;
+    }
+    if (request.frame && typeof request.frame === "object") {
+      return [request.frame];
+    }
+    return [request];
+  }
+
+  function buildProtocolRequestTriggerFrame(
+    trigger,
+    input = {},
+    installation = null,
+  ) {
+    const protocolId =
+      normalizeString(input.protocolId, null) ??
+      resolveInstallationProtocolId(installation) ??
+      resolveTriggerProtocolId(trigger);
+    const requestId =
+      normalizeString(input.requestId, null) ??
+      `protocol:${protocolId ?? trigger.triggerId}:${Date.now()}`;
+    return buildBaseTriggerFrame(trigger, {
+      ...input,
+      traceId: input.traceId ?? requestId,
+      sequence: input.sequence ?? 1,
+      payload: input.payload ?? input.body ?? null,
+      metadata: {
+        requestId,
+        protocolId,
+        peerId:
+          normalizeString(input.peerId, null) ??
+          normalizeString(input.metadata?.peerId, null) ??
+          null,
+        serverKey:
+          normalizeString(input.serverKey, null) ??
+          normalizeString(input.metadata?.serverKey, null) ??
+          null,
+        entityId:
+          normalizeString(input.entityId, null) ??
+          normalizeString(input.metadata?.entityId, null) ??
+          null,
+        signedRequest: normalizeBooleanLike(
+          input.signedRequest ?? input.metadata?.signedRequest,
+          false,
+        ),
+        encryptedTransport: normalizeBooleanLike(
+          input.encryptedTransport ?? input.metadata?.encryptedTransport,
+          false,
+        ),
+        serviceName:
+          normalizeString(input.serviceName, null) ??
+          normalizeString(installation?.serviceName, null),
+        nodeInfoUrl:
+          normalizeString(input.nodeInfoUrl, null) ??
+          normalizeString(installation?.nodeInfoUrl, null),
+        listenMultiaddrs: cloneJsonCompatibleValue(
+          input.listenMultiaddrs ?? installation?.listenMultiaddrs ?? [],
+        ),
+        advertisedMultiaddrs: cloneJsonCompatibleValue(
+          input.advertisedMultiaddrs ?? installation?.advertisedMultiaddrs ?? [],
+        ),
+        description: trigger.description ?? null,
+        ...(input.metadata ?? {}),
+      },
+    });
+  }
+
   async function dispatchTriggerFrames(triggerId, frames) {
     await host.start();
     await assertSupportedLocalBindings();
@@ -2995,6 +3352,45 @@ export function createInstalledFlowService(options = {}) {
     };
   }
 
+  async function handleProtocolRequest(request = {}) {
+    await host.start();
+    await assertSupportedLocalBindings();
+    const { trigger, installation } = resolveProtocolTrigger(request);
+    await assertLocalProtocolRequestAuthorized(installation, request);
+    const response = await dispatchTriggerFrames(
+      trigger.triggerId,
+      listProtocolRequestFrames(request).map((frameInput, index) =>
+        buildProtocolRequestTriggerFrame(
+          trigger,
+          {
+            ...frameInput,
+            sequence:
+              frameInput?.sequence ??
+              request.sequence ??
+              index + 1,
+            metadata: {
+              ...(normalizeMetadata(request.metadata) ?? {}),
+              ...(normalizeMetadata(frameInput?.metadata) ?? {}),
+            },
+          },
+          installation,
+        ),
+      ),
+    );
+    return {
+      triggerId: trigger.triggerId,
+      protocolId:
+        resolveInstallationProtocolId(installation) ??
+        resolveTriggerProtocolId(trigger),
+      serviceName: normalizeString(installation?.serviceName, null),
+      authPolicies: resolveLocalAuthPoliciesForProtocolInstallation(
+        installation,
+      ).map((policy) => policy.policyId),
+      installation: cloneJsonCompatibleValue(installation),
+      ...response,
+    };
+  }
+
   function listTimerTriggers() {
     const activeTriggerIds = new Set(
       Array.from(timerHandles.values()).map((record) => record.triggerId),
@@ -3027,6 +3423,46 @@ export function createInstalledFlowService(options = {}) {
           null,
         description: trigger.description,
       }));
+  }
+
+  function listProtocolRoutes() {
+    const protocolTriggers = listTriggersByKind(TriggerKind.PROTOCOL_REQUEST);
+    const handleInstallations = listHandleProtocolInstallations();
+    if (handleInstallations.length === 0) {
+      return protocolTriggers.map((trigger) => {
+        const installation = {
+          protocolId: resolveTriggerProtocolId(trigger),
+        };
+        return {
+          triggerId: trigger.triggerId,
+          protocolId: resolveTriggerProtocolId(trigger),
+          serviceName: null,
+          nodeInfoUrl: null,
+          description: trigger.description,
+          authPolicies: resolveLocalAuthPoliciesForProtocolInstallation(
+            installation,
+          ).map((policy) => policy.policyId),
+        };
+      });
+    }
+    return handleInstallations.flatMap((installation) =>
+      protocolTriggers
+        .filter((trigger) =>
+          protocolTriggerMatchesInstallation(trigger, installation),
+        )
+        .map((trigger) => ({
+          triggerId: trigger.triggerId,
+          protocolId:
+            resolveInstallationProtocolId(installation) ??
+            resolveTriggerProtocolId(trigger),
+          serviceName: normalizeString(installation?.serviceName, null),
+          nodeInfoUrl: normalizeString(installation?.nodeInfoUrl, null),
+          description: trigger.description ?? installation.description ?? null,
+          authPolicies: resolveLocalAuthPoliciesForProtocolInstallation(
+            installation,
+          ).map((policy) => policy.policyId),
+        })),
+    );
   }
 
   function startTimerServices() {
@@ -3119,6 +3555,7 @@ export function createInstalledFlowService(options = {}) {
         ...startup,
         timerTriggers: listTimerTriggers(),
         httpRoutes: listHttpRoutes(),
+        protocolRoutes: listProtocolRoutes(),
         deploymentBindings: buildDeploymentBindingSummary(),
       };
     },
@@ -3135,6 +3572,7 @@ export function createInstalledFlowService(options = {}) {
         ...refreshResult,
         timerTriggers: listTimerTriggers(),
         httpRoutes: listHttpRoutes(),
+        protocolRoutes: listProtocolRoutes(),
         deploymentBindings: buildDeploymentBindingSummary(),
       };
     },
@@ -3145,8 +3583,10 @@ export function createInstalledFlowService(options = {}) {
     dispatchTriggerFrames,
     dispatchTimerTrigger,
     handleHttpRequest,
+    handleProtocolRequest,
     listTimerTriggers,
     listHttpRoutes,
+    listProtocolRoutes,
     getPublicationEventCount() {
       return publicationEvents.length;
     },
@@ -3164,6 +3604,7 @@ export function createInstalledFlowService(options = {}) {
         started,
         timerTriggers: listTimerTriggers(),
         httpRoutes: listHttpRoutes(),
+        protocolRoutes: listProtocolRoutes(),
         publicationEvents: publicationEvents.length,
         deploymentBindings: buildDeploymentBindingSummary(),
       };

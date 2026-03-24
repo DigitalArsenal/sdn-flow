@@ -7,13 +7,19 @@ import {
 } from "../runtime/index.js";
 
 function canonicalInterfaceKey(externalInterface) {
+  const interfaceId =
+    typeof externalInterface?.interfaceId === "string"
+      ? externalInterface.interfaceId.trim()
+      : "";
+  if (interfaceId.length > 0) {
+    return `interface:${interfaceId}`;
+  }
   return [
     externalInterface.kind,
     externalInterface.direction,
     externalInterface.capability,
     externalInterface.resource,
     externalInterface.protocolId,
-    externalInterface.topic,
     externalInterface.path,
   ]
     .map((value) => value ?? "")
