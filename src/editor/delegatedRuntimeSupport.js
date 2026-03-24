@@ -8,6 +8,18 @@ function normalizeString(value, fallback = null) {
 
 const delegatedRuntimeFamilies = Object.freeze([
   Object.freeze({
+    family: "file",
+    pluginId: "com.digitalarsenal.editor.file",
+    methodId: "invoke",
+    handlerKey: "com.digitalarsenal.editor.file:invoke",
+  }),
+  Object.freeze({
+    family: "file in",
+    pluginId: "com.digitalarsenal.editor.file-in",
+    methodId: "invoke",
+    handlerKey: "com.digitalarsenal.editor.file-in:invoke",
+  }),
+  Object.freeze({
     family: "delay",
     pluginId: "com.digitalarsenal.editor.delay",
     methodId: "invoke",

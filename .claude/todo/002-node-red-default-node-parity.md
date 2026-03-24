@@ -32,7 +32,6 @@ Status: active
 - [ ] `link call`
 - [ ] `debug`
 - [ ] immediate/manual `inject`
-- [ ] `read file` and `write file` on preopened roots
 
 ## `wasmedge` Bucket
 
@@ -57,6 +56,7 @@ Status: active
 - [ ] `status`
 - [ ] `complete`
 - [ ] browser-local inbound listener behavior
+- [ ] `read file` and `write file` on preopened roots
 - [ ] browser-only or OS-only watch/process semantics
 
 ## Required Work
@@ -76,6 +76,8 @@ Status: active
          Editor-only live-runtime families are now rejected through
          `src/editor/liveRuntimeSupport.js` instead of falling through generic
          live artifact lowering.
+         File reader/writer nodes now route through the delegated host-adapter
+         boundary instead of the generic JS bucket.
 
 3. Tests
    - [x] Add parity drift enforcement that checks the matrix against the

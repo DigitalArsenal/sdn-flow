@@ -35,25 +35,33 @@ function normalizeInvokeSurface(value, fallback = null) {
 }
 
 function normalizeDependencyInvokeSurface(dependency = {}) {
-  const explicitSurface = normalizeInvokeSurface(
-    dependency.invokeSurface ?? dependency.invoke_surface,
-    null,
-  );
-  if (explicitSurface) {
-    return explicitSurface;
-  }
-  const declaredSurfaces = normalizeArray(
-    dependency.invokeSurfaces ?? dependency.invoke_surfaces,
-  )
-    .map((surface) => normalizeInvokeSurface(surface, null))
-    .filter(Boolean);
+  const declaredSurfaces = normalizeDependencyInvokeSurfaces(dependency);
   if (declaredSurfaces.includes(InvokeSurface.DIRECT)) {
     return InvokeSurface.DIRECT;
   }
   if (declaredSurfaces.includes(InvokeSurface.COMMAND)) {
     return InvokeSurface.COMMAND;
   }
-  return InvokeSurface.DIRECT;
+  return declaredSurfaces[0] ?? InvokeSurface.DIRECT;
+}
+
+function normalizeDependencyInvokeSurfaces(dependency = {}) {
+  const declaredSurfaces = normalizeArray(
+    dependency.invokeSurfaces ?? dependency.invoke_surfaces,
+  )
+    .map((surface) => normalizeInvokeSurface(surface, null))
+    .filter(Boolean);
+  if (declaredSurfaces.length > 0) {
+    return Array.from(new Set(declaredSurfaces));
+  }
+  const explicitSurface = normalizeInvokeSurface(
+    dependency.invokeSurface ?? dependency.invoke_surface,
+    null,
+  );
+  if (explicitSurface) {
+    return [explicitSurface];
+  }
+  return [InvokeSurface.DIRECT];
 }
 
 function normalizeDependencyRuntimeExports(dependency = {}) {
@@ -231,6 +239,8 @@ function normalizeArtifactDependency(dependency = {}) {
     )
       .map((value) => normalizeString(value, null))
       .filter(Boolean),
+    invokeSurface: normalizeDependencyInvokeSurface(dependency),
+    invokeSurfaces: normalizeDependencyInvokeSurfaces(dependency),
     exports: normalizeArray(dependency.exports)
       .map((value) => normalizeString(value, null))
       .filter(Boolean),

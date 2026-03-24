@@ -1777,6 +1777,98 @@ test("runtime manager fails fast when delegated-only families are unavailable fo
   }
 });
 
+test("runtime manager fails fast when delegated filesystem families are unavailable for the runtime target", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "sdn-flow-editor-runtime-delegated-file-"));
+  let loadCalls = 0;
+
+  try {
+    const runtimePaths = getSdnFlowEditorRuntimePaths({ projectRoot: tempDir });
+    await writeSdnFlowEditorBuildFile(runtimePaths.currentBuildFilePath, {
+      kind: "sdn-flow-editor-flow-build",
+      version: 1,
+      compileId: "compile-delegated-file",
+      createdAt: "2026-03-18T12:00:00.000Z",
+      outputName: "flow-runtime",
+      runtimeModel: "compiled-cpp-wasm",
+      flows: [
+        {
+          id: "tab-1",
+          type: "tab",
+          label: "Unsupported File Family",
+        },
+        {
+          id: "inject-1",
+          z: "tab-1",
+          type: "inject",
+          wires: [["file-1"]],
+        },
+        {
+          id: "file-1",
+          z: "tab-1",
+          type: "file",
+          filename: "runtime/output.txt",
+          filenameType: "str",
+          wires: [],
+        },
+      ],
+      serializedArtifact: {
+        artifactId: "flow-delegated-file:deadbeef",
+        programId: "flow-delegated-file",
+      },
+      artifactSummary: {
+        artifactId: "flow-delegated-file:deadbeef",
+        programId: "flow-delegated-file",
+      },
+      program: {
+        programId: "flow-delegated-file",
+        triggers: [
+          {
+            triggerId: "trigger-inject-1",
+          },
+        ],
+        nodes: [
+          {
+            nodeId: "file-1",
+            pluginId: "com.digitalarsenal.editor.file",
+            methodId: "invoke",
+          },
+        ],
+      },
+    });
+
+    const manager = createSdnFlowEditorRuntimeManager({
+      projectRoot: tempDir,
+      delegatedRuntimeSupport: false,
+      async loadCompiledRuntimeHost() {
+        loadCalls += 1;
+        return {
+          artifact: {
+            programId: "flow-delegated-file",
+            wasm: new Uint8Array([0x00, 0x61, 0x73, 0x6d]),
+          },
+          host: {
+            resetRuntimeState() {},
+            async destroyDependencies() {},
+          },
+        };
+      },
+      logError() {},
+    });
+
+    await manager.initialize();
+
+    const status = manager.getRuntimeStatus();
+    assert.equal(loadCalls, 0);
+    assert.equal(status.compiledRuntimeLoaded, false);
+    assert.match(
+      status.lastArtifactLoadError,
+      /Delegated editor runtime support for file node "file-1" is unavailable\. Enable delegated support for this editor runtime target\./,
+    );
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("runtime manager routes link out fan-out and link call returns through the compiled runtime", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "sdn-flow-editor-runtime-links-"));
   const runtimePaths = getSdnFlowEditorRuntimePaths({ projectRoot: tempDir });
@@ -2127,9 +2219,18 @@ test("runtime manager executes file write and file in nodes through the compiled
     await manager.dispatchInject("inject-file-read-runtime");
     await new Promise((resolve) => setTimeout(resolve, 150));
 
+    const runtimeClassification = manager.getRuntimeStatus().runtimeClassification;
     const debugMessages = manager.getRuntimeStatus().debugMessages.map((entry) => entry.message);
     const fileEvents = debugMessages.filter((entry) => entry.name === "file debug");
 
+    assert.equal(
+      runtimeClassification.nodeFamilies.find((entry) => entry.family === "file")?.classification,
+      "delegated",
+    );
+    assert.equal(
+      runtimeClassification.nodeFamilies.find((entry) => entry.family === "file in")?.classification,
+      "delegated",
+    );
     assert.deepEqual(fileEvents.map((entry) => entry.msg.payload), ["alpha", "beta"]);
     assert.deepEqual(fileEvents.map((entry) => entry.msg.parts.index), [0, 1]);
     assert.ok(fileEvents.every((entry) => entry.msg.parts.count === 2));

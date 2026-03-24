@@ -633,11 +633,34 @@ test("artifact dependency normalization does not force direct invoke defaults fo
     invokeSurface: InvokeSurface.COMMAND,
   });
 
+  assert.equal(normalized.invokeSurface, InvokeSurface.COMMAND);
+  assert.deepEqual(normalized.invokeSurfaces, [InvokeSurface.COMMAND]);
   assert.deepEqual(normalized.runtimeExports, {
     initSymbol: null,
     destroySymbol: null,
     mallocSymbol: null,
     freeSymbol: null,
     streamInvokeSymbol: null,
+  });
+});
+
+test("artifact dependency normalization prefers direct when both invoke surfaces are declared", () => {
+  const normalized = normalizeArtifactDependency({
+    dependencyId: "dep-dual",
+    pluginId: "com.digitalarsenal.runtime.dual",
+    invokeSurfaces: [InvokeSurface.COMMAND, InvokeSurface.DIRECT],
+  });
+
+  assert.equal(normalized.invokeSurface, InvokeSurface.DIRECT);
+  assert.deepEqual(normalized.invokeSurfaces, [
+    InvokeSurface.COMMAND,
+    InvokeSurface.DIRECT,
+  ]);
+  assert.deepEqual(normalized.runtimeExports, {
+    initSymbol: null,
+    destroySymbol: null,
+    mallocSymbol: DefaultInvokeExports.allocSymbol,
+    freeSymbol: DefaultInvokeExports.freeSymbol,
+    streamInvokeSymbol: DefaultInvokeExports.invokeSymbol,
   });
 });

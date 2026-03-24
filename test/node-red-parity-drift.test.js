@@ -117,10 +117,14 @@ test("parity matrix current-state claims match the runtime support we ship", asy
   for (const [family, handlerKey] of RUNTIME_HANDLER_KEYS.entries()) {
     const row = rowsByFamily.get(family);
     assert.ok(row, `Matrix is missing a row for shipped family "${family}".`);
+    const expectedCurrentState =
+      family === "file" || family === "file in"
+        ? "delegated/wrapper"
+        : "JS runtime";
     assert.equal(
       row.currentState,
-      "JS runtime",
-      `Matrix says "${family}" is not JS runtime-backed anymore.`,
+      expectedCurrentState,
+      `Matrix says "${family}" has drifted from the shipped runtime bucket.`,
     );
     assert.ok(
       runtimeManagerSource.includes(handlerKey),

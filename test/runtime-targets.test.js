@@ -12,6 +12,7 @@ import {
   HostedRuntimeEngine,
   listCompiledArtifactRuntimeTargets,
   normalizeCompiledArtifact,
+  InvokeSurface,
   RuntimeTarget,
   startStandaloneFlowRuntime,
   summarizeHostedRuntimePlan,
@@ -46,6 +47,22 @@ test("buildDefaultFlowManifestBuffer infers standalone wasi for pure manual flow
   assert.equal(manifest?.pluginId, "com.digitalarsenal.tests.runtime-targets");
   assert.deepEqual(manifest?.invokeSurfaces, ["direct", "command"]);
   assert.deepEqual(manifest?.runtimeTargets, [RuntimeTarget.WASI]);
+});
+
+test("buildDefaultFlowManifestBuffer narrows invoke surfaces from dependency metadata", () => {
+  const manifestBuffer = buildDefaultFlowManifestBuffer({
+    program: createProgram(),
+    dependencies: [
+      {
+        dependencyId: "dep-command",
+        pluginId: "com.digitalarsenal.runtime.command",
+        invokeSurface: InvokeSurface.COMMAND,
+      },
+    ],
+  });
+
+  const manifest = decodeCompiledArtifactManifest({ manifestBuffer });
+  assert.deepEqual(manifest?.invokeSurfaces, [InvokeSurface.COMMAND]);
 });
 
 test("buildDefaultFlowManifestBuffer infers hosted server targets and honors explicit wasmedge overrides", () => {

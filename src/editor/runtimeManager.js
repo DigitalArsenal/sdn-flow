@@ -5674,7 +5674,7 @@ export function createSdnFlowEditorRuntimeManager(options = {}) {
         };
       },
     );
-    runtimeHandlers.set(
+    delegatedRuntimeHandlers.set(
       "com.digitalarsenal.editor.file:invoke",
       async ({ dispatchDescriptor, inputs }) => {
         const nodeConfig = getActiveFlowNode(dispatchDescriptor?.nodeId);
@@ -5698,7 +5698,7 @@ export function createSdnFlowEditorRuntimeManager(options = {}) {
         };
       },
     );
-    runtimeHandlers.set(
+    delegatedRuntimeHandlers.set(
       "com.digitalarsenal.editor.file-in:invoke",
       async ({ dispatchDescriptor, inputs }) => {
         const nodeConfig = getActiveFlowNode(dispatchDescriptor?.nodeId);

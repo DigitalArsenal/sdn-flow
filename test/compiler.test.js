@@ -4,6 +4,8 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 
 import {
+  buildDefaultFlowManifestBuffer,
+  decodeCompiledArtifactManifest,
   createSdkEmceptionSession,
   EmceptionCompilerAdapter,
   SignedArtifactCatalog,
@@ -237,6 +239,55 @@ test("emception compiler adapter prepares a single-source C++ compile plan with 
     await emception.removeDirectory(workingDirectory).catch(() => {});
     await emception.dispose().catch(() => {});
   }
+});
+
+test("emception compiler adapter carries dependency invoke-surface metadata into the manifest buffer", async () => {
+  const program = {
+    programId: "com.digitalarsenal.tests.command-only",
+    version: "0.2.8",
+    nodes: [],
+    edges: [],
+    triggers: [],
+    triggerBindings: [],
+    requiredPlugins: [],
+    artifactDependencies: [
+      {
+        dependencyId: "dep-command",
+        pluginId: "com.digitalarsenal.runtime.command",
+        version: "1.0.0",
+        invokeSurface: "command",
+      },
+    ],
+  };
+  const catalog = new SignedArtifactCatalog();
+  catalog.registerArtifact({
+    dependencyId: "dep-command",
+    pluginId: "com.digitalarsenal.runtime.command",
+    version: "1.0.0",
+    signature: "sig",
+    signerPublicKey: "pub",
+    invokeSurface: "command",
+    runtimeExports: {
+      initSymbol: null,
+      destroySymbol: null,
+      mallocSymbol: null,
+      freeSymbol: null,
+      streamInvokeSymbol: null,
+    },
+    wasm: wasmBytes(9),
+    manifestBuffer: new Uint8Array([0x50, 0x4c, 0x55, 0x47, 0x09]),
+  });
+
+  const compiler = new EmceptionCompilerAdapter({
+    artifactCatalog: catalog,
+    manifestBuilder: buildDefaultFlowManifestBuffer,
+  });
+
+  const prepared = await compiler.prepareCompile({ program });
+  const manifest = decodeCompiledArtifactManifest({
+    manifestBuffer: prepared.manifestBuffer,
+  });
+  assert.deepEqual(manifest?.invokeSurfaces, ["command"]);
 });
 
 test("emception compiler adapter rejects artifact compilation without an SDK emception session", async () => {

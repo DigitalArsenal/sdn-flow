@@ -115,6 +115,71 @@ function deploymentPlanUsesHostedBindings(deploymentPlan = null) {
   );
 }
 
+function normalizeInvokeSurfaceList(values) {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  const ordered = [];
+  for (const value of values) {
+    const normalized = normalizeString(value, null);
+    if (
+      (normalized === InvokeSurface.DIRECT ||
+        normalized === InvokeSurface.COMMAND) &&
+      !ordered.includes(normalized)
+    ) {
+      ordered.push(normalized);
+    }
+  }
+  ordered.sort((left, right) => {
+    const order = {
+      [InvokeSurface.DIRECT]: 0,
+      [InvokeSurface.COMMAND]: 1,
+    };
+    return (order[left] ?? 99) - (order[right] ?? 99);
+  });
+  return ordered;
+}
+
+function collectDependencyInvokeSurfaces(dependencies = []) {
+  const surfaces = [];
+  if (!Array.isArray(dependencies)) {
+    return surfaces;
+  }
+  for (const dependency of dependencies) {
+    const dependencySurfaces = normalizeInvokeSurfaceList(
+      dependency?.invokeSurfaces ?? dependency?.invoke_surfaces,
+    );
+    const normalizedSurfaces =
+      dependencySurfaces.length > 0
+        ? dependencySurfaces
+        : normalizeInvokeSurfaceList([
+            dependency?.invokeSurface ?? dependency?.invoke_surface,
+          ]);
+    for (const surface of normalizedSurfaces) {
+      if (!surfaces.includes(surface)) {
+        surfaces.push(surface);
+      }
+    }
+  }
+  return surfaces;
+}
+
+function inferFlowInvokeSurfaces(options = {}) {
+  const explicitSurfaces = normalizeInvokeSurfaceList(
+    options.invokeSurfaces ?? options.invoke_surfaces,
+  );
+  if (explicitSurfaces.length > 0) {
+    return explicitSurfaces;
+  }
+  const dependencySurfaces = collectDependencyInvokeSurfaces(
+    options.dependencies ?? [],
+  );
+  if (dependencySurfaces.length > 0) {
+    return dependencySurfaces;
+  }
+  return [InvokeSurface.DIRECT, InvokeSurface.COMMAND];
+}
+
 export function inferFlowRuntimeTargets(options = {}) {
   const normalizedProgram = normalizeProgram(options.program ?? {});
   const explicitTargets = normalizeStringArray(
@@ -222,7 +287,7 @@ export function buildDefaultFlowManifest(options = {}) {
       "0.1.0",
     pluginFamily: "flow",
     capabilities: normalizeStringArray(requirements.capabilities),
-    invokeSurfaces: [InvokeSurface.DIRECT, InvokeSurface.COMMAND],
+    invokeSurfaces: inferFlowInvokeSurfaces(options),
     runtimeTargets: inferFlowRuntimeTargets({
       ...options,
       program: normalizedProgram,
