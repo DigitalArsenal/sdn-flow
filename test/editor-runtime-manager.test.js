@@ -5,6 +5,7 @@ import { Buffer } from "node:buffer";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+import { deserialize as deserializeStructuredValue } from "node:v8";
 
 import {
   buildSdnFlowEditorUrl,
@@ -36,6 +37,10 @@ async function writeDummyEditorExecutable(_command, args) {
   const outputPath = String(args?.at?.(-1) ?? "");
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
   await fs.writeFile(outputPath, "binary", "utf8");
+}
+
+function decodeRuntimeFramePayload(frame = {}) {
+  return deserializeStructuredValue(frame.bytes);
 }
 
 test("runtime paths resolve generated-tools, archive, and session locations", () => {
@@ -464,7 +469,11 @@ test("runtime manager dispatches inject triggers through the active compiled run
     assert.equal(result.idle, true);
     assert.equal(capturedFrames.length, 1);
     assert.equal(capturedFrames[0].triggerIndex, 0);
-    const payload = JSON.parse(Buffer.from(capturedFrames[0].frame.bytes).toString("utf8"));
+    assert.equal(
+      capturedFrames[0].frame.typeRef?.wireFormat,
+      "v8-structured",
+    );
+    const payload = decodeRuntimeFramePayload(capturedFrames[0].frame);
     assert.equal(payload.payload, "hello");
     assert.equal(payload.topic, "demo");
   } finally {
@@ -574,7 +583,7 @@ test("runtime manager honors custom inject props sent by the editor UI", async (
     });
     assert.equal(result.idle, true);
     assert.equal(capturedFrames.length, 1);
-    const payload = JSON.parse(Buffer.from(capturedFrames[0].frame.bytes).toString("utf8"));
+    const payload = decodeRuntimeFramePayload(capturedFrames[0].frame);
     assert.equal(payload.payload, "override");
     assert.equal(payload.topic, "custom");
     assert.equal(payload.traceId, "trace-123");
@@ -714,7 +723,7 @@ test("runtime manager dispatches HTTP requests through http in triggers and retu
 
     assert.equal(capturedFrames.length, 1);
     assert.equal(capturedFrames[0].triggerIndex, 0);
-    const payload = JSON.parse(Buffer.from(capturedFrames[0].frame.bytes).toString("utf8"));
+    const payload = decodeRuntimeFramePayload(capturedFrames[0].frame);
     assert.equal(payload._msgid, "req-123");
     assert.deepEqual(payload.payload, {
       enabled: true,
@@ -728,6 +737,65 @@ test("runtime manager dispatches HTTP requests through http in triggers and retu
     assert.deepEqual(payload.req.query, {
       view: "full",
     });
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("runtime manager preserves Uint8Array payloads across the compiled editor runtime transport", async () => {
+  const tempDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "sdn-flow-editor-runtime-binary-payload-"),
+  );
+
+  try {
+    const manager = createSdnFlowEditorRuntimeManager({
+      projectRoot: tempDir,
+      compileFlowArtifact: compileEditorFlowInRepo,
+      runBuildCommand: writeDummyEditorExecutable,
+      logError() {},
+    });
+
+    await manager.initialize();
+    await manager.scheduleCompile([
+      { id: "tab-binary", type: "tab", label: "Binary Flow" },
+      {
+        id: "inject-binary",
+        z: "tab-binary",
+        type: "inject",
+        props: [
+          {
+            p: "payload",
+            v: "placeholder",
+            vt: "str",
+          },
+        ],
+        wires: [["debug-binary"]],
+      },
+      {
+        id: "debug-binary",
+        z: "tab-binary",
+        type: "debug",
+        active: true,
+        complete: "payload",
+        targetType: "msg",
+        wires: [],
+      },
+    ]);
+    await manager.waitForActiveCompile();
+
+    await manager.dispatchInject("inject-binary", {
+      payload: new Uint8Array([5, 6, 7, 8]),
+      topic: "binary-demo",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    const debugEntry = manager
+      .getRuntimeStatus()
+      .debugMessages.findLast((entry) => entry.message?.path === "tab-binary");
+    assert.ok(debugEntry);
+    assert.equal(debugEntry.message.format, "Uint8Array[4]");
+    assert.ok(debugEntry.message.msg instanceof Uint8Array);
+    assert.deepEqual(Array.from(debugEntry.message.msg), [5, 6, 7, 8]);
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }

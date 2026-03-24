@@ -72,7 +72,10 @@ Status: active
    - [ ] Move remaining deterministic node semantics into compiled C++/WASM.
    - [ ] Implement guest-owned network node families against the `wasmedge`
          target.
-   - [ ] Keep the delegated bucket explicitly small and documented.
+   - [x] Keep the delegated bucket explicitly small and documented.
+         Editor-only live-runtime families are now rejected through
+         `src/editor/liveRuntimeSupport.js` instead of falling through generic
+         live artifact lowering.
 
 3. Tests
    - [x] Add parity drift enforcement that checks the matrix against the

@@ -137,6 +137,36 @@ test("compileNodeRedFlowsToSdnArtifact derives delegated HTTP service bindings f
   });
 });
 
+test("compileNodeRedFlowsToSdnArtifact rejects editor-only live-runtime families before compilation", async () => {
+  await assert.rejects(
+    compileNodeRedFlowsToSdnArtifact(
+      [
+        {
+          id: "flow-1",
+          type: "tab",
+          label: "Flow 1",
+        },
+        {
+          id: "rbe-1",
+          z: "flow-1",
+          type: "rbe",
+          wires: [["watch-1"]],
+        },
+        {
+          id: "watch-1",
+          z: "flow-1",
+          type: "watch",
+          wires: [],
+        },
+      ],
+      {
+        outputName: "flow-runtime",
+      },
+    ),
+    /Cannot compile a live runtime artifact for editor-only Node-RED families: "rbe" \(rbe-1\), "watch" \(watch-1\)/,
+  );
+});
+
 test("compileNodeRedFlowsToSdnArtifact rejects direct compiler overrides for artifact builds", async () => {
   await assert.rejects(
     compileNodeRedFlowsToSdnArtifact(

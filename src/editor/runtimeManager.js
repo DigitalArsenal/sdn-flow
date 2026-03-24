@@ -6,6 +6,7 @@ import { Buffer } from "node:buffer";
 import { exec as childProcessExec, spawn as childProcessSpawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
+import { deserialize as deserializeStructuredValue, serialize as serializeStructuredValue } from "node:v8";
 import cronosjs from "cronosjs";
 import yaml from "js-yaml";
 import mustache from "mustache";
@@ -39,8 +40,11 @@ const SDN_FLOW_EDITOR_MAX_REPEAT_SECONDS = 2147483;
 const SDN_FLOW_EDITOR_DEFAULT_ONCE_DELAY_SECONDS = 0.1;
 const SDN_FLOW_EDITOR_DEFAULT_EXEC_MAX_BUFFER_BYTES = 10_000_000;
 const SDN_FLOW_EDITOR_RUNTIME_MESSAGE_TYPE = Object.freeze({
-  schemaName: "sdn-flow.editor.message",
+  schemaName: "sdn-flow.editor.runtime-envelope",
+  fileIdentifier: "SDRE",
   acceptsAnyFlatbuffer: true,
+  wireFormat: "v8-structured",
+  rootTypeName: "SdnFlowEditorRuntimeEnvelope",
 });
 const SDN_FLOW_EDITOR_RUNTIME_CLASSIFICATION = Object.freeze({
   COMPILED: "compiled",
@@ -75,11 +79,7 @@ function toByteArray(value) {
 }
 
 function encodeRuntimePayload(value) {
-  const bytes = toByteArray(value);
-  if (bytes) {
-    return new Uint8Array(bytes);
-  }
-  return textEncoder.encode(JSON.stringify(value ?? null));
+  return new Uint8Array(serializeStructuredValue(value ?? null));
 }
 
 function decodeRuntimePayload(value) {
@@ -87,11 +87,16 @@ function decodeRuntimePayload(value) {
   if (!bytes || bytes.length === 0) {
     return null;
   }
+  try {
+    return deserializeStructuredValue(bytes);
+  } catch {
+    // Fall back for legacy JSON/text frames that may still be in flight.
+  }
   const text = textDecoder.decode(bytes);
   try {
     return JSON.parse(text);
   } catch {
-    return text;
+    return new Uint8Array(bytes);
   }
 }
 

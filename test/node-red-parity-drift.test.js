@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 
 import { NodeRedNodeSets } from "../src/editor/nodeRedRegistry.generated.js";
+import { EDITOR_ONLY_LIVE_RUNTIME_NODE_FAMILIES } from "../src/editor/liveRuntimeSupport.js";
 
 const MATRIX_PATH = new URL("../docs/node-red-parity-matrix.md", import.meta.url);
 const RUNTIME_MANAGER_PATH = new URL("../src/editor/runtimeManager.js", import.meta.url);
@@ -174,5 +175,20 @@ test("parity matrix current-state claims match the runtime support we ship", asy
     runtimeManagerSource,
     /async handleHttpRequest\(request = \{\}\)/,
     "The HTTP wrapper path disappeared from the runtime manager.",
+  );
+});
+
+test("editor-only matrix families stay aligned with the explicit live-runtime rejection inventory", async () => {
+  const matrixText = await fs.readFile(MATRIX_PATH, "utf8");
+  const matrixRows = parseMatrixRows(matrixText);
+  const editorOnlyFamilies = matrixRows
+    .filter((row) => row.currentState === "editor-only")
+    .flatMap((row) => splitFamilies(row.families))
+    .sort();
+
+  assert.deepEqual(
+    [...EDITOR_ONLY_LIVE_RUNTIME_NODE_FAMILIES].sort(),
+    editorOnlyFamilies,
+    "The explicit editor-only live-runtime inventory drifted from the checked-in parity matrix.",
   );
 });

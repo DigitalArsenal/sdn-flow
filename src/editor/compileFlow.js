@@ -12,6 +12,10 @@ import { createFlowDeploymentPlan } from "../deploy/deploymentPlan.js";
 import { serializeCompiledArtifact } from "../deploy/compiledArtifact.js";
 import { convertNodeRedFlowsToSdnProgram } from "./flowLowering.js";
 import { SDN_FLOW_EDITOR_ARTIFACT_OUTPUT_NAME } from "./compileConfig.js";
+import {
+  collectEditorOnlyLiveRuntimeNodes,
+  createEditorOnlyLiveRuntimeError,
+} from "./liveRuntimeSupport.js";
 
 const PACKAGE_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
@@ -162,6 +166,15 @@ export async function compileNodeRedFlows(flows = [], options = {}) {
   const outputName =
     options.outputName ?? SDN_FLOW_EDITOR_ARTIFACT_OUTPUT_NAME;
   const { program, warnings } = convertNodeRedFlowsToSdnProgram(flows);
+  const unsupportedLiveRuntimeNodes = collectEditorOnlyLiveRuntimeNodes(flows);
+  if (
+    mode === SdnFlowEditorCompileMode.ARTIFACT &&
+    unsupportedLiveRuntimeNodes.length > 0
+  ) {
+    throw new Error(
+      createEditorOnlyLiveRuntimeError(unsupportedLiveRuntimeNodes),
+    );
+  }
   const deploymentPlan = createFlowDeploymentPlan(program, {
     deploymentPlan: options.deploymentPlan,
     pluginId: options.pluginId,

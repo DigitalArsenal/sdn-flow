@@ -177,6 +177,50 @@ test("convertNodeRedFlowsToSdnProgram lowers http in nodes into HTTP triggers", 
   ]);
 });
 
+test("convertNodeRedFlowsToSdnProgram warns when editor-only live-runtime families are present", () => {
+  const { program, warnings } = convertNodeRedFlowsToSdnProgram([
+    {
+      id: "tab-1",
+      type: "tab",
+      label: "Editor Only",
+    },
+    {
+      id: "watch-1",
+      z: "tab-1",
+      type: "watch",
+      wires: [["debug-1"]],
+    },
+    {
+      id: "debug-1",
+      z: "tab-1",
+      type: "debug",
+      wires: [],
+    },
+  ]);
+
+  assert.deepEqual(
+    program.nodes.map((node) => ({
+      nodeId: node.nodeId,
+      pluginId: node.pluginId,
+    })),
+    [
+      {
+        nodeId: "watch-1",
+        pluginId: "com.digitalarsenal.editor.watch",
+      },
+      {
+        nodeId: "debug-1",
+        pluginId: "com.digitalarsenal.editor.debug",
+      },
+    ],
+  );
+  assert.match(
+    warnings[0],
+    /"watch" \(watch-1\) remains editor-only for live execution/i,
+  );
+  assert.match(warnings[0], /preview lowering is structural only/i);
+});
+
 test("compile preview subprocess always resolves the packaged helper script", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "sdn-flow-editor-preview-script-"));
   const scriptPath = path.join(tempDir, "scripts", "editor-compile-preview.mjs");

@@ -1,3 +1,8 @@
+import {
+  createEditorOnlyLiveRuntimeWarning,
+  isEditorOnlyLiveRuntimeFamily,
+} from "./liveRuntimeSupport.js";
+
 function normalizeString(value, fallback = "") {
   if (typeof value !== "string") {
     return fallback;
@@ -267,6 +272,15 @@ export function convertNodeRedFlowsToSdnProgram(flows = []) {
       type,
       config: extractEditorNodeConfig(node),
     };
+
+    if (isEditorOnlyLiveRuntimeFamily(type)) {
+      warnings.push(
+        createEditorOnlyLiveRuntimeWarning({
+          nodeId,
+          type,
+        }),
+      );
+    }
 
     if (type === "inject") {
       const trigger = buildTriggerForInjectNode(node);
