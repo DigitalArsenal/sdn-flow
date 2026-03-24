@@ -90,6 +90,7 @@ export {
   createNpmPackageManager,
 } from "./packageManagers.js";
 export {
+  describeHostedBindingDelegation,
   normalizeHostedBinding,
   normalizeHostedRuntime,
   normalizeHostedRuntimePlan,

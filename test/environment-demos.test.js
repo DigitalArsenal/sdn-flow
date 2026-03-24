@@ -235,6 +235,16 @@ test("environment host plans summarize the intended host adapters and bindings",
   assert.equal(browserSummary.adapter, "sdn-js");
   assert.equal(browserSummary.engine, "browser");
   assert.equal(browserSummary.transports.includes("same-app"), true);
+  assert.deepEqual(
+    browserSummary.delegatedBindings.map((binding) => binding.bindingId),
+    ["browser-cache-loopback"],
+  );
+  assert.deepEqual(browserSummary.standaloneBindings, []);
+  assert.deepEqual(browserSummary.delegatedBindings[0].delegationReasons, [
+    "browser-host-surface",
+    "browser-inbound-listener",
+    "browser-same-app-bridge",
+  ]);
   assert.equal(jsSummary.engine, "deno");
   assert.equal(jsSummary.transports.includes("http"), true);
   assert.equal(goSummary.engine, "go");

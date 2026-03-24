@@ -119,6 +119,8 @@ test("listInstalledFlowHttpBindings extracts host-plan HTTP listen bindings for 
       programId: "com.digitalarsenal.examples.http-app-host",
       adapter: "sdn-js",
       engine: "deno",
+      delegated: false,
+      delegationReasons: [],
       binding: {
         bindingId: "catalog-http-listener",
         direction: "listen",
@@ -154,6 +156,7 @@ test("startInstalledFlowAppHost binds HTTP listeners through the injected serve 
   });
 
   assert.equal(host.listeners.length, 1);
+  assert.equal(host.listeners[0].delegated, false);
   assert.equal(serveCalls.length, 1);
   assert.equal(serveCalls[0].binding.bindingId, "catalog-http-listener");
 

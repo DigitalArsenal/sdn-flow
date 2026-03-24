@@ -8,7 +8,8 @@ It uses:
 - timer trigger
 - outbound HTTP to CelesTrak
 - browser-managed cache storage
-- same-app runtime inspection binding
+- same-app runtime inspection binding exposed as a delegated browser bridge, not
+  a standalone listener
 
 The host profile is OrbPro browser with the `sdn-js` adapter family.
 The intended browser-runtime binding path is

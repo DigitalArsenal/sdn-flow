@@ -187,6 +187,12 @@ test("startInstalledFlowBrowserFetchHost registers and removes a fetch listener"
   });
 
   assert.equal(host.bindingContexts.length, 1);
+  assert.equal(host.bindingContexts[0].delegated, true);
+  assert.deepEqual(host.bindingContexts[0].delegationReasons, [
+    "browser-host-surface",
+    "browser-inbound-listener",
+    "browser-fetch-handler",
+  ]);
   assert.equal(registeredListeners.length, 1);
   assert.equal(registeredListeners[0].eventType, "fetch");
 

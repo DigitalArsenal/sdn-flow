@@ -3,7 +3,10 @@ import {
   HostedRuntimeBindingDirection,
   HostedRuntimeTransport,
 } from "./constants.js";
-import { normalizeHostedRuntimePlan } from "./normalize.js";
+import {
+  describeHostedBindingDelegation,
+  normalizeHostedRuntimePlan,
+} from "./normalize.js";
 
 function normalizeString(value, fallback = null) {
   if (typeof value !== "string") {
@@ -38,6 +41,10 @@ export function listInstalledFlowHttpBindings(options = {}) {
         programId: runtime.programId ?? null,
         adapter: runtime.adapter ?? hostPlan?.adapter ?? null,
         engine: runtime.engine ?? hostPlan?.engine ?? null,
+        ...describeHostedBindingDelegation({
+          engine: runtime.engine ?? hostPlan?.engine ?? null,
+          binding,
+        }),
         binding,
       });
     }

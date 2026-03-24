@@ -63,7 +63,7 @@ Standalone `wasi`:
 - [ ] WebSocket and MQTT via guest libraries over sockets/TLS
 
 Delegated or wrapper-only:
-- [ ] browser inbound listeners
+- [x] browser inbound listeners
 - [ ] browser filesystem beyond the chosen portable adapter
 - [ ] file watch
 - [ ] cron scheduling
@@ -76,5 +76,5 @@ Delegated or wrapper-only:
 - [x] Pure `wasi` artifacts run without installed-host wrappers.
 - [x] `wasmedge` artifacts run without installed-host wrappers for supported
       guest networking paths.
-- [ ] Browser deployments clearly declare delegated bindings instead of
+- [x] Browser deployments clearly declare delegated bindings instead of
       pretending to be standalone.

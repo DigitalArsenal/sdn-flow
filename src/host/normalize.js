@@ -2,6 +2,7 @@ import {
   HostedRuntimeAdapter,
   HostedRuntimeAuthority,
   HostedRuntimeBindingDirection,
+  HostedRuntimeEngine,
   HostedRuntimeKind,
   HostedRuntimeStartupPhase,
   HostedRuntimeTransport,
@@ -331,6 +332,32 @@ function bindingSupportsDisconnectedOperation(binding) {
   );
 }
 
+export function describeHostedBindingDelegation({
+  engine = null,
+  binding = null,
+} = {}) {
+  const normalizedEngine = normalizeHostedRuntimeEngine(engine, null);
+  const reasons = [];
+
+  if (normalizedEngine === HostedRuntimeEngine.BROWSER) {
+    reasons.push("browser-host-surface");
+    if (binding?.direction === HostedRuntimeBindingDirection.LISTEN) {
+      reasons.push("browser-inbound-listener");
+    }
+    if (binding?.transport === HostedRuntimeTransport.HTTP) {
+      reasons.push("browser-fetch-handler");
+    }
+    if (binding?.transport === HostedRuntimeTransport.SAME_APP) {
+      reasons.push("browser-same-app-bridge");
+    }
+  }
+
+  return {
+    delegated: reasons.length > 0,
+    delegationReasons: reasons,
+  };
+}
+
 export function summarizeHostedRuntimePlan(planInput = {}) {
   const plan = normalizeHostedRuntimePlan(planInput);
   const startupOrder = buildStartupOrder(plan.runtimes);
@@ -347,9 +374,19 @@ export function summarizeHostedRuntimePlan(planInput = {}) {
       adapters.add(runtime.adapter);
     }
     for (const binding of runtime.bindings) {
+      const resolvedEngine = runtime.engine ?? plan.engine;
+      const delegation = describeHostedBindingDelegation({
+        engine: resolvedEngine,
+        binding,
+      });
       bindings.push({
         ownerRuntimeId: runtime.runtimeId,
+        programId: runtime.programId,
         startupPhase: runtime.startupPhase,
+        adapter: runtime.adapter ?? plan.adapter,
+        engine: resolvedEngine,
+        delegated: delegation.delegated,
+        delegationReasons: delegation.delegationReasons,
         ...binding,
       });
       transports.add(binding.transport);
@@ -361,6 +398,11 @@ export function summarizeHostedRuntimePlan(planInput = {}) {
     bindings.every((binding) =>
       binding.required ? bindingSupportsDisconnectedOperation(binding) : true,
     );
+  const sortedBindings = bindings.sort((left, right) =>
+    `${left.ownerRuntimeId}:${left.direction}:${left.transport}:${left.protocolId ?? ""}`.localeCompare(
+      `${right.ownerRuntimeId}:${right.direction}:${right.transport}:${right.protocolId ?? ""}`,
+    ),
+  );
 
   return {
     hostId: plan.hostId,
@@ -424,15 +466,14 @@ export function summarizeHostedRuntimePlan(planInput = {}) {
           runtimeTargets: runtime.runtimeTargets,
         }),
       })),
-    bindings: bindings.sort((left, right) =>
-      `${left.ownerRuntimeId}:${left.direction}:${left.transport}:${left.protocolId ?? ""}`.localeCompare(
-        `${right.ownerRuntimeId}:${right.direction}:${right.transport}:${right.protocolId ?? ""}`,
-      ),
-    ),
+    bindings: sortedBindings,
+    delegatedBindings: sortedBindings.filter((binding) => binding.delegated),
+    standaloneBindings: sortedBindings.filter((binding) => !binding.delegated),
   };
 }
 
 export default {
+  describeHostedBindingDelegation,
   normalizeHostedBinding,
   normalizeHostedRuntime,
   normalizeHostedRuntimePlan,
