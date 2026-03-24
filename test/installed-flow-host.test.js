@@ -119,6 +119,105 @@ function createAuthenticatedHttpServiceOptions(extra = {}) {
   };
 }
 
+function createAuthenticatedIpfsServiceOptions(extra = {}) {
+  return {
+    program: {
+      programId: "com.digitalarsenal.examples.authenticated-ipfs-service",
+      nodes: [
+        {
+          nodeId: "retention",
+          pluginId: "com.digitalarsenal.examples.memory.auth-ipfs",
+          methodId: "apply_retention",
+        },
+      ],
+      edges: [],
+      triggers: [],
+      triggerBindings: [],
+      requiredPlugins: ["com.digitalarsenal.examples.memory.auth-ipfs"],
+      externalInterfaces: [
+        {
+          interfaceId: "ipfs-pin-retention",
+          kind: "host-service",
+          direction: "bidirectional",
+          capability: "ipfs",
+          resource: "ipfs://pin-retention",
+          description: "Retains and evicts pinned content.",
+          properties: {
+            operations: ["pin", "unpin"],
+          },
+        },
+      ],
+    },
+    deploymentPlan: {
+      pluginId: "com.digitalarsenal.examples.authenticated-ipfs-service",
+      version: "1.0.0",
+      scheduleBindings: [],
+      serviceBindings: [],
+      inputBindings: [
+        {
+          bindingId: "ipfs-pin-retention-binding",
+          interfaceId: "ipfs-pin-retention",
+          targetPluginId: "com.digitalarsenal.examples.memory.auth-ipfs",
+          targetMethodId: "apply_retention",
+          targetInputPortId: "request",
+          sourceKind: "catalog-sync",
+          description: "Local IPFS retention ingress",
+        },
+      ],
+      publicationBindings: [],
+      authPolicies: [
+        {
+          policyId: "approved-ipfs-peers",
+          bindingMode: "local",
+          targetKind: "ipfs-service",
+          targetId: "ipfs-pin-retention",
+          allowServerKeys: ["ed25519:approved"],
+          requireSignedRequests: true,
+          requireEncryptedTransport: true,
+        },
+      ],
+      protocolInstallations: [],
+    },
+    discover: false,
+    pluginPackages: [
+      {
+        manifest: {
+          pluginId: "com.digitalarsenal.examples.memory.auth-ipfs",
+          name: "In-Memory Auth IPFS",
+          version: "1.0.0",
+          pluginFamily: "transform",
+          methods: [
+            {
+              methodId: "apply_retention",
+              inputPorts: [{ portId: "request", required: true }],
+              outputPorts: [{ portId: "response" }],
+              maxBatch: 8,
+              drainPolicy: "drain-to-empty",
+            },
+          ],
+        },
+        handlers: {
+          apply_retention({ inputs }) {
+            return {
+              outputs: inputs.map((frame) => ({
+                ...frame,
+                portId: "response",
+                metadata: {
+                  ...frame.metadata,
+                  statusCode: 200,
+                },
+              })),
+              backlogRemaining: 0,
+              yielded: false,
+            };
+          },
+        },
+      },
+    ],
+    ...extra,
+  };
+}
+
 test("host plan summaries track engine compatibility for the shared sdn-js family", () => {
   const summary = summarizeHostedRuntimePlan({
     hostId: "browser-host",
@@ -1168,6 +1267,71 @@ test("installed flow service enforces local HTTP auth policies from the deployme
   assert.equal(response.outputs[0].frame.metadata.statusCode, 200);
 });
 
+test("installed flow service enforces local IPFS auth policies from the deployment plan", async () => {
+  const service = createInstalledFlowService(createAuthenticatedIpfsServiceOptions());
+
+  const startup = await service.start();
+  assert.deepEqual(startup.ipfsRoutes, [
+    {
+      bindingId: "ipfs-pin-retention-binding",
+      interfaceId: "ipfs-pin-retention",
+      resource: "ipfs://pin-retention",
+      direction: "bidirectional",
+      description: "Local IPFS retention ingress",
+      operations: ["pin", "unpin"],
+      authPolicies: ["approved-ipfs-peers"],
+    },
+  ]);
+
+  await assert.rejects(
+    service.handleIpfsRequest({
+      interfaceId: "ipfs-pin-retention",
+      operation: "pin",
+      cid: "bafydenied",
+      headers: {
+        "x-sdn-server-key": "ed25519:approved",
+      },
+      metadata: {
+        url: "https://example.test/ipfs/pin-retention",
+      },
+    }),
+    (error) => {
+      assert.equal(error.statusCode, 403);
+      assert.match(error.message, /signed requests/i);
+      return true;
+    },
+  );
+
+  const response = await service.handleIpfsRequest({
+    interfaceId: "ipfs-pin-retention",
+    operation: "pin",
+    cid: "bafyapproved",
+    headers: {
+      "x-sdn-server-key": "ed25519:approved",
+      "x-sdn-signed-request": "1",
+    },
+    metadata: {
+      url: "https://example.test/ipfs/pin-retention",
+    },
+    frame: {
+      streamId: 1,
+      payload: new Uint8Array([1, 2, 3]),
+    },
+  });
+
+  assert.equal(response.bindingId, "ipfs-pin-retention-binding");
+  assert.equal(response.interfaceId, "ipfs-pin-retention");
+  assert.equal(response.resource, "ipfs://pin-retention");
+  assert.deepEqual(response.authPolicies, ["approved-ipfs-peers"]);
+  assert.equal(response.outputs.length, 1);
+  assert.equal(response.outputs[0].frame.metadata.ipfsOperation, "pin");
+  assert.equal(response.outputs[0].frame.metadata.cid, "bafyapproved");
+  assert.equal(
+    response.outputs[0].frame.metadata.inputBindingId,
+    "ipfs-pin-retention-binding",
+  );
+});
+
 test("installed flow service aligns HTTP ingress frames before node-to-node dispatch", async () => {
   const ingressFormats = [];
   const sinkFormats = [];
@@ -1427,6 +1591,116 @@ test("installed flow service resolves walletProfileId and trustMapId against man
   assert.equal(response.serviceId, "service-secure-download");
   assert.deepEqual(response.authPolicies, ["wallet-trust"]);
   assert.equal(response.outputs[0].frame.metadata.statusCode, 200);
+});
+
+test("installed flow service resolves walletProfileId and trustMapId against managed wallet trust material for IPFS services", async () => {
+  const securityDirectory = await mkdtemp(
+    path.join(os.tmpdir(), "sdn-flow-service-ipfs-wallet-trust-"),
+  );
+  const securityState = await ensureManagedSecurityState({
+    projectRoot: securityDirectory,
+    scopeId: "trusted-client",
+    security: {
+      storageDir: path.join(securityDirectory, ".sdn-flow-security"),
+      wallet: {
+        enabled: true,
+      },
+      tls: {
+        enabled: false,
+      },
+    },
+    startup: {
+      protocol: "https",
+      hostname: "127.0.0.1",
+    },
+  });
+  const trustedServerKey = `ed25519:${securityState.wallet.signingPublicKeyHex}`;
+  const service = createInstalledFlowService(
+    createAuthenticatedIpfsServiceOptions({
+      baseDirectory: securityDirectory,
+      deploymentPlan: {
+        pluginId: "com.digitalarsenal.examples.authenticated-ipfs-service",
+        version: "1.0.0",
+        scheduleBindings: [],
+        serviceBindings: [],
+        inputBindings: [
+          {
+            bindingId: "ipfs-pin-retention-binding",
+            interfaceId: "ipfs-pin-retention",
+            targetPluginId: "com.digitalarsenal.examples.memory.auth-ipfs",
+            targetMethodId: "apply_retention",
+            targetInputPortId: "request",
+            sourceKind: "catalog-sync",
+            description: "Local IPFS retention ingress",
+          },
+        ],
+        publicationBindings: [],
+        authPolicies: [
+          {
+            policyId: "wallet-ipfs-trust",
+            bindingMode: "local",
+            targetKind: "ipfs-service",
+            targetId: "ipfs-pin-retention",
+            walletProfileId: "trusted-client",
+            trustMapId: "approved-callers",
+            requireSignedRequests: true,
+            requireEncryptedTransport: true,
+          },
+        ],
+        protocolInstallations: [],
+      },
+      walletProfiles: {
+        "trusted-client": {
+          recordPath: securityState.wallet.recordPath,
+        },
+      },
+      trustMaps: {
+        "approved-callers": {
+          walletProfileId: "trusted-client",
+        },
+      },
+    }),
+  );
+
+  const startup = await service.start();
+  assert.deepEqual(startup.ipfsRoutes[0].authPolicies, ["wallet-ipfs-trust"]);
+
+  await assert.rejects(
+    service.handleIpfsRequest({
+      interfaceId: "ipfs-pin-retention",
+      operation: "pin",
+      cid: "bafydenied",
+      headers: {
+        "x-sdn-server-key": "ed25519:not-approved",
+        "x-sdn-signed-request": "1",
+      },
+      metadata: {
+        url: "https://example.test/ipfs/pin-retention",
+      },
+    }),
+    /server key/i,
+  );
+
+  const response = await service.handleIpfsRequest({
+    interfaceId: "ipfs-pin-retention",
+    operation: "pin",
+    cid: "bafytrusted",
+    headers: {
+      "x-sdn-server-key": trustedServerKey.toLowerCase(),
+      "x-sdn-signed-request": "1",
+    },
+    metadata: {
+      url: "https://example.test/ipfs/pin-retention",
+    },
+    frame: {
+      streamId: 1,
+      payload: new Uint8Array([7, 8, 9]),
+    },
+  });
+
+  assert.deepEqual(response.authPolicies, ["wallet-ipfs-trust"]);
+  assert.equal(response.outputs.length, 1);
+  assert.equal(response.outputs[0].frame.metadata.cid, "bafytrusted");
 });
 
 test("installed flow service exposes delegated deployment bindings explicitly", async () => {

@@ -23,8 +23,8 @@ Status: active
 
 ## Auth, Trust, And SDN/IPFS Integration
 
-- [ ] Enforce approved-key trust mappings uniformly at request time.
-- [ ] Use `hd-wasm-wallet` trust material for REST and IPFS/protocol services.
+- [x] Enforce approved-key trust mappings uniformly at request time.
+- [x] Use `hd-wasm-wallet` trust material for REST and IPFS/protocol services.
 - [x] Model Go-hosted IPFS bindings against the official Kubo RPC client instead
       of the SDN proxy path.
 - [x] Keep hosted protocol identity in the manifest and concrete routing in the
@@ -52,8 +52,8 @@ Status: active
    - [x] Expose the same data through FlatSQL REST queries.
 
 4. Authenticated REST and IPFS services
-   - [ ] Reject requests from unapproved keys.
-   - [ ] Apply the same trust policy to REST, protocol, and IPFS surfaces.
+   - [x] Reject requests from unapproved keys.
+   - [x] Apply the same trust policy to REST, protocol, and IPFS surfaces.
 
 5. Homomorphic conjunction service orchestration
    - [ ] Treat the HE implementation in `../flatbuffers/wasm` as the crypto

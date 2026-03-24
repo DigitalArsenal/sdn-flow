@@ -2438,6 +2438,33 @@ export function createInstalledFlowService(options = {}) {
       : [];
   }
 
+  function listProgramExternalInterfaces() {
+    return Array.isArray(getProgram().externalInterfaces)
+      ? getProgram().externalInterfaces
+      : [];
+  }
+
+  function resolveProgramExternalInterface(interfaceId) {
+    const normalizedInterfaceId = normalizeString(interfaceId, null);
+    if (!normalizedInterfaceId) {
+      return null;
+    }
+    return (
+      listProgramExternalInterfaces().find(
+        (candidate) =>
+          normalizeString(candidate?.interfaceId, null) === normalizedInterfaceId,
+      ) ?? null
+    );
+  }
+
+  function normalizeOperationNames(values) {
+    return Array.from(
+      new Set(
+        normalizeStringArray(values).map((value) => value.toLowerCase()),
+      ),
+    ).sort();
+  }
+
   function listLocalScheduleBindings() {
     return filterBindingsByMode(
       listScheduleBindingsFromPlan(getDeploymentPlan()),
@@ -2472,6 +2499,37 @@ export function createInstalledFlowService(options = {}) {
       (installation) =>
         normalizeProtocolRole(installation?.role, null) === "handle",
     );
+  }
+
+  function listLocalIpfsInputBindingRoutes() {
+    return listInputBindingRoutes()
+      .map((route) => {
+        const externalInterface = resolveProgramExternalInterface(route.interfaceId);
+        if (
+          !externalInterface ||
+          externalInterface.kind !== ExternalInterfaceKind.HOST_SERVICE ||
+          normalizeString(externalInterface.capability, null) !== "ipfs"
+        ) {
+          return null;
+        }
+        return {
+          ...route,
+          resource: normalizeString(externalInterface.resource, null),
+          direction:
+            normalizeString(
+              externalInterface.direction,
+              ExternalInterfaceDirection.BIDIRECTIONAL,
+            ) ?? ExternalInterfaceDirection.BIDIRECTIONAL,
+          description:
+            normalizeString(route.description, null) ??
+            normalizeString(externalInterface.description, null),
+          operations: normalizeOperationNames(
+            externalInterface.properties?.operations,
+          ),
+          externalInterface: cloneJsonCompatibleValue(externalInterface),
+        };
+      })
+      .filter(Boolean);
   }
 
   function invalidateResolvedBindingCaches() {
@@ -2714,6 +2772,42 @@ export function createInstalledFlowService(options = {}) {
     );
   }
 
+  function resolveLocalAuthPoliciesForIpfsRoute(
+    route,
+    deploymentPlan = getDeploymentPlan(),
+  ) {
+    if (!route) {
+      return [];
+    }
+    const authPolicies = listAuthPoliciesFromPlan(deploymentPlan);
+    const routeTargetIds = new Set(
+      [
+        normalizeString(route.bindingId, null),
+        normalizeString(route.interfaceId, null),
+        normalizeString(route.resource, null),
+      ].filter(Boolean),
+    );
+    return filterBindingsByMode(authPolicies, DeploymentBindingMode.LOCAL).filter(
+      (policy) => {
+        const targetKind = normalizeString(policy.targetKind, null)?.toLowerCase();
+        if (targetKind !== "host-service" && targetKind !== "ipfs-service") {
+          return false;
+        }
+        const targetId = normalizeString(policy.targetId, null);
+        return !targetId || routeTargetIds.has(targetId);
+      },
+    );
+  }
+
+  function resolveEffectiveLocalAuthPoliciesForIpfsRoute(
+    route,
+    deploymentPlan = getDeploymentPlan(),
+  ) {
+    return resolveLocalAuthPoliciesForIpfsRoute(route, deploymentPlan).map(
+      (policy) => resolvedLocalAuthPoliciesById.get(policy.policyId) ?? policy,
+    );
+  }
+
   function resolveRequestSecurityContext(request = {}) {
     const headers = normalizeHeaderRecord(request.headers);
     const metadata = normalizeMetadata(request.metadata);
@@ -2948,6 +3042,83 @@ export function createInstalledFlowService(options = {}) {
         throw createHttpStatusError(
           403,
           `Protocol service "${protocolLabel}" rejected an unapproved entity id under auth policy "${authPolicy.policyId}".`,
+          {
+            code: "entity-id-not-approved",
+          },
+        );
+      }
+    }
+  }
+
+  async function assertLocalIpfsRequestAuthorized(route, request = {}) {
+    await assertSupportedLocalBindings();
+    const authPolicies = resolveEffectiveLocalAuthPoliciesForIpfsRoute(route);
+    if (authPolicies.length === 0) {
+      return;
+    }
+    const securityContext = resolveRequestSecurityContext(request);
+    const routeLabel =
+      normalizeString(route?.interfaceId, null) ??
+      normalizeString(route?.bindingId, null) ??
+      normalizeString(route?.resource, null) ??
+      "ipfs";
+
+    for (const authPolicy of authPolicies) {
+      if (
+        authPolicy.requireEncryptedTransport &&
+        !securityContext.encryptedTransport
+      ) {
+        throw createHttpStatusError(
+          403,
+          `IPFS service "${routeLabel}" requires encrypted transport by auth policy "${authPolicy.policyId}".`,
+          {
+            code: "encrypted-transport-required",
+          },
+        );
+      }
+      if (authPolicy.requireSignedRequests && !securityContext.signedRequest) {
+        throw createHttpStatusError(
+          403,
+          `IPFS service "${routeLabel}" requires signed requests by auth policy "${authPolicy.policyId}".`,
+          {
+            code: "signed-request-required",
+          },
+        );
+      }
+      if (
+        authPolicy.allowPeerIds.length > 0 &&
+        !authPolicy.allowPeerIds.includes(securityContext.peerId ?? "")
+      ) {
+        throw createHttpStatusError(
+          403,
+          `IPFS service "${routeLabel}" rejected an unapproved peer id under auth policy "${authPolicy.policyId}".`,
+          {
+            code: "peer-id-not-approved",
+          },
+        );
+      }
+      if (
+        authPolicy.allowServerKeys.length > 0 &&
+        !isAllowedServerKey(
+          authPolicy.allowServerKeys,
+          securityContext.serverKey ?? "",
+        )
+      ) {
+        throw createHttpStatusError(
+          403,
+          `IPFS service "${routeLabel}" rejected an unapproved server key under auth policy "${authPolicy.policyId}".`,
+          {
+            code: "server-key-not-approved",
+          },
+        );
+      }
+      if (
+        authPolicy.allowEntityIds.length > 0 &&
+        !authPolicy.allowEntityIds.includes(securityContext.entityId ?? "")
+      ) {
+        throw createHttpStatusError(
+          403,
+          `IPFS service "${routeLabel}" rejected an unapproved entity id under auth policy "${authPolicy.policyId}".`,
           {
             code: "entity-id-not-approved",
           },
@@ -3215,6 +3386,27 @@ export function createInstalledFlowService(options = {}) {
         localProtocolTargetIds.add(targetId);
       }
     }
+    const localIpfsRoutes = listLocalIpfsInputBindingRoutes();
+    const localIpfsTargetIds = new Set();
+    for (const route of localIpfsRoutes) {
+      if (
+        normalizeString(
+          route.direction,
+          ExternalInterfaceDirection.BIDIRECTIONAL,
+        ) === ExternalInterfaceDirection.OUTPUT
+      ) {
+        throw new Error(
+          `Installed flow service cannot host local IPFS service "${route.interfaceId ?? route.bindingId}" because external interface "${route.interfaceId ?? route.bindingId}" is output-only.`,
+        );
+      }
+      for (const targetId of [
+        normalizeString(route.bindingId, null),
+        normalizeString(route.interfaceId, null),
+        normalizeString(route.resource, null),
+      ].filter(Boolean)) {
+        localIpfsTargetIds.add(targetId);
+      }
+    }
 
     const nextResolvedLocalAuthPoliciesById = new Map();
     for (const authPolicy of filterBindingsByMode(
@@ -3226,7 +3418,9 @@ export function createInstalledFlowService(options = {}) {
         targetKind !== "service" &&
         targetKind !== "http-service" &&
         targetKind !== "protocol" &&
-        targetKind !== "protocol-service"
+        targetKind !== "protocol-service" &&
+        targetKind !== "host-service" &&
+        targetKind !== "ipfs-service"
       ) {
         throw new Error(
           `Installed flow service cannot enforce local auth policy "${authPolicy.policyId}" for targetKind "${authPolicy.targetKind}".`,
@@ -3237,6 +3431,12 @@ export function createInstalledFlowService(options = {}) {
         if (targetId && !localServiceIds.has(targetId)) {
           throw new Error(
             `Installed flow service cannot enforce local auth policy "${authPolicy.policyId}" because targetId "${targetId}" is not a local HTTP service binding.`,
+          );
+        }
+      } else if (targetKind === "host-service" || targetKind === "ipfs-service") {
+        if (targetId && !localIpfsTargetIds.has(targetId)) {
+          throw new Error(
+            `Installed flow service cannot enforce local auth policy "${authPolicy.policyId}" because targetId "${targetId}" is not a local IPFS service binding.`,
           );
         }
       } else if (targetId && !localProtocolTargetIds.has(targetId)) {
@@ -3535,7 +3735,83 @@ export function createInstalledFlowService(options = {}) {
     };
   }
 
+  function assertIpfsOperationAllowed(route, operation) {
+    const normalizedOperation = normalizeString(operation, null)?.toLowerCase();
+    if (!normalizedOperation) {
+      return;
+    }
+    if (
+      Array.isArray(route?.operations) &&
+      route.operations.length > 0 &&
+      !route.operations.includes(normalizedOperation)
+    ) {
+      throw createHttpStatusError(
+        400,
+        `IPFS service "${route.interfaceId ?? route.bindingId ?? route.resource ?? "ipfs"}" does not allow operation "${normalizedOperation}".`,
+        {
+          code: "ipfs-operation-not-supported",
+        },
+      );
+    }
+  }
+
+  function resolveIpfsRoute(request = {}) {
+    const requestedBindingId = normalizeString(request.bindingId, null);
+    const requestedInterfaceId = normalizeString(request.interfaceId, null);
+    const requestedResource = normalizeString(request.resource, null);
+    const routes = listLocalIpfsInputBindingRoutes().filter((route) => {
+      if (requestedBindingId && route.bindingId !== requestedBindingId) {
+        return false;
+      }
+      if (requestedInterfaceId && route.interfaceId !== requestedInterfaceId) {
+        return false;
+      }
+      if (requestedResource && route.resource !== requestedResource) {
+        return false;
+      }
+      return true;
+    });
+
+    if (routes.length === 0) {
+      throw createHttpStatusError(
+        404,
+        `No local IPFS service matches "${requestedInterfaceId ?? requestedBindingId ?? requestedResource ?? "request"}".`,
+        {
+          code: "ipfs-service-not-found",
+        },
+      );
+    }
+    if (
+      !requestedBindingId &&
+      !requestedInterfaceId &&
+      !requestedResource &&
+      routes.length > 1
+    ) {
+      throw createHttpStatusError(
+        400,
+        "IPFS request matches multiple local services. Specify bindingId, interfaceId, or resource explicitly.",
+        {
+          code: "ipfs-service-ambiguous",
+        },
+      );
+    }
+
+    const route = routes[0];
+    assertIpfsOperationAllowed(route, request.operation);
+    return route;
+  }
+
   function listProtocolRequestFrames(request = {}) {
+    if (Array.isArray(request.frames) && request.frames.length > 0) {
+      return request.frames;
+    }
+    if (request.frame && typeof request.frame === "object") {
+      return [request.frame];
+    }
+    return [request];
+  }
+
+  function listIpfsRequestFrames(request = {}) {
     if (Array.isArray(request.frames) && request.frames.length > 0) {
       return request.frames;
     }
@@ -3771,6 +4047,62 @@ export function createInstalledFlowService(options = {}) {
     };
   }
 
+  async function handleIpfsRequest(request = {}) {
+    await host.start();
+    await assertSupportedLocalBindings();
+    const route = resolveIpfsRoute(request);
+    await assertLocalIpfsRequestAuthorized(route, request);
+    const response = await dispatchInputBindingFrames(
+      route.bindingId,
+      listIpfsRequestFrames(request).map((frameInput, index) => {
+        assertIpfsOperationAllowed(
+          route,
+          frameInput?.operation ?? request.operation,
+        );
+        const requestId =
+          normalizeString(frameInput?.requestId, null) ??
+          normalizeString(request.requestId, null) ??
+          `ipfs:${route.bindingId}:${Date.now()}:${index + 1}`;
+        return {
+          ...frameInput,
+          sequence:
+            frameInput?.sequence ??
+            request.sequence ??
+            index + 1,
+          payload:
+            frameInput?.payload ??
+            frameInput?.body ??
+            request.payload ??
+            request.body ??
+            null,
+          metadata: {
+            requestId,
+            ipfsOperation:
+              normalizeString(frameInput?.operation, null) ??
+              normalizeString(request.operation, null),
+            cid:
+              normalizeString(frameInput?.cid, null) ??
+              normalizeString(request.cid, null),
+            resource: route.resource ?? null,
+            interfaceId: route.interfaceId ?? null,
+            ...(normalizeMetadata(request.metadata) ?? {}),
+            ...(normalizeMetadata(frameInput?.metadata) ?? {}),
+          },
+        };
+      }),
+    );
+    return {
+      bindingId: route.bindingId,
+      interfaceId: route.interfaceId ?? null,
+      resource: route.resource ?? null,
+      operations: cloneJsonCompatibleValue(route.operations ?? []),
+      authPolicies: resolveLocalAuthPoliciesForIpfsRoute(route).map(
+        (policy) => policy.policyId,
+      ),
+      ...response,
+    };
+  }
+
   function listTimerTriggers() {
     const activeTriggerIds = new Set(
       Array.from(timerHandles.values()).map((record) => record.triggerId),
@@ -3843,6 +4175,20 @@ export function createInstalledFlowService(options = {}) {
           ).map((policy) => policy.policyId),
         })),
     );
+  }
+
+  function listIpfsRoutes() {
+    return listLocalIpfsInputBindingRoutes().map((route) => ({
+      bindingId: route.bindingId,
+      interfaceId: route.interfaceId ?? null,
+      resource: route.resource ?? null,
+      direction: route.direction ?? null,
+      description: route.description ?? null,
+      operations: cloneJsonCompatibleValue(route.operations ?? []),
+      authPolicies: resolveLocalAuthPoliciesForIpfsRoute(route).map(
+        (policy) => policy.policyId,
+      ),
+    }));
   }
 
   function startTimerServices() {
@@ -3935,6 +4281,7 @@ export function createInstalledFlowService(options = {}) {
         ...startup,
         timerTriggers: listTimerTriggers(),
         httpRoutes: listHttpRoutes(),
+        ipfsRoutes: listIpfsRoutes(),
         protocolRoutes: listProtocolRoutes(),
         deploymentBindings: buildDeploymentBindingSummary(),
       };
@@ -3952,6 +4299,7 @@ export function createInstalledFlowService(options = {}) {
         ...refreshResult,
         timerTriggers: listTimerTriggers(),
         httpRoutes: listHttpRoutes(),
+        ipfsRoutes: listIpfsRoutes(),
         protocolRoutes: listProtocolRoutes(),
         deploymentBindings: buildDeploymentBindingSummary(),
       };
@@ -3964,9 +4312,11 @@ export function createInstalledFlowService(options = {}) {
     dispatchTriggerFrames,
     dispatchTimerTrigger,
     handleHttpRequest,
+    handleIpfsRequest,
     handleProtocolRequest,
     listTimerTriggers,
     listHttpRoutes,
+    listIpfsRoutes,
     listProtocolRoutes,
     getPublicationEventCount() {
       return publicationEvents.length;
@@ -3985,6 +4335,7 @@ export function createInstalledFlowService(options = {}) {
         started,
         timerTriggers: listTimerTriggers(),
         httpRoutes: listHttpRoutes(),
+        ipfsRoutes: listIpfsRoutes(),
         protocolRoutes: listProtocolRoutes(),
         publicationEvents: publicationEvents.length,
         deploymentBindings: buildDeploymentBindingSummary(),

@@ -386,6 +386,177 @@ test("createInstalledFlowApp passes workspace.service trust material into the in
   assert.equal(accepted.status, 200);
 });
 
+test("createInstalledFlowApp passes workspace.service trust material into local IPFS services", async () => {
+  const workspaceDirectory = await mkdtemp(
+    path.join(os.tmpdir(), "sdn-flow-installed-app-ipfs-auth-"),
+  );
+  const securityState = await ensureManagedSecurityState({
+    projectRoot: workspaceDirectory,
+    scopeId: "trusted-client",
+    security: {
+      storageDir: path.join(workspaceDirectory, ".sdn-flow-security"),
+      wallet: {
+        enabled: true,
+      },
+      tls: {
+        enabled: false,
+      },
+    },
+    startup: {
+      protocol: "https",
+      hostname: "127.0.0.1",
+    },
+  });
+  const trustedServerKey = `ed25519:${securityState.wallet.signingPublicKeyHex}`;
+  const app = await createInstalledFlowApp({
+    workspace: {
+      workspaceId: "authenticated-ipfs-app",
+      discover: false,
+      program: {
+        programId: "com.digitalarsenal.examples.authenticated-ipfs-app",
+        nodes: [
+          {
+            nodeId: "retention",
+            pluginId: "com.digitalarsenal.examples.memory.workspace-auth-ipfs",
+            methodId: "apply_retention",
+          },
+        ],
+        edges: [],
+        triggers: [],
+        triggerBindings: [],
+        requiredPlugins: ["com.digitalarsenal.examples.memory.workspace-auth-ipfs"],
+        externalInterfaces: [
+          {
+            interfaceId: "ipfs-pin-retention",
+            kind: "host-service",
+            direction: "bidirectional",
+            capability: "ipfs",
+            resource: "ipfs://pin-retention",
+            properties: {
+              operations: ["pin"],
+            },
+          },
+        ],
+      },
+      deploymentPlan: {
+        pluginId: "com.digitalarsenal.examples.authenticated-ipfs-app",
+        version: "1.0.0",
+        scheduleBindings: [],
+        serviceBindings: [],
+        inputBindings: [
+          {
+            bindingId: "ipfs-pin-retention-binding",
+            interfaceId: "ipfs-pin-retention",
+            targetPluginId: "com.digitalarsenal.examples.memory.workspace-auth-ipfs",
+            targetMethodId: "apply_retention",
+            targetInputPortId: "request",
+            sourceKind: "catalog-sync",
+          },
+        ],
+        publicationBindings: [],
+        authPolicies: [
+          {
+            policyId: "workspace-ipfs-wallet-trust",
+            bindingMode: "local",
+            targetKind: "ipfs-service",
+            targetId: "ipfs-pin-retention",
+            trustMapId: "approved-callers",
+            requireSignedRequests: true,
+            requireEncryptedTransport: true,
+          },
+        ],
+        protocolInstallations: [],
+      },
+      pluginPackages: [
+        {
+          manifest: {
+            pluginId: "com.digitalarsenal.examples.memory.workspace-auth-ipfs",
+            name: "In-Memory Workspace Auth IPFS",
+            version: "1.0.0",
+            pluginFamily: "transform",
+            methods: [
+              {
+                methodId: "apply_retention",
+                inputPorts: [{ portId: "request", required: true }],
+                outputPorts: [{ portId: "response" }],
+                maxBatch: 8,
+                drainPolicy: "drain-to-empty",
+              },
+            ],
+          },
+          handlers: {
+            apply_retention({ inputs }) {
+              return {
+                outputs: inputs.map((frame) => ({
+                  ...frame,
+                  portId: "response",
+                  metadata: {
+                    ...frame.metadata,
+                    statusCode: 200,
+                  },
+                })),
+                backlogRemaining: 0,
+                yielded: false,
+              };
+            },
+          },
+        },
+      ],
+      service: {
+        walletProfiles: {
+          "trusted-client": {
+            recordPath: securityState.wallet.recordPath,
+          },
+        },
+        trustMaps: {
+          "approved-callers": {
+            walletProfileId: "trusted-client",
+          },
+        },
+      },
+    },
+  });
+
+  await app.start();
+
+  await assert.rejects(
+    app.service.handleIpfsRequest({
+      interfaceId: "ipfs-pin-retention",
+      operation: "pin",
+      cid: "bafydenied",
+      headers: {
+        "x-sdn-server-key": "ed25519:not-approved",
+        "x-sdn-signed-request": "1",
+      },
+      metadata: {
+        url: "https://example.test/ipfs/pin-retention",
+      },
+    }),
+    (error) => error?.statusCode === 403,
+  );
+
+  const accepted = await app.service.handleIpfsRequest({
+    interfaceId: "ipfs-pin-retention",
+    operation: "pin",
+    cid: "bafytrusted",
+    headers: {
+      "x-sdn-server-key": trustedServerKey,
+      "x-sdn-signed-request": "1",
+    },
+    metadata: {
+      url: "https://example.test/ipfs/pin-retention",
+    },
+    frame: {
+      streamId: 1,
+      payload: new Uint8Array([1, 2, 3]),
+    },
+  });
+
+  assert.deepEqual(accepted.authPolicies, ["workspace-ipfs-wallet-trust"]);
+  assert.equal(accepted.outputs.length, 1);
+  assert.equal(accepted.outputs[0].frame.metadata.cid, "bafytrusted");
+});
+
 test("workspace package install and uninstall helpers maintain the explicit plugin catalog", async () => {
   const workspaceDirectory = await mkdtemp(
     path.join(os.tmpdir(), "sdn-flow-workspace-catalog-"),
