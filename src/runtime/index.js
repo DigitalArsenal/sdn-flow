@@ -18,4 +18,3 @@ export {
   normalizeProgram,
 } from "./normalize.js";
 export { MethodRegistry } from "./MethodRegistry.js";
-export { FlowRuntime } from "./FlowRuntime.js";

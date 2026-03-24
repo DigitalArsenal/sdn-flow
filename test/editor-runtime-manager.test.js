@@ -1440,6 +1440,275 @@ test("runtime manager reports compiled, delegated, and js-shim runtime classific
   }
 });
 
+test("runtime manager classifies delay, trigger, link, and exec families behind delegated support", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "sdn-flow-editor-runtime-delegated-families-"));
+
+  try {
+    const runtimePaths = getSdnFlowEditorRuntimePaths({ projectRoot: tempDir });
+    await writeSdnFlowEditorBuildFile(runtimePaths.currentBuildFilePath, {
+      kind: "sdn-flow-editor-flow-build",
+      version: 1,
+      compileId: "compile-delegated-families",
+      createdAt: "2026-03-18T12:00:00.000Z",
+      outputName: "flow-runtime",
+      runtimeModel: "compiled-cpp-wasm",
+      flows: [
+        {
+          id: "tab-1",
+          type: "tab",
+          label: "Delegated Families",
+        },
+        {
+          id: "inject-1",
+          z: "tab-1",
+          type: "inject",
+          wires: [["delay-1"]],
+        },
+        {
+          id: "delay-1",
+          z: "tab-1",
+          type: "delay",
+          wires: [["trigger-1"]],
+        },
+        {
+          id: "trigger-1",
+          z: "tab-1",
+          type: "trigger",
+          wires: [["link-call-1"]],
+        },
+        {
+          id: "link-call-1",
+          z: "tab-1",
+          type: "link call",
+          wires: [["function-1"]],
+        },
+        {
+          id: "link-out-1",
+          z: "tab-1",
+          type: "link out",
+          wires: [],
+        },
+        {
+          id: "link-in-1",
+          z: "tab-1",
+          type: "link in",
+          wires: [["link-out-1"]],
+        },
+        {
+          id: "exec-1",
+          z: "tab-1",
+          type: "exec",
+          wires: [],
+        },
+        {
+          id: "function-1",
+          z: "tab-1",
+          type: "function",
+          wires: [["exec-1"]],
+        },
+      ],
+      serializedArtifact: {
+        artifactId: "flow-delegated:deadbeef",
+        programId: "flow-delegated",
+      },
+      artifactSummary: {
+        artifactId: "flow-delegated:deadbeef",
+        programId: "flow-delegated",
+      },
+      program: {
+        programId: "flow-delegated",
+        triggers: [
+          {
+            triggerId: "trigger-inject-1",
+          },
+        ],
+        nodes: [
+          {
+            nodeId: "delay-1",
+            pluginId: "com.digitalarsenal.editor.delay",
+            methodId: "invoke",
+          },
+          {
+            nodeId: "trigger-1",
+            pluginId: "com.digitalarsenal.editor.trigger",
+            methodId: "invoke",
+          },
+          {
+            nodeId: "link-call-1",
+            pluginId: "com.digitalarsenal.editor.link-call",
+            methodId: "invoke",
+          },
+          {
+            nodeId: "link-out-1",
+            pluginId: "com.digitalarsenal.editor.link-out",
+            methodId: "invoke",
+          },
+          {
+            nodeId: "link-in-1",
+            pluginId: "com.digitalarsenal.editor.link-in",
+            methodId: "invoke",
+          },
+          {
+            nodeId: "exec-1",
+            pluginId: "com.digitalarsenal.editor.exec",
+            methodId: "invoke",
+          },
+          {
+            nodeId: "function-1",
+            pluginId: "com.digitalarsenal.editor.function",
+            methodId: "invoke",
+          },
+        ],
+      },
+    });
+
+    const manager = createSdnFlowEditorRuntimeManager({
+      projectRoot: tempDir,
+      async loadCompiledRuntimeHost(buildRecord) {
+        return {
+          artifact: {
+            programId: buildRecord.serializedArtifact.programId,
+            wasm: new Uint8Array([0x00, 0x61, 0x73, 0x6d]),
+          },
+          host: {
+            resetRuntimeState() {},
+            async destroyDependencies() {},
+          },
+        };
+      },
+      logError() {},
+    });
+
+    await manager.initialize();
+
+    const runtimeClassification = manager.getRuntimeStatus().runtimeClassification;
+    const delegatedFamilies = new Map(
+      runtimeClassification.nodeFamilies
+        .filter((entry) => entry.classification === "delegated")
+        .map((entry) => [entry.family, entry.handlerKeys]),
+    );
+
+    assert.deepEqual(runtimeClassification.summary, {
+      totalNodes: 8,
+      families: 8,
+      handlers: 7,
+      byClassification: {
+        compiled: 1,
+        delegated: 6,
+        "js-shim": 1,
+      },
+    });
+    assert.deepEqual(delegatedFamilies, new Map([
+      ["delay", ["com.digitalarsenal.editor.delay:invoke"]],
+      ["exec", ["com.digitalarsenal.editor.exec:invoke"]],
+      ["link call", ["com.digitalarsenal.editor.link-call:invoke"]],
+      ["link in", ["com.digitalarsenal.editor.link-in:invoke"]],
+      ["link out", ["com.digitalarsenal.editor.link-out:invoke"]],
+      ["trigger", ["com.digitalarsenal.editor.trigger:invoke"]],
+    ]));
+    assert.equal(
+      runtimeClassification.nodeFamilies.find((entry) => entry.family === "function")?.classification,
+      "js-shim",
+    );
+    assert.equal(
+      runtimeClassification.nodeFamilies.find((entry) => entry.family === "inject")?.classification,
+      "compiled",
+    );
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("runtime manager fails fast when delegated-only families are unavailable for the runtime target", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "sdn-flow-editor-runtime-delegated-unavailable-"));
+  let loadCalls = 0;
+
+  try {
+    const runtimePaths = getSdnFlowEditorRuntimePaths({ projectRoot: tempDir });
+    await writeSdnFlowEditorBuildFile(runtimePaths.currentBuildFilePath, {
+      kind: "sdn-flow-editor-flow-build",
+      version: 1,
+      compileId: "compile-delegated-unavailable",
+      createdAt: "2026-03-18T12:00:00.000Z",
+      outputName: "flow-runtime",
+      runtimeModel: "compiled-cpp-wasm",
+      flows: [
+        {
+          id: "tab-1",
+          type: "tab",
+          label: "Unsupported Delegated Family",
+        },
+        {
+          id: "inject-1",
+          z: "tab-1",
+          type: "inject",
+          wires: [["exec-1"]],
+        },
+        {
+          id: "exec-1",
+          z: "tab-1",
+          type: "exec",
+          wires: [],
+        },
+      ],
+      serializedArtifact: {
+        artifactId: "flow-unavailable:deadbeef",
+        programId: "flow-unavailable",
+      },
+      artifactSummary: {
+        artifactId: "flow-unavailable:deadbeef",
+        programId: "flow-unavailable",
+      },
+      program: {
+        programId: "flow-unavailable",
+        triggers: [
+          {
+            triggerId: "trigger-inject-1",
+          },
+        ],
+        nodes: [
+          {
+            nodeId: "exec-1",
+            pluginId: "com.digitalarsenal.editor.exec",
+            methodId: "invoke",
+          },
+        ],
+      },
+    });
+
+    const manager = createSdnFlowEditorRuntimeManager({
+      projectRoot: tempDir,
+      delegatedRuntimeSupport: false,
+      async loadCompiledRuntimeHost() {
+        loadCalls += 1;
+        return {
+          artifact: {
+            programId: "flow-unavailable",
+            wasm: new Uint8Array([0x00, 0x61, 0x73, 0x6d]),
+          },
+          host: {
+            resetRuntimeState() {},
+            async destroyDependencies() {},
+          },
+        };
+      },
+      logError() {},
+    });
+
+    await manager.initialize();
+
+    const status = manager.getRuntimeStatus();
+    assert.equal(loadCalls, 0);
+    assert.equal(status.compiledRuntimeLoaded, false);
+    assert.match(
+      status.lastArtifactLoadError,
+      /Delegated editor runtime support for exec node "exec-1" is unavailable\. Enable delegated support for this editor runtime target\./,
+    );
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("runtime manager routes link out fan-out and link call returns through the compiled runtime", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "sdn-flow-editor-runtime-links-"));
   const runtimePaths = getSdnFlowEditorRuntimePaths({ projectRoot: tempDir });

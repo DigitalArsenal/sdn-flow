@@ -92,7 +92,7 @@ Run these before you call the work complete:
 
 ## Practical Entry Points
 
-- `src/runtime`: program normalization, runtime descriptors, `FlowRuntime`
+- `src/runtime`: program normalization, runtime descriptors, method registry
 - `src/compiler`: compiled flow artifact generation
 - `src/host`: startup surfaces, workspace model, runtime ABI binders
 - `src/deploy`: compiled-artifact deployment helpers

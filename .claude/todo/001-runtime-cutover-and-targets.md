@@ -78,3 +78,5 @@ Delegated or wrapper-only:
       guest networking paths.
 - [x] Browser deployments clearly declare delegated bindings instead of
       pretending to be standalone.
+- [x] Delegated-only editor runtime families fail fast when delegated support
+      is unavailable for the selected runtime target.

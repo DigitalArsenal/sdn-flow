@@ -22,6 +22,11 @@ import {
   normalizeStartupProtocol,
 } from "../host/managedSecurity.js";
 import { compileNodeRedFlowsToSdnArtifactInSubprocess } from "./compileArtifactSubprocess.js";
+import {
+  createSdnFlowEditorDelegatedRuntimeUnavailableError,
+  listSdnFlowEditorDelegatedRuntimeFamilies,
+  resolveSdnFlowEditorDelegatedRuntimeFamily,
+} from "./delegatedRuntimeSupport.js";
 
 const SDN_FLOW_EDITOR_DEFAULT_HOSTNAME = "127.0.0.1";
 const SDN_FLOW_EDITOR_DEFAULT_PORT = 1990;
@@ -251,6 +256,29 @@ function createEmptyRuntimeClassificationStatus() {
     },
     nodeFamilies: [],
     handlers: [],
+  };
+}
+
+function normalizeDelegatedRuntimeSupportOptions(options = {}) {
+  if (options?.delegatedRuntimeSupport === false) {
+    return {
+      enabled: false,
+      handlers: {},
+    };
+  }
+  if (
+    options?.delegatedRuntimeSupport &&
+    typeof options.delegatedRuntimeSupport === "object" &&
+    !Array.isArray(options.delegatedRuntimeSupport)
+  ) {
+    return {
+      enabled: options.delegatedRuntimeSupport.enabled !== false,
+      handlers: options.delegatedRuntimeSupport.handlers ?? {},
+    };
+  }
+  return {
+    enabled: true,
+    handlers: {},
   };
 }
 
@@ -4102,7 +4130,9 @@ export function createSdnFlowEditorRuntimeManager(options = {}) {
       });
     });
   const logError = options.logError ?? console.error.bind(console);
+  const delegatedRuntimeSupport = normalizeDelegatedRuntimeSupportOptions(options);
   const userRuntimeHandlers = options.runtimeHandlers ?? {};
+  const userDelegatedRuntimeHandlers = delegatedRuntimeSupport.handlers;
   const dependencyInvoker = options.dependencyInvoker ?? null;
   const dependencyStreamBridge = options.dependencyStreamBridge ?? null;
   const artifactImports = options.artifactImports ?? {};
@@ -4116,6 +4146,7 @@ export function createSdnFlowEditorRuntimeManager(options = {}) {
     options.scheduleCronTask ??
     ((expression, callback) => cronosjs.scheduleTask(expression, callback));
   const runtimeHandlers = new Map();
+  const delegatedRuntimeHandlers = new Map();
 
   let compileState = null;
   let compilePromise = null;
@@ -5837,7 +5868,7 @@ export function createSdnFlowEditorRuntimeManager(options = {}) {
         };
       },
     );
-    runtimeHandlers.set(
+    delegatedRuntimeHandlers.set(
       "com.digitalarsenal.editor.delay:invoke",
       async ({ dispatchDescriptor, inputs }) => {
         const nodeConfig = getActiveFlowNode(dispatchDescriptor?.nodeId);
@@ -6006,7 +6037,7 @@ export function createSdnFlowEditorRuntimeManager(options = {}) {
         };
       },
     );
-    runtimeHandlers.set(
+    delegatedRuntimeHandlers.set(
       "com.digitalarsenal.editor.trigger:invoke",
       async ({ dispatchDescriptor, inputs }) => {
         const nodeConfig = getActiveFlowNode(dispatchDescriptor?.nodeId);
@@ -6093,7 +6124,7 @@ export function createSdnFlowEditorRuntimeManager(options = {}) {
         };
       },
     );
-    runtimeHandlers.set(
+    delegatedRuntimeHandlers.set(
       "com.digitalarsenal.editor.link-in:invoke",
       async ({ dispatchDescriptor, inputs }) => {
         const nodeConfig = getActiveFlowNode(dispatchDescriptor?.nodeId);
@@ -6109,7 +6140,7 @@ export function createSdnFlowEditorRuntimeManager(options = {}) {
         };
       },
     );
-    runtimeHandlers.set(
+    delegatedRuntimeHandlers.set(
       "com.digitalarsenal.editor.link-out:invoke",
       async ({ dispatchDescriptor, inputs }) => {
         const nodeConfig = getActiveFlowNode(dispatchDescriptor?.nodeId);
@@ -6152,7 +6183,7 @@ export function createSdnFlowEditorRuntimeManager(options = {}) {
         return { outputs: [] };
       },
     );
-    runtimeHandlers.set(
+    delegatedRuntimeHandlers.set(
       "com.digitalarsenal.editor.link-call:invoke",
       async ({ dispatchDescriptor, inputs }) => {
         const nodeConfig = getActiveFlowNode(dispatchDescriptor?.nodeId);
@@ -6199,7 +6230,7 @@ export function createSdnFlowEditorRuntimeManager(options = {}) {
         return { outputs: [] };
       },
     );
-    runtimeHandlers.set(
+    delegatedRuntimeHandlers.set(
       "com.digitalarsenal.editor.exec:invoke",
       async ({ dispatchDescriptor, inputs }) => {
         const nodeConfig = getActiveFlowNode(dispatchDescriptor?.nodeId);
@@ -6491,17 +6522,75 @@ export function createSdnFlowEditorRuntimeManager(options = {}) {
   function applyRuntimeHandlerOverrides(overrides) {
     if (overrides instanceof Map) {
       for (const [key, handler] of overrides.entries()) {
-        runtimeHandlers.set(key, handler);
+        const definition = resolveSdnFlowEditorDelegatedRuntimeFamily({ handlerKey: key });
+        (definition ? delegatedRuntimeHandlers : runtimeHandlers).set(key, handler);
       }
       return;
     }
     for (const [key, handler] of Object.entries(overrides ?? {})) {
-      runtimeHandlers.set(key, handler);
+      const definition = resolveSdnFlowEditorDelegatedRuntimeFamily({ handlerKey: key });
+      (definition ? delegatedRuntimeHandlers : runtimeHandlers).set(key, handler);
+    }
+  }
+
+  function createUnavailableDelegatedRuntimeHandler(definition) {
+    return async ({ dispatchDescriptor }) => {
+      throw createSdnFlowEditorDelegatedRuntimeUnavailableError(definition, {
+        nodeId: normalizeString(dispatchDescriptor?.nodeId, null),
+      });
+    };
+  }
+
+  function buildBoundRuntimeHandlers() {
+    const handlers = new Map(runtimeHandlers);
+    for (const definition of listSdnFlowEditorDelegatedRuntimeFamilies()) {
+      const supportedHandler =
+        delegatedRuntimeSupport.enabled !== false
+          ? delegatedRuntimeHandlers.get(definition.handlerKey)
+          : null;
+      handlers.set(
+        definition.handlerKey,
+        typeof supportedHandler === "function"
+          ? supportedHandler
+          : createUnavailableDelegatedRuntimeHandler(definition),
+      );
+    }
+    return handlers;
+  }
+
+  function assertDelegatedRuntimeSupportAvailable(buildRecord = null) {
+    if (delegatedRuntimeSupport.enabled !== false) {
+      return;
+    }
+    const flows = asArray(buildRecord?.flows).filter(isPlainObject);
+    const workspaceIds = new Set(
+      flows
+        .filter((entry) => isNodeRedTabNode(entry))
+        .map((entry) => normalizeString(entry?.id, null))
+        .filter(Boolean),
+    );
+    for (const node of flows) {
+      if (isNodeRedTabNode(node) || isNodeRedSubflowDefinition(node)) {
+        continue;
+      }
+      if (isNodeRedConfigNode(node, workspaceIds)) {
+        continue;
+      }
+      const definition = resolveSdnFlowEditorDelegatedRuntimeFamily({
+        family: normalizeString(node?.type, null),
+      });
+      if (!definition) {
+        continue;
+      }
+      throw createSdnFlowEditorDelegatedRuntimeUnavailableError(definition, {
+        nodeId: normalizeString(node?.id, null),
+      });
     }
   }
 
   installBuiltInRuntimeHandlers();
   applyRuntimeHandlerOverrides(userRuntimeHandlers);
+  applyRuntimeHandlerOverrides(userDelegatedRuntimeHandlers);
 
   const loadCompiledRuntimeHost =
     options.loadCompiledRuntimeHost ??
@@ -6514,7 +6603,7 @@ export function createSdnFlowEditorRuntimeManager(options = {}) {
           : WebAssembly.instantiate;
       const host = await bindCompiledFlowRuntimeHost({
         artifact,
-        handlers: runtimeHandlers,
+        handlers: buildBoundRuntimeHandlers(),
         dependencyInvoker,
         dependencyStreamBridge,
         artifactImports,
@@ -6558,6 +6647,7 @@ export function createSdnFlowEditorRuntimeManager(options = {}) {
   }
 
   async function activateCompiledBuild(buildRecord) {
+    assertDelegatedRuntimeSupportAvailable(buildRecord);
     const loadedRuntime = await loadCompiledRuntimeHost(buildRecord);
     const previousHost = activeRuntimeHost;
     stopInjectSchedules();
@@ -6787,7 +6877,18 @@ export function createSdnFlowEditorRuntimeManager(options = {}) {
     };
   }
 
-  function resolveRuntimePathClassification(nodeId, pluginId, methodId) {
+  function resolveRuntimePathClassification(nodeId, family, pluginId, methodId) {
+    const delegatedDefinition = resolveSdnFlowEditorDelegatedRuntimeFamily({
+      family,
+      pluginId,
+      methodId,
+    });
+    if (delegatedDefinition) {
+      return {
+        classification: SDN_FLOW_EDITOR_RUNTIME_CLASSIFICATION.DELEGATED,
+        handlerKey: delegatedDefinition.handlerKey,
+      };
+    }
     for (const key of createRuntimeHandlerLookupKeys({
       nodeId,
       pluginId,
@@ -6919,7 +7020,7 @@ export function createSdnFlowEditorRuntimeManager(options = {}) {
       const invocationIdentity = deriveRuntimeInvocationIdentity(node, runtimeNode);
       const pluginId = normalizeString(invocationIdentity?.pluginId, null);
       const methodId = normalizeString(invocationIdentity?.methodId, null);
-      const resolution = resolveRuntimePathClassification(nodeId, pluginId, methodId);
+      const resolution = resolveRuntimePathClassification(nodeId, family, pluginId, methodId);
 
       const familyEntry = getFamilyEntry(family, resolution.classification);
       familyEntry.count += 1;
