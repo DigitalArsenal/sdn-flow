@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   buildDefaultFlowManifestBuffer,
+  createFlowDeploymentPlan,
   createInstalledFlowHost,
   decodeCompiledArtifactManifest,
   evaluateHostedRuntimeTargetSupport,
@@ -12,6 +13,7 @@ import {
   listCompiledArtifactRuntimeTargets,
   normalizeCompiledArtifact,
   RuntimeTarget,
+  startStandaloneFlowRuntime,
   summarizeHostedRuntimePlan,
 } from "../src/index.js";
 
@@ -371,5 +373,135 @@ test("createInstalledFlowHost enforces browser, server, wasi, and wasmedge host 
   await assert.rejects(
     incompatibleHost.start(),
     /cannot start runtime "browser-runtime".*wasmedge/i,
+  );
+});
+
+test("startStandaloneFlowRuntime resolves a compiled deployment into a strict standalone wasi runtime without installed-host wrappers", async () => {
+  const client = new FlowDeploymentClient();
+  const deploymentPlan = createFlowDeploymentPlan({
+    programId: "com.digitalarsenal.tests.standalone-wasi",
+    version: "0.3.1",
+    triggers: [
+      {
+        triggerId: "manual",
+        kind: "manual",
+      },
+    ],
+  });
+  const artifact = await normalizeCompiledArtifact({
+    programId: "com.digitalarsenal.tests.standalone-wasi",
+    wasm: new Uint8Array([0x00, 0x61, 0x73, 0x6d]),
+    manifestBuffer: buildDefaultFlowManifestBuffer({
+      program: createProgram({
+        programId: "com.digitalarsenal.tests.standalone-wasi",
+        triggers: [
+          {
+            triggerId: "manual",
+            kind: "manual",
+          },
+        ],
+      }),
+      runtimeTargets: [RuntimeTarget.WASI],
+    }),
+  });
+  const deployment = await client.prepareDeployment({
+    artifact,
+    deploymentPlan,
+    target: {
+      kind: "local",
+      runtimeId: "standalone-wasi-runtime",
+      hostKind: "standalone-wasi",
+      adapter: HostedRuntimeAdapter.HOST_INTERNAL,
+      engine: HostedRuntimeEngine.WASI,
+    },
+  });
+
+  const boundArtifacts = [];
+  const runtime = await startStandaloneFlowRuntime({
+    input: deployment,
+    bindRuntimeHost: async (options) => {
+      boundArtifacts.push(options.artifact.programId);
+      return {
+        runEntrypoint() {
+          return {
+            entrypoint: "_start",
+            argc: 0,
+            argv: [],
+            exitCode: 0,
+          };
+        },
+        resetRuntimeState() {},
+        async destroyDependencies() {},
+      };
+    },
+  });
+
+  assert.deepEqual(boundArtifacts, [
+    "com.digitalarsenal.tests.standalone-wasi",
+  ]);
+  assert.equal(runtime.deploymentPlan?.programId, deploymentPlan.programId);
+  assert.equal(runtime.target.hostKind, "standalone-wasi");
+  assert.equal(runtime.target.adapter, HostedRuntimeAdapter.HOST_INTERNAL);
+  assert.equal(runtime.target.engine, HostedRuntimeEngine.WASI);
+  assert.deepEqual(runtime.runtimeTargets, [RuntimeTarget.WASI]);
+  assert.equal(runtime.runtimeCompatibility?.ok, true);
+  assert.deepEqual(runtime.runEntrypoint(), {
+    entrypoint: "_start",
+    argc: 0,
+    argv: [],
+    exitCode: 0,
+  });
+
+  await assert.doesNotReject(runtime.close());
+});
+
+test("startStandaloneFlowRuntime defaults wasmedge artifacts onto the host-internal wasi runtime and rejects incompatible standalone targets", async () => {
+  const artifact = await normalizeCompiledArtifact({
+    programId: "com.digitalarsenal.tests.standalone-wasmedge",
+    wasm: new Uint8Array([0x00, 0x61, 0x73, 0x6d]),
+    manifestBuffer: buildDefaultFlowManifestBuffer({
+      program: createProgram({
+        programId: "com.digitalarsenal.tests.standalone-wasmedge",
+      }),
+      runtimeTargets: [RuntimeTarget.WASMEDGE],
+    }),
+  });
+
+  const runtime = await startStandaloneFlowRuntime({
+    artifact,
+    bindRuntimeHost: async () => ({
+      runEntrypoint() {
+        return {
+          entrypoint: "_start",
+          argc: 0,
+          argv: [],
+          exitCode: 0,
+        };
+      },
+      resetRuntimeState() {},
+      async destroyDependencies() {},
+    }),
+  });
+
+  assert.equal(runtime.target.hostKind, "wasmedge");
+  assert.equal(runtime.target.adapter, HostedRuntimeAdapter.HOST_INTERNAL);
+  assert.equal(runtime.target.engine, HostedRuntimeEngine.WASI);
+  assert.deepEqual(runtime.runtimeTargets, [RuntimeTarget.WASMEDGE]);
+  assert.equal(runtime.runtimeCompatibility?.ok, true);
+
+  await assert.rejects(
+    startStandaloneFlowRuntime({
+      artifact,
+      target: {
+        hostKind: "orbpro",
+        adapter: HostedRuntimeAdapter.SDN_JS,
+        engine: HostedRuntimeEngine.BROWSER,
+      },
+      bindRuntimeHost: async () => ({
+        resetRuntimeState() {},
+        async destroyDependencies() {},
+      }),
+    }),
+    /Standalone runtime cannot satisfy embedded runtimeTargets wasmedge/i,
   );
 });

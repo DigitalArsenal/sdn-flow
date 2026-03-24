@@ -73,8 +73,8 @@ Delegated or wrapper-only:
 
 ## Validation
 
-- [ ] Pure `wasi` artifacts run without installed-host wrappers.
-- [ ] `wasmedge` artifacts run without installed-host wrappers for supported
+- [x] Pure `wasi` artifacts run without installed-host wrappers.
+- [x] `wasmedge` artifacts run without installed-host wrappers for supported
       guest networking paths.
 - [ ] Browser deployments clearly declare delegated bindings instead of
       pretending to be standalone.

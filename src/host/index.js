@@ -81,6 +81,10 @@ export {
   registerInstalledPluginPackages,
 } from "./installedFlowHost.js";
 export {
+  resolveStandaloneFlowRuntimeInput,
+  startStandaloneFlowRuntime,
+} from "./standaloneRuntime.js";
+export {
   createCommandPackageManager,
   createNodeCommandRunner,
   createNpmPackageManager,
