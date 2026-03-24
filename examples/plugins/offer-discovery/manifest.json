@@ -17,8 +17,8 @@
               "setId": "entity-profile",
               "allowedTypes": [
                 {
-                  "schemaName": "EntityProfile.fbs",
-                  "fileIdentifier": "ENPF"
+                  "schemaName": "ProtectedCatalogEntry.fbs",
+                  "fileIdentifier": "PRTC"
                 }
               ]
             }
@@ -36,8 +36,8 @@
               "setId": "offered-message",
               "allowedTypes": [
                 {
-                  "schemaName": "OfferedMessage.fbs",
-                  "fileIdentifier": "OFMS"
+                  "schemaName": "CatalogQueryResult.fbs",
+                  "fileIdentifier": "CQRS"
                 }
               ]
             }

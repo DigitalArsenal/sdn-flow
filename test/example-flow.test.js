@@ -772,7 +772,7 @@ test("SDN IPFS pull and pin example runs through the reference harness end-to-en
     handlers: {
       import_entity_profile: ({ inputs }) => ({
         outputs: inputs.map((input) =>
-          frame("profile", "EntityProfile.fbs", "ENPF", input.payload, {
+          frame("profile", "ProtectedCatalogEntry.fbs", "PRTC", input.payload, {
             sequence: input.sequence,
             traceId: input.traceId,
           }),
@@ -789,7 +789,7 @@ test("SDN IPFS pull and pin example runs through the reference harness end-to-en
       discover_offered_messages: ({ inputs }) => ({
         outputs: inputs.flatMap((input) =>
           (input.payload.offeredMessages ?? []).map((offer, index) =>
-            frame("offers", "OfferedMessage.fbs", "OFMS", offer, {
+            frame("offers", "CatalogQueryResult.fbs", "CQRS", offer, {
               sequence: index + 1,
               traceId: `${input.traceId}:offer:${offer.messageId}`,
             }),
@@ -821,8 +821,8 @@ test("SDN IPFS pull and pin example runs through the reference harness end-to-en
           outputs.push(
             frame(
               "pull-requests",
-              "IpfsPullRequest.fbs",
-              "IPRQ",
+              "CidRef.fbs",
+              "CIDR",
               {
                 cid: input.payload.cid,
                 messageId: input.payload.messageId,
@@ -931,7 +931,7 @@ test("SDN IPFS pull and pin example runs through the reference harness end-to-en
   runtime.loadProgram(flow);
 
   runtime.enqueueTriggerFrames("entity-profile-feed", [
-    frame("profile", "EntityProfile.fbs", "ENPF", {
+    frame("profile", "ProtectedCatalogEntry.fbs", "PRTC", {
       entityId: "space-weather-node",
       offeredMessages: [
         {
@@ -950,7 +950,7 @@ test("SDN IPFS pull and pin example runs through the reference harness end-to-en
   assert.deepEqual(Array.from(watchedOffers.keys()), ["space-weather.k-index"]);
 
   runtime.enqueueTriggerFrames("pnm-notification-feed", [
-    frame("notification", "PublishNotification.fbs", "PNOT", {
+    frame("notification", "CidRef.fbs", "CIDR", {
       messageId: "space-weather.k-index",
       cid: "bafyspaceweather0001",
       publishedAt: "2026-03-24T00:05:00Z",
@@ -966,7 +966,7 @@ test("SDN IPFS pull and pin example runs through the reference harness end-to-en
   ]);
 
   runtime.enqueueTriggerFrames("pnm-notification-feed", [
-    frame("notification", "PublishNotification.fbs", "PNOT", {
+    frame("notification", "CidRef.fbs", "CIDR", {
       messageId: "space-weather.k-index",
       cid: "bafyspaceweather0002",
       publishedAt: "2026-03-24T00:10:00Z",

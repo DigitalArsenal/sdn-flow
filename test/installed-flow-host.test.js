@@ -1120,6 +1120,161 @@ test("installed flow service enforces local HTTP auth policies from the deployme
   assert.equal(response.outputs[0].frame.metadata.statusCode, 200);
 });
 
+test("installed flow service aligns HTTP ingress frames before node-to-node dispatch", async () => {
+  const ingressFormats = [];
+  const sinkFormats = [];
+  const service = createInstalledFlowService({
+    program: {
+      programId: "com.digitalarsenal.examples.aligned-http-service",
+      nodes: [
+        {
+          nodeId: "parser",
+          pluginId: "com.digitalarsenal.examples.memory.http-parser",
+          methodId: "parse_request",
+        },
+        {
+          nodeId: "sink",
+          pluginId: "com.digitalarsenal.examples.memory.aligned-sink",
+          methodId: "capture",
+        },
+      ],
+      edges: [
+        {
+          edgeId: "parser-to-sink",
+          fromNodeId: "parser",
+          fromPortId: "parsed",
+          toNodeId: "sink",
+          toPortId: "input",
+        },
+      ],
+      triggers: [
+        {
+          triggerId: "catalog-http",
+          kind: "http-request",
+          source: "/catalog",
+          acceptedTypes: [
+            {
+              schemaName: "HttpRequest.fbs",
+              fileIdentifier: "HREQ",
+            },
+          ],
+        },
+      ],
+      triggerBindings: [
+        {
+          triggerId: "catalog-http",
+          targetNodeId: "parser",
+          targetPortId: "request",
+        },
+      ],
+      requiredPlugins: [
+        "com.digitalarsenal.examples.memory.http-parser",
+        "com.digitalarsenal.examples.memory.aligned-sink",
+      ],
+    },
+    deploymentPlan: {
+      pluginId: "com.digitalarsenal.examples.aligned-http-service",
+      version: "1.0.0",
+      scheduleBindings: [],
+      serviceBindings: [
+        {
+          serviceId: "catalog-http-service",
+          triggerId: "catalog-http",
+          bindingMode: "local",
+          serviceKind: "http-server",
+          routePath: "/catalog",
+          method: "POST",
+        },
+      ],
+      inputBindings: [],
+      publicationBindings: [],
+      authPolicies: [],
+      protocolInstallations: [],
+    },
+    discover: false,
+    pluginPackages: [
+      {
+        manifest: {
+          pluginId: "com.digitalarsenal.examples.memory.http-parser",
+          name: "In-Memory HTTP Parser",
+          version: "1.0.0",
+          pluginFamily: "analysis",
+          methods: [
+            {
+              methodId: "parse_request",
+              inputPorts: [{ portId: "request", required: true }],
+              outputPorts: [{ portId: "parsed" }],
+              maxBatch: 8,
+              drainPolicy: "drain-to-empty",
+            },
+          ],
+        },
+        handlers: {
+          parse_request({ inputs }) {
+            ingressFormats.push(inputs[0].typeRef?.wireFormat ?? null);
+            return {
+              outputs: inputs.map((frame) => ({
+                ...frame,
+                portId: "parsed",
+              })),
+              backlogRemaining: 0,
+              yielded: false,
+            };
+          },
+        },
+      },
+      {
+        manifest: {
+          pluginId: "com.digitalarsenal.examples.memory.aligned-sink",
+          name: "In-Memory Aligned Sink",
+          version: "1.0.0",
+          pluginFamily: "analysis",
+          methods: [
+            {
+              methodId: "capture",
+              inputPorts: [{ portId: "input", required: true }],
+              outputPorts: [{ portId: "response" }],
+              maxBatch: 8,
+              drainPolicy: "drain-to-empty",
+            },
+          ],
+        },
+        handlers: {
+          capture({ inputs }) {
+            sinkFormats.push(inputs[0].typeRef?.wireFormat ?? null);
+            return {
+              outputs: inputs.map((frame) => ({
+                ...frame,
+                portId: "response",
+              })),
+              backlogRemaining: 0,
+              yielded: false,
+            };
+          },
+        },
+      },
+    ],
+  });
+
+  await service.start();
+  const response = await service.handleHttpRequest({
+    path: "/catalog",
+    method: "POST",
+    typeRef: {
+      schemaName: "HttpRequest.fbs",
+      fileIdentifier: "HREQ",
+    },
+    payload: new Uint8Array([1, 2, 3]),
+  });
+
+  assert.equal(response.serviceId, "catalog-http-service");
+  assert.deepEqual(ingressFormats, ["aligned-binary"]);
+  assert.deepEqual(sinkFormats, ["aligned-binary"]);
+  assert.equal(response.outputs.length, 1);
+  assert.equal(response.outputs[0].frame.typeRef.wireFormat, "aligned-binary");
+  assert.equal(response.outputs[0].frame.typeRef.requiredAlignment, 8);
+});
+
 test("installed flow service resolves walletProfileId and trustMapId against managed wallet trust material", async () => {
   const securityDirectory = await mkdtemp(
     path.join(os.tmpdir(), "sdn-flow-service-wallet-trust-"),
@@ -1742,4 +1897,209 @@ test("installed flow service hosts local protocol installations by protocolId wi
   assert.deepEqual(Array.from(response.outputs[0].frame.payload), [4, 5, 6]);
   assert.equal(response.outputs[0].frame.metadata.protocolId, "/com.digitalarsenal/catalog/1.0.0");
   assert.deepEqual(seenProtocolIds, [["/com.digitalarsenal/catalog/1.0.0"]]);
+});
+
+test("installed flow service keeps protocol identity in the manifest and uses deployment routes for local selection", async () => {
+  const seenProtocolRequests = [];
+  const protocolBoundService = createInstalledFlowService({
+    program: {
+      programId: "com.digitalarsenal.examples.protocol-route-service",
+      nodes: [
+        {
+          nodeId: "responder",
+          pluginId: "com.digitalarsenal.examples.memory.protocol-router",
+          methodId: "handle_protocol",
+        },
+      ],
+      edges: [],
+      triggers: [
+        {
+          triggerId: "catalog-protocol",
+          kind: "protocol-request",
+          protocolId: "/com.digitalarsenal/catalog/1.0.0",
+          source: "/com.digitalarsenal/catalog/1.0.0",
+        },
+      ],
+      triggerBindings: [
+        {
+          triggerId: "catalog-protocol",
+          targetNodeId: "responder",
+          targetPortId: "request",
+        },
+      ],
+      requiredPlugins: ["com.digitalarsenal.examples.memory.protocol-router"],
+    },
+    deploymentPlan: {
+      pluginId: "com.digitalarsenal.examples.protocol-route-service",
+      version: "1.0.0",
+      scheduleBindings: [],
+      serviceBindings: [],
+      inputBindings: [],
+      publicationBindings: [],
+      authPolicies: [
+        {
+          policyId: "catalog-a-auth",
+          bindingMode: "local",
+          targetKind: "protocol-service",
+          targetId: "catalog-a",
+          allowServerKeys: ["ed25519:catalog-a"],
+          requireSignedRequests: true,
+          requireEncryptedTransport: true,
+        },
+        {
+          policyId: "catalog-b-auth",
+          bindingMode: "local",
+          targetKind: "protocol-service",
+          targetId: "catalog-b",
+          allowServerKeys: ["ed25519:catalog-b"],
+          requireSignedRequests: true,
+          requireEncryptedTransport: true,
+        },
+      ],
+      protocolInstallations: [
+        {
+          protocolId: "/com.digitalarsenal/catalog/1.0.0",
+          transportKind: "http",
+          role: "handle",
+          serviceName: "catalog-a",
+          nodeInfoUrl: "https://node.example.test/catalog-a",
+        },
+        {
+          protocolId: "/com.digitalarsenal/catalog/1.0.0",
+          transportKind: "http",
+          role: "handle",
+          serviceName: "catalog-b",
+          nodeInfoUrl: "https://node.example.test/catalog-b",
+        },
+      ],
+    },
+    discover: false,
+    pluginPackages: [
+      {
+        manifest: {
+          pluginId: "com.digitalarsenal.examples.memory.protocol-router",
+          name: "In-Memory Protocol Router",
+          version: "1.0.0",
+          pluginFamily: "responder",
+          methods: [
+            {
+              methodId: "handle_protocol",
+              inputPorts: [{ portId: "request", required: true }],
+              outputPorts: [{ portId: "response" }],
+              maxBatch: 8,
+              drainPolicy: "drain-to-empty",
+            },
+          ],
+        },
+        handlers: {
+          handle_protocol({ inputs }) {
+            seenProtocolRequests.push({
+              protocolId: inputs[0].metadata?.protocolId ?? null,
+              serviceName: inputs[0].metadata?.serviceName ?? null,
+              nodeInfoUrl: inputs[0].metadata?.nodeInfoUrl ?? null,
+            });
+            return {
+              outputs: inputs.map((frame) => ({
+                ...frame,
+                portId: "response",
+              })),
+              backlogRemaining: 0,
+              yielded: false,
+            };
+          },
+        },
+      },
+    ],
+  });
+
+  const startup = await protocolBoundService.start();
+  assert.deepEqual(
+    startup.protocolRoutes.map((route) => ({
+      protocolId: route.protocolId,
+      serviceName: route.serviceName,
+      nodeInfoUrl: route.nodeInfoUrl,
+      authPolicies: route.authPolicies,
+    })),
+    [
+      {
+        protocolId: "/com.digitalarsenal/catalog/1.0.0",
+        serviceName: "catalog-a",
+        nodeInfoUrl: "https://node.example.test/catalog-a",
+        authPolicies: ["catalog-a-auth"],
+      },
+      {
+        protocolId: "/com.digitalarsenal/catalog/1.0.0",
+        serviceName: "catalog-b",
+        nodeInfoUrl: "https://node.example.test/catalog-b",
+        authPolicies: ["catalog-b-auth"],
+      },
+    ],
+  );
+
+  await assert.rejects(
+    protocolBoundService.handleProtocolRequest({
+      protocolId: "/com.digitalarsenal/catalog/1.0.0",
+      serviceName: "catalog-b",
+      signedRequest: true,
+      encryptedTransport: true,
+      serverKey: "ed25519:catalog-a",
+      frames: [
+        {
+          streamId: 1,
+          sequence: 1,
+          typeRef: {
+            schemaName: "CatalogRequest.fbs",
+            fileIdentifier: "CREQ",
+          },
+          payload: new Uint8Array([1, 2, 3]),
+        },
+      ],
+    }),
+    (error) =>
+      error?.statusCode === 403 && /server key/i.test(error.message),
+  );
+
+  const response = await protocolBoundService.handleProtocolRequest({
+    protocolId: "/com.digitalarsenal/catalog/1.0.0",
+    nodeInfoUrl: "https://node.example.test/catalog-b",
+    signedRequest: true,
+    encryptedTransport: true,
+    serverKey: "ed25519:catalog-b",
+    frames: [
+      {
+        streamId: 1,
+        sequence: 1,
+        typeRef: {
+          schemaName: "CatalogRequest.fbs",
+          fileIdentifier: "CREQ",
+        },
+        payload: new Uint8Array([4, 5, 6]),
+      },
+    ],
+  });
+
+  assert.equal(response.protocolId, "/com.digitalarsenal/catalog/1.0.0");
+  assert.equal(response.serviceName, "catalog-b");
+  assert.equal(
+    response.installation.nodeInfoUrl,
+    "https://node.example.test/catalog-b",
+  );
+  assert.deepEqual(response.authPolicies, ["catalog-b-auth"]);
+  assert.equal(response.outputs.length, 1);
+  assert.equal(
+    response.outputs[0].frame.metadata.protocolId,
+    "/com.digitalarsenal/catalog/1.0.0",
+  );
+  assert.equal(response.outputs[0].frame.metadata.serviceName, "catalog-b");
+  assert.equal(
+    response.outputs[0].frame.metadata.nodeInfoUrl,
+    "https://node.example.test/catalog-b",
+  );
+  assert.deepEqual(seenProtocolRequests, [
+    {
+      protocolId: "/com.digitalarsenal/catalog/1.0.0",
+      serviceName: "catalog-b",
+      nodeInfoUrl: "https://node.example.test/catalog-b",
+    },
+  ]);
 });

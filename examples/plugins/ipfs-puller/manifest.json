@@ -26,8 +26,8 @@
               "setId": "ipfs-pull-request",
               "allowedTypes": [
                 {
-                  "schemaName": "IpfsPullRequest.fbs",
-                  "fileIdentifier": "IPRQ"
+                  "schemaName": "CidRef.fbs",
+                  "fileIdentifier": "CIDR"
                 }
               ]
             }

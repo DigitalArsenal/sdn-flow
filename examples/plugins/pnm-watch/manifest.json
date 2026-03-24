@@ -27,8 +27,8 @@
               "setId": "offered-message",
               "allowedTypes": [
                 {
-                  "schemaName": "OfferedMessage.fbs",
-                  "fileIdentifier": "OFMS"
+                  "schemaName": "CatalogQueryResult.fbs",
+                  "fileIdentifier": "CQRS"
                 }
               ]
             }
@@ -44,8 +44,8 @@
               "setId": "publish-notification",
               "allowedTypes": [
                 {
-                  "schemaName": "PublishNotification.fbs",
-                  "fileIdentifier": "PNOT"
+                  "schemaName": "CidRef.fbs",
+                  "fileIdentifier": "CIDR"
                 }
               ]
             }
@@ -63,8 +63,8 @@
               "setId": "ipfs-pull-request",
               "allowedTypes": [
                 {
-                  "schemaName": "IpfsPullRequest.fbs",
-                  "fileIdentifier": "IPRQ"
+                  "schemaName": "CidRef.fbs",
+                  "fileIdentifier": "CIDR"
                 }
               ]
             }

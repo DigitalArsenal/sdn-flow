@@ -104,8 +104,8 @@
       "source": "/sdn/entity/profile",
       "acceptedTypes": [
         {
-          "schemaName": "EntityProfile.fbs",
-          "fileIdentifier": "ENPF"
+          "schemaName": "ProtectedCatalogEntry.fbs",
+          "fileIdentifier": "PRTC"
         }
       ],
       "description": "Imports entity profile messages that advertise offered SDS content."
@@ -117,8 +117,8 @@
       "protocolId": "/sds/pnm/1.0.0",
       "acceptedTypes": [
         {
-          "schemaName": "PublishNotification.fbs",
-          "fileIdentifier": "PNOT"
+          "schemaName": "CidRef.fbs",
+          "fileIdentifier": "CIDR"
         }
       ],
       "description": "Receives SDS publish notifications for watched content offers."

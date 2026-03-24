@@ -26,8 +26,8 @@
               "setId": "entity-profile",
               "allowedTypes": [
                 {
-                  "schemaName": "EntityProfile.fbs",
-                  "fileIdentifier": "ENPF"
+                  "schemaName": "ProtectedCatalogEntry.fbs",
+                  "fileIdentifier": "PRTC"
                 }
               ]
             }
@@ -45,8 +45,8 @@
               "setId": "entity-profile",
               "allowedTypes": [
                 {
-                  "schemaName": "EntityProfile.fbs",
-                  "fileIdentifier": "ENPF"
+                  "schemaName": "ProtectedCatalogEntry.fbs",
+                  "fileIdentifier": "PRTC"
                 }
               ]
             }

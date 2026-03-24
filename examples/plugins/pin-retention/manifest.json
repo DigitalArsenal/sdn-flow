@@ -12,13 +12,6 @@
       "capability": "ipfs",
       "resource": "ipfs://pin-retention",
       "description": "Pins newly pulled content and evicts older content according to the active policy."
-    },
-    {
-      "interfaceId": "pin-policy-config",
-      "kind": "local-runtime",
-      "direction": "input",
-      "resource": "policy://retain-latest-1",
-      "description": "Local policy input that keeps only the most recent pulled content pinned."
     }
   ],
   "methods": [

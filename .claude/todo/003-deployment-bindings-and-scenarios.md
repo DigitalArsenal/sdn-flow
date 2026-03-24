@@ -25,9 +25,9 @@ Status: active
 
 - [ ] Enforce approved-key trust mappings uniformly at request time.
 - [ ] Use `hd-wasm-wallet` trust material for REST and IPFS/protocol services.
-- [ ] Keep hosted protocol identity in the manifest and concrete routing in the
+- [x] Keep hosted protocol identity in the manifest and concrete routing in the
       deployment plan.
-- [ ] Apply regular FlatBuffer versus aligned-binary negotiation consistently
+- [x] Apply regular FlatBuffer versus aligned-binary negotiation consistently
       across installed services and module-to-module routing.
 
 ## Acceptance Scenarios
