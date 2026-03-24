@@ -1,0 +1,48 @@
+{
+  "hostId": "sdn-js-he-assessor",
+  "hostKind": "sdn-js",
+  "adapter": "sdn-js",
+  "engine": "deno",
+  "description": "Deno-hosted direct-stream assessor for encrypted conjunction assessment.",
+  "disconnectedCapable": false,
+  "runtimes": [
+    {
+      "runtimeId": "he-conjunction-assessor",
+      "kind": "flow",
+      "programId": "com.digitalarsenal.examples.sdn-js-he-conjunction-assessor",
+      "description": "Assessor runtime for direct authenticated encrypted conjunction requests.",
+      "execution": "compiled-wasm",
+      "authority": "local",
+      "adapter": "sdn-js",
+      "startupPhase": "session",
+      "autoStart": true,
+      "dependsOn": [],
+      "requiredCapabilities": [
+        "protocol_handle",
+        "wallet_sign"
+      ],
+      "runtimeTargets": [
+        "server"
+      ],
+      "bindings": [
+        {
+          "bindingId": "he-assessment-listener",
+          "direction": "listen",
+          "transport": "sdn-protocol",
+          "protocolId": "/sds/he/conjunction/assessment/1.0.0",
+          "url": "https://assessor.example.test/sds/he/conjunction/assessment/1.0.0",
+          "required": true,
+          "description": "Direct authenticated assessment ingress for encrypted ephemeris pairs."
+        },
+        {
+          "bindingId": "wallet-active-key",
+          "direction": "dial",
+          "transport": "same-app",
+          "url": "wallet://active-key",
+          "required": true,
+          "description": "Local wallet-backed key source used to derive the assessor HE session."
+        }
+      ]
+    }
+  ]
+}

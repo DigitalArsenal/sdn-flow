@@ -176,6 +176,39 @@ test("wasmedge demo marks UDP and filesystem access as explicit host-profile req
   );
 });
 
+test("sdn-js HE assessor demo declares direct protocol ingress and wallet-backed HE session requirements", async () => {
+  const flow = await readJson(
+    "../examples/environments/sdn-js-he-conjunction-assessor/flow.json",
+  );
+  const manifests = await Promise.all([
+    readJson("../examples/plugins/flatbuffers-he-session/manifest.json"),
+    readJson("../examples/plugins/flatbuffers-he-conjunction/manifest.json"),
+  ]);
+  const session = new FlowDesignerSession({ program: flow });
+  const summary = session.inspectRequirements({ manifests });
+
+  assert.deepEqual(summary.capabilities, ["protocol_handle", "wallet_sign"]);
+  assert.equal(
+    hasInterface(
+      summary,
+      (item) =>
+        item.kind === "protocol" &&
+        item.direction === "input" &&
+        item.protocolId === "/sds/he/conjunction/assessment/1.0.0",
+    ),
+    true,
+  );
+  assert.equal(
+    hasInterface(
+      summary,
+      (item) =>
+        item.kind === "host-service" &&
+        item.resource === "wallet://active-key",
+    ),
+    true,
+  );
+});
+
 test("environment host plans summarize the intended host adapters and bindings", async () => {
   const browserPlan = await readJson(
     "../examples/environments/orbpro-browser-omm-cache/host-plan.json",
@@ -186,6 +219,9 @@ test("environment host plans summarize the intended host adapters and bindings",
   const goPlan = await readJson(
     "../examples/environments/go-sdn-omm-service/host-plan.json",
   );
+  const hePlan = await readJson(
+    "../examples/environments/sdn-js-he-conjunction-assessor/host-plan.json",
+  );
   const wasmedgePlan = await readJson(
     "../examples/environments/wasmedge-udp-spooler/host-plan.json",
   );
@@ -193,6 +229,7 @@ test("environment host plans summarize the intended host adapters and bindings",
   const browserSummary = summarizeHostedRuntimePlan(browserPlan);
   const jsSummary = summarizeHostedRuntimePlan(jsPlan);
   const goSummary = summarizeHostedRuntimePlan(goPlan);
+  const heSummary = summarizeHostedRuntimePlan(hePlan);
   const wasmedgeSummary = summarizeHostedRuntimePlan(wasmedgePlan);
 
   assert.equal(browserSummary.adapter, "sdn-js");
@@ -213,6 +250,30 @@ test("environment host plans summarize the intended host adapters and bindings",
         binding.implementation?.clientPackage ===
           "github.com/ipfs/kubo/client/rpc" &&
         binding.implementation?.apiBaseUrl === "http://127.0.0.1:5001/api/v0",
+    ),
+    true,
+  );
+  assert.equal(heSummary.adapter, "sdn-js");
+  assert.equal(heSummary.engine, "deno");
+  assert.equal(heSummary.transports.includes("same-app"), true);
+  assert.equal(heSummary.transports.includes("sdn-protocol"), true);
+  assert.equal(
+    heSummary.bindings.some(
+      (binding) =>
+        binding.bindingId === "he-assessment-listener" &&
+        binding.transport === "sdn-protocol" &&
+        binding.protocolId === "/sds/he/conjunction/assessment/1.0.0" &&
+        binding.url ===
+          "https://assessor.example.test/sds/he/conjunction/assessment/1.0.0",
+    ),
+    true,
+  );
+  assert.equal(
+    heSummary.bindings.some(
+      (binding) =>
+        binding.bindingId === "wallet-active-key" &&
+        binding.transport === "same-app" &&
+        binding.url === "wallet://active-key",
     ),
     true,
   );

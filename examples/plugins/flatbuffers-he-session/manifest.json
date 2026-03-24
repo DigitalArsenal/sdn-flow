@@ -1,0 +1,73 @@
+{
+  "pluginId": "com.digitalarsenal.infrastructure.flatbuffers-he-session",
+  "name": "FlatBuffers HE Session",
+  "version": "1.0.0",
+  "pluginFamily": "infrastructure",
+  "capabilities": [
+    "wallet_sign"
+  ],
+  "externalInterfaces": [
+    {
+      "interfaceId": "wallet-active-key",
+      "kind": "host-service",
+      "direction": "bidirectional",
+      "capability": "wallet_sign",
+      "resource": "wallet://active-key",
+      "description": "Host-provided HD wallet key source used to derive deterministic assessor HE contexts through the flatc-wasm HE bridge.",
+      "properties": {
+        "curves": [
+          "ed25519",
+          "x25519"
+        ],
+        "residentKeyMaterial": true
+      }
+    }
+  ],
+  "methods": [
+    {
+      "methodId": "derive_public_bundle",
+      "displayName": "Derive Public Bundle",
+      "inputPorts": [
+        {
+          "portId": "request",
+          "acceptedTypeSets": [
+            {
+              "setId": "encrypted-conjunction-request",
+              "allowedTypes": [
+                {
+                  "schemaName": "AlignedRecordBatch.fbs",
+                  "fileIdentifier": "RECS"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 1,
+          "required": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portId": "session_bundle",
+          "acceptedTypeSets": [
+            {
+              "setId": "assessment-session-bundle",
+              "allowedTypes": [
+                {
+                  "schemaName": "AlignedRecordBatch.fbs",
+                  "fileIdentifier": "RECS"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 1,
+          "required": true
+        }
+      ],
+      "maxBatch": 32,
+      "drainPolicy": "drain-until-yield",
+      "description": "Derives the assessor-side HE public bundle via flatc-wasm exports ./he and ./he-bridge instead of reimplementing HE key handling inside sdn-flow."
+    }
+  ]
+}

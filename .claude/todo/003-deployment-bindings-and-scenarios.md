@@ -1,10 +1,10 @@
 # Deployment Bindings, Auth, And Scenario Validation
 
-Status: active
+Status: complete
 
 ## Deployment Plan Enforcement
 
-- [ ] Consume and enforce the SDK deployment plan in the installed host path.
+- [x] Consume and enforce the SDK deployment plan in the installed host path.
 - [ ] Apply:
   - [x] `scheduleBindings`
   - [x] `serviceBindings`
@@ -56,9 +56,9 @@ Status: active
    - [x] Apply the same trust policy to REST, protocol, and IPFS surfaces.
 
 5. Homomorphic conjunction service orchestration
-   - [ ] Treat the HE implementation in `../flatbuffers/wasm` as the crypto
+   - [x] Treat the HE implementation in `../flatbuffers/wasm` as the crypto
          primitive source of truth.
-   - [ ] Make `sdn-flow` able to compose and deploy that service with the same
+   - [x] Make `sdn-flow` able to compose and deploy that service with the same
          compiled-runtime and deployment-plan path.
 
 ## Release Criteria

@@ -747,6 +747,65 @@ test("installed flow hosted runtime plans describe Go IPFS host services with of
   });
 });
 
+test("installed flow hosted runtime plans carry HE assessor protocol and wallet bindings through the deployment-plan path", async () => {
+  const program = await readJson("../examples/flows/he-conjunction-assessor/flow.json");
+  const manifests = await Promise.all([
+    readJson("../examples/plugins/flatbuffers-he-session/manifest.json"),
+    readJson("../examples/plugins/flatbuffers-he-conjunction/manifest.json"),
+  ]);
+  const plan = createInstalledFlowHostedRuntimePlan({
+    hostId: "sdn-js-he-assessor",
+    hostKind: "sdn-js",
+    adapter: HostedRuntimeAdapter.SDN_JS,
+    engine: HostedRuntimeEngine.DENO,
+    program,
+    manifests,
+    deploymentPlan: {
+      pluginId: "com.digitalarsenal.examples.he-conjunction-assessor",
+      version: "1.0.0",
+      scheduleBindings: [],
+      serviceBindings: [],
+      inputBindings: [],
+      publicationBindings: [],
+      authPolicies: [],
+      protocolInstallations: [
+        {
+          protocolId: "/sds/he/conjunction/assessment/1.0.0",
+          wireId: "he-assessment-wire",
+          transportKind: "http",
+          role: "handle",
+          serviceName: "he-conjunction-assessor",
+          nodeInfoUrl:
+            "https://assessor.example.test/sds/he/conjunction/assessment/1.0.0",
+        },
+      ],
+    },
+  });
+  const summary = summarizeHostedRuntimePlan(plan);
+
+  assert.deepEqual(plan.runtimes[0].runtimeTargets, ["server"]);
+  assert.equal(
+    summary.bindings.some(
+      (binding) =>
+        binding.bindingId === "assessment-request:listen" &&
+        binding.transport === "sdn-protocol" &&
+        binding.protocolId === "/sds/he/conjunction/assessment/1.0.0" &&
+        binding.url ===
+          "https://assessor.example.test/sds/he/conjunction/assessment/1.0.0",
+    ),
+    true,
+  );
+  assert.equal(
+    summary.bindings.some(
+      (binding) =>
+        binding.bindingId === "wallet-active-key:dial" &&
+        binding.transport === "same-app" &&
+        binding.url === "wallet://active-key",
+    ),
+    true,
+  );
+});
+
 test("installed flow service auto-starts timer triggers with positive intervals", async () => {
   const scheduledIntervals = [];
   const clearedHandles = [];

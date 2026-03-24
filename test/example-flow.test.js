@@ -998,6 +998,229 @@ test("SDN IPFS pull and pin example runs through the reference harness end-to-en
   );
 });
 
+test("HE conjunction assessor example summarizes direct protocol ingress and flatbuffers/wasm HE source-of-truth metadata", async () => {
+  const flow = await readJson("../examples/flows/he-conjunction-assessor/flow.json");
+  const manifests = await Promise.all([
+    readJson("../examples/plugins/flatbuffers-he-session/manifest.json"),
+    readJson("../examples/plugins/flatbuffers-he-conjunction/manifest.json"),
+  ]);
+
+  const session = new FlowDesignerSession({ program: flow });
+  const summary = session.inspectRequirements({ manifests });
+
+  assert.deepEqual(summary.capabilities, ["protocol_handle", "wallet_sign"]);
+  assert.equal(summary.artifactDependencies.length, 2);
+  assert.equal(
+    summary.externalInterfaces.some(
+      (item) =>
+        item.kind === "protocol" &&
+        item.direction === "input" &&
+        item.protocolId === "/sds/he/conjunction/assessment/1.0.0",
+    ),
+    true,
+  );
+  assert.equal(
+    summary.externalInterfaces.some(
+      (item) =>
+        item.kind === "host-service" &&
+        item.resource === "wallet://active-key",
+    ),
+    true,
+  );
+  assert.deepEqual(
+    summary.artifactDependencies.find(
+      (dependency) =>
+        dependency.pluginId ===
+        "com.digitalarsenal.infrastructure.flatbuffers-he-session",
+    )?.metadata?.sourceOfTruth,
+    {
+      workspacePath: "../flatbuffers/wasm",
+      packageName: "flatc-wasm",
+      exports: ["./he", "./he-bridge"],
+    },
+  );
+  assert.deepEqual(
+    summary.artifactDependencies.find(
+      (dependency) =>
+        dependency.pluginId ===
+        "com.digitalarsenal.infrastructure.flatbuffers-he-conjunction",
+    )?.metadata?.sourceOfTruth,
+    {
+      workspacePath: "../flatbuffers/wasm",
+      packageName: "flatc-wasm",
+      exports: ["./he"],
+    },
+  );
+});
+
+test("HE conjunction assessor example runs through the reference harness end-to-end", async () => {
+  const flow = await readJson("../examples/flows/he-conjunction-assessor/flow.json");
+  const manifests = {
+    session: await readJson(
+      "../examples/plugins/flatbuffers-he-session/manifest.json",
+    ),
+    conjunction: await readJson(
+      "../examples/plugins/flatbuffers-he-conjunction/manifest.json",
+    ),
+  };
+
+  const registry = new MethodRegistry();
+
+  registry.registerPlugin({
+    manifest: manifests.session,
+    handlers: {
+      derive_public_bundle: ({ inputs }) => ({
+        outputs: inputs.map((input) =>
+          frame(
+            "session_bundle",
+            "AlignedRecordBatch.fbs",
+            "RECS",
+            {
+              assessmentId: input.payload.assessmentId,
+              sourcePackage: "flatc-wasm",
+              sourceExports: ["./he", "./he-bridge"],
+              publicKey: [1, 2, 3, 4],
+              relinKeys: [5, 6, 7, 8],
+              polyDegree: 4096,
+            },
+            {
+              traceId: input.traceId,
+              sequence: input.sequence,
+            },
+          ),
+        ),
+        backlogRemaining: 0,
+        yielded: false,
+      }),
+    },
+  });
+
+  registry.registerPlugin({
+    manifest: manifests.conjunction,
+    handlers: {
+      evaluate_pairwise_distance: ({ inputs }) => {
+        const request = inputs.find((input) => input.portId === "request");
+        const sessionBundle = inputs.find(
+          (input) => input.portId === "session_bundle",
+        );
+
+        if (!request || !sessionBundle) {
+          throw new Error(
+            "evaluate_pairwise_distance requires request and session_bundle inputs.",
+          );
+        }
+
+        const primary = request.payload.parties.primary.positionCiphertexts;
+        const secondary = request.payload.parties.secondary.positionCiphertexts;
+        const dx = Number(primary.x?.[0] ?? 0) - Number(secondary.x?.[0] ?? 0);
+        const dy = Number(primary.y?.[0] ?? 0) - Number(secondary.y?.[0] ?? 0);
+        const dz = Number(primary.z?.[0] ?? 0) - Number(secondary.z?.[0] ?? 0);
+        const distanceSqKm = dx * dx + dy * dy + dz * dz;
+
+        return {
+          outputs: [
+            frame(
+              "assessment_result",
+              "AlignedRecordBatch.fbs",
+              "RECS",
+              {
+                assessmentId: request.payload.assessmentId,
+                operatorIds: [
+                  request.payload.parties.primary.operatorId,
+                  request.payload.parties.secondary.operatorId,
+                ],
+                thresholdKm: request.payload.thresholdKm,
+                distanceSqKm,
+                alert:
+                  distanceSqKm <
+                  request.payload.thresholdKm * request.payload.thresholdKm,
+                sourcePackage: sessionBundle.payload.sourcePackage,
+              },
+              {
+                traceId: request.traceId,
+                sequence: request.sequence,
+              },
+            ),
+          ],
+          backlogRemaining: 0,
+          yielded: false,
+        };
+      },
+      build_assessment_decision: ({ inputs }) => ({
+        outputs: inputs.map((input) =>
+          frame(
+            "decision",
+            "AlignedRecordBatch.fbs",
+            "RECS",
+            {
+              assessmentId: input.payload.assessmentId,
+              status: input.payload.alert ? "alert" : "safe",
+              thresholdKm: input.payload.thresholdKm,
+              distanceSqKm: input.payload.distanceSqKm,
+              operatorIds: input.payload.operatorIds,
+              sourcePackage: input.payload.sourcePackage,
+            },
+            {
+              traceId: input.traceId,
+              sequence: input.sequence,
+            },
+          ),
+        ),
+        backlogRemaining: 0,
+        yielded: false,
+      }),
+    },
+  });
+
+  const sinkOutputs = [];
+  const runtime = new FlowRuntime({
+    registry,
+    maxInvocationsPerDrain: 32,
+    onSinkOutput(event) {
+      sinkOutputs.push(event);
+    },
+  });
+  runtime.loadProgram(flow);
+
+  runtime.enqueueTriggerFrames("assessment-request", [
+    frame("request", "AlignedRecordBatch.fbs", "RECS", {
+      assessmentId: "assess-42",
+      thresholdKm: 6,
+      parties: {
+        primary: {
+          operatorId: "operator-a",
+          positionCiphertexts: {
+            x: [7000],
+            y: [0],
+            z: [0],
+          },
+        },
+        secondary: {
+          operatorId: "operator-b",
+          positionCiphertexts: {
+            x: [7003],
+            y: [4],
+            z: [0],
+          },
+        },
+      },
+    }),
+  ]);
+  const runtimeResult = await runtime.drain();
+
+  assert.equal(runtimeResult.idle, true);
+  assert.equal(sinkOutputs.length, 1);
+  assert.equal(sinkOutputs[0].nodeId, "emit-decision");
+  assert.deepEqual(sinkOutputs[0].frame.payload, {
+    assessmentId: "assess-42",
+    status: "alert",
+    thresholdKm: 6,
+    distanceSqKm: 25,
+    operatorIds: ["operator-a", "operator-b"],
+    sourcePackage: "flatc-wasm",
+  });
+});
+
 test("ISS proximity OEM example summarizes external requirements for the visual editor", async () => {
   const flow = await readJson("../examples/flows/iss-proximity-oem/flow.json");
   const manifests = await Promise.all([

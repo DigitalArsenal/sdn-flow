@@ -1,0 +1,117 @@
+{
+  "pluginId": "com.digitalarsenal.infrastructure.flatbuffers-he-conjunction",
+  "name": "FlatBuffers HE Conjunction",
+  "version": "1.0.0",
+  "pluginFamily": "infrastructure",
+  "capabilities": [],
+  "externalInterfaces": [],
+  "methods": [
+    {
+      "methodId": "evaluate_pairwise_distance",
+      "displayName": "Evaluate Pairwise Distance",
+      "inputPorts": [
+        {
+          "portId": "request",
+          "acceptedTypeSets": [
+            {
+              "setId": "encrypted-conjunction-request",
+              "allowedTypes": [
+                {
+                  "schemaName": "AlignedRecordBatch.fbs",
+                  "fileIdentifier": "RECS"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 1,
+          "required": true
+        },
+        {
+          "portId": "session_bundle",
+          "acceptedTypeSets": [
+            {
+              "setId": "assessment-session-bundle",
+              "allowedTypes": [
+                {
+                  "schemaName": "AlignedRecordBatch.fbs",
+                  "fileIdentifier": "RECS"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 1,
+          "required": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portId": "assessment_result",
+          "acceptedTypeSets": [
+            {
+              "setId": "encrypted-conjunction-assessment",
+              "allowedTypes": [
+                {
+                  "schemaName": "AlignedRecordBatch.fbs",
+                  "fileIdentifier": "RECS"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 1,
+          "required": true
+        }
+      ],
+      "maxBatch": 16,
+      "drainPolicy": "drain-until-yield",
+      "description": "Uses the flatc-wasm HE runtime exports to compute encrypted pairwise distance without moving HE math into sdn-flow."
+    },
+    {
+      "methodId": "build_assessment_decision",
+      "displayName": "Build Assessment Decision",
+      "inputPorts": [
+        {
+          "portId": "assessment_result",
+          "acceptedTypeSets": [
+            {
+              "setId": "encrypted-conjunction-assessment",
+              "allowedTypes": [
+                {
+                  "schemaName": "AlignedRecordBatch.fbs",
+                  "fileIdentifier": "RECS"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 1,
+          "required": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portId": "decision",
+          "acceptedTypeSets": [
+            {
+              "setId": "conjunction-decision",
+              "allowedTypes": [
+                {
+                  "schemaName": "AlignedRecordBatch.fbs",
+                  "fileIdentifier": "RECS"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 1,
+          "required": true
+        }
+      ],
+      "maxBatch": 16,
+      "drainPolicy": "drain-until-yield",
+      "description": "Transforms the assessor-side HE result into a typed threshold decision for the response path."
+    }
+  ]
+}

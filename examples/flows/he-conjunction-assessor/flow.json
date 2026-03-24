@@ -1,0 +1,132 @@
+{
+  "programId": "com.digitalarsenal.examples.he-conjunction-assessor",
+  "name": "HE Conjunction Assessor",
+  "version": "0.1.0",
+  "description": "Assessor-side flow that derives a deterministic HE session from the local wallet, evaluates encrypted pairwise ephemeris distance, and emits a typed threshold decision over the compiled flow runtime.",
+  "runtimeTargets": [
+    "server"
+  ],
+  "nodes": [
+    {
+      "nodeId": "derive-session",
+      "pluginId": "com.digitalarsenal.infrastructure.flatbuffers-he-session",
+      "methodId": "derive_public_bundle",
+      "kind": "transform",
+      "drainPolicy": "drain-until-yield"
+    },
+    {
+      "nodeId": "assess-distance",
+      "pluginId": "com.digitalarsenal.infrastructure.flatbuffers-he-conjunction",
+      "methodId": "evaluate_pairwise_distance",
+      "kind": "analyzer",
+      "drainPolicy": "drain-until-yield"
+    },
+    {
+      "nodeId": "emit-decision",
+      "pluginId": "com.digitalarsenal.infrastructure.flatbuffers-he-conjunction",
+      "methodId": "build_assessment_decision",
+      "kind": "responder",
+      "drainPolicy": "drain-until-yield"
+    }
+  ],
+  "edges": [
+    {
+      "edgeId": "session-to-assessment",
+      "fromNodeId": "derive-session",
+      "fromPortId": "session_bundle",
+      "toNodeId": "assess-distance",
+      "toPortId": "session_bundle",
+      "backpressurePolicy": "queue",
+      "queueDepth": 16
+    },
+    {
+      "edgeId": "assessment-to-decision",
+      "fromNodeId": "assess-distance",
+      "fromPortId": "assessment_result",
+      "toNodeId": "emit-decision",
+      "toPortId": "assessment_result",
+      "backpressurePolicy": "queue",
+      "queueDepth": 16
+    }
+  ],
+  "triggers": [
+    {
+      "triggerId": "assessment-request",
+      "kind": "protocol-request",
+      "source": "/sds/he/conjunction/assessment/1.0.0",
+      "protocolId": "/sds/he/conjunction/assessment/1.0.0",
+      "acceptedTypes": [
+        {
+          "schemaName": "AlignedRecordBatch.fbs",
+          "fileIdentifier": "RECS"
+        }
+      ],
+      "description": "Receives a direct authenticated assessment request carrying encrypted ephemeris for both operators."
+    }
+  ],
+  "triggerBindings": [
+    {
+      "triggerId": "assessment-request",
+      "targetNodeId": "derive-session",
+      "targetPortId": "request",
+      "backpressurePolicy": "queue",
+      "queueDepth": 16
+    },
+    {
+      "triggerId": "assessment-request",
+      "targetNodeId": "assess-distance",
+      "targetPortId": "request",
+      "backpressurePolicy": "queue",
+      "queueDepth": 16
+    }
+  ],
+  "requiredPlugins": [
+    "com.digitalarsenal.infrastructure.flatbuffers-he-session",
+    "com.digitalarsenal.infrastructure.flatbuffers-he-conjunction"
+  ],
+  "artifactDependencies": [
+    {
+      "dependencyId": "flatbuffers-he-session-signed",
+      "pluginId": "com.digitalarsenal.infrastructure.flatbuffers-he-session",
+      "version": "1.0.0",
+      "artifactUri": "signed://plugins/flatbuffers-he-session/1.0.0",
+      "sha256": "1212121212121212121212121212121212121212121212121212121212121212",
+      "signature": "ed25519:demo-flatbuffers-he-session-signature",
+      "signerPublicKey": "ed25519:demo-signer-1",
+      "requiredCapabilities": [
+        "wallet_sign"
+      ],
+      "metadata": {
+        "sourceOfTruth": {
+          "workspacePath": "../flatbuffers/wasm",
+          "packageName": "flatc-wasm",
+          "exports": [
+            "./he",
+            "./he-bridge"
+          ]
+        }
+      }
+    },
+    {
+      "dependencyId": "flatbuffers-he-conjunction-signed",
+      "pluginId": "com.digitalarsenal.infrastructure.flatbuffers-he-conjunction",
+      "version": "1.0.0",
+      "artifactUri": "signed://plugins/flatbuffers-he-conjunction/1.0.0",
+      "sha256": "3434343434343434343434343434343434343434343434343434343434343434",
+      "signature": "ed25519:demo-flatbuffers-he-conjunction-signature",
+      "signerPublicKey": "ed25519:demo-signer-1",
+      "requiredCapabilities": [
+        "protocol_handle"
+      ],
+      "metadata": {
+        "sourceOfTruth": {
+          "workspacePath": "../flatbuffers/wasm",
+          "packageName": "flatc-wasm",
+          "exports": [
+            "./he"
+          ]
+        }
+      }
+    }
+  ]
+}
