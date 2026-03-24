@@ -37,6 +37,11 @@ const SDN_FLOW_EDITOR_RUNTIME_MESSAGE_TYPE = Object.freeze({
   schemaName: "sdn-flow.editor.message",
   acceptsAnyFlatbuffer: true,
 });
+const SDN_FLOW_EDITOR_RUNTIME_CLASSIFICATION = Object.freeze({
+  COMPILED: "compiled",
+  DELEGATED: "delegated",
+  JS_SHIM: "js-shim",
+});
 const SDN_FLOW_EDITOR_TRIGGER_NOTHING = Symbol("sdn-flow.editor.trigger.nothing");
 
 const textEncoder = new TextEncoder();
@@ -230,6 +235,113 @@ function normalizeNodeRedOutputPortIds(node = {}) {
     return [basePortId];
   }
   return Array.from({ length: outputCount }, (_, index) => `${basePortId}-${index + 1}`);
+}
+
+function createEmptyRuntimeClassificationStatus() {
+  return {
+    summary: {
+      totalNodes: 0,
+      families: 0,
+      handlers: 0,
+      byClassification: {
+        compiled: 0,
+        delegated: 0,
+        "js-shim": 0,
+      },
+    },
+    nodeFamilies: [],
+    handlers: [],
+  };
+}
+
+function isNodeRedTabNode(node = {}) {
+  return normalizeString(node?.type, null) === "tab";
+}
+
+function isNodeRedSubflowDefinition(node = {}) {
+  const type = normalizeString(node?.type, null);
+  return type === "subflow" || type?.startsWith("subflow:") === true;
+}
+
+function isNodeRedConfigNode(node = {}, workspaceIds = new Set()) {
+  if (!isPlainObject(node)) {
+    return false;
+  }
+  if (isNodeRedTabNode(node) || isNodeRedSubflowDefinition(node)) {
+    return false;
+  }
+  const workspaceId = normalizeString(node?.z, "");
+  return workspaceId.length === 0 || !workspaceIds.has(workspaceId);
+}
+
+function slugifyEditorNodeType(value, fallback = "node") {
+  const normalized = normalizeString(value, fallback) ?? fallback;
+  const slug = normalized
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug || fallback;
+}
+
+function deriveRuntimeInvocationIdentity(node = {}, runtimeNode = null) {
+  const pluginId = normalizeString(runtimeNode?.pluginId, null);
+  const methodId = normalizeString(runtimeNode?.methodId, null);
+  if (pluginId || methodId) {
+    return {
+      pluginId,
+      methodId,
+    };
+  }
+  const type = normalizeString(node?.type, "function") ?? "function";
+  switch (type) {
+    case "debug":
+      return {
+        pluginId: "com.digitalarsenal.editor.debug",
+        methodId: "write_debug",
+      };
+    case "http request":
+      return {
+        pluginId: "com.digitalarsenal.flow.http-fetcher",
+        methodId: "fetch",
+      };
+    case "http response":
+      return {
+        pluginId: "com.digitalarsenal.flow.http-response",
+        methodId: "send",
+      };
+    case "switch":
+      return {
+        pluginId: "com.digitalarsenal.editor.switch",
+        methodId: "route",
+      };
+    case "function":
+      return {
+        pluginId: "com.digitalarsenal.editor.function",
+        methodId: "invoke",
+      };
+    default:
+      return {
+        pluginId: `com.digitalarsenal.editor.${slugifyEditorNodeType(type)}`,
+        methodId: "invoke",
+      };
+  }
+}
+
+function createRuntimeHandlerLookupKeys({
+  pluginId = null,
+  methodId = null,
+  dependencyId = null,
+  nodeId = null,
+} = {}) {
+  return [
+    dependencyId && methodId ? `${dependencyId}:${methodId}` : null,
+    pluginId && methodId ? `${pluginId}:${methodId}` : null,
+    nodeId && methodId ? `${nodeId}:${methodId}` : null,
+    dependencyId,
+    pluginId,
+    nodeId,
+    methodId,
+  ].filter(Boolean);
 }
 
 function inferDebugFormat(value) {
@@ -6675,6 +6787,217 @@ export function createSdnFlowEditorRuntimeManager(options = {}) {
     };
   }
 
+  function resolveRuntimePathClassification(nodeId, pluginId, methodId) {
+    for (const key of createRuntimeHandlerLookupKeys({
+      nodeId,
+      pluginId,
+      methodId,
+    })) {
+      if (runtimeHandlers.has(key)) {
+        return {
+          classification: SDN_FLOW_EDITOR_RUNTIME_CLASSIFICATION.JS_SHIM,
+          handlerKey: key,
+        };
+      }
+    }
+    if (
+      typeof dependencyInvoker === "function" ||
+      typeof dependencyStreamBridge === "function"
+    ) {
+      return {
+        classification: SDN_FLOW_EDITOR_RUNTIME_CLASSIFICATION.DELEGATED,
+        handlerKey:
+          (pluginId && methodId && `${pluginId}:${methodId}`) ||
+          pluginId ||
+          methodId ||
+          nodeId ||
+          null,
+      };
+    }
+    return {
+      classification: SDN_FLOW_EDITOR_RUNTIME_CLASSIFICATION.COMPILED,
+      handlerKey:
+        (pluginId && methodId && `${pluginId}:${methodId}`) ||
+        pluginId ||
+        methodId ||
+        nodeId ||
+        null,
+    };
+  }
+
+  function buildRuntimeClassificationStatus() {
+    const classificationStatus = createEmptyRuntimeClassificationStatus();
+    const flows = asArray(activeBuild?.flows).filter(isPlainObject);
+    if (flows.length === 0) {
+      return classificationStatus;
+    }
+
+    const workspaceIds = new Set(
+      flows
+        .filter((entry) => isNodeRedTabNode(entry))
+        .map((entry) => normalizeString(entry?.id, null))
+        .filter(Boolean),
+    );
+    const programNodesById = new Map();
+    for (const entry of asArray(activeBuild?.program?.nodes)) {
+      const nodeId = normalizeString(entry?.nodeId, null);
+      if (nodeId) {
+        programNodesById.set(nodeId, entry);
+      }
+    }
+
+    const familyEntries = new Map();
+    const handlerEntries = new Map();
+    const classificationCounts = {
+      compiled: 0,
+      delegated: 0,
+      "js-shim": 0,
+    };
+    let totalNodes = 0;
+
+    const getFamilyEntry = (family, classification) => {
+      const entryKey = `${family}\u0000${classification}`;
+      if (!familyEntries.has(entryKey)) {
+        familyEntries.set(entryKey, {
+          family,
+          classification,
+          count: 0,
+          nodeIds: new Set(),
+          triggerIds: new Set(),
+          pluginIds: new Set(),
+          methodIds: new Set(),
+          handlerKeys: new Set(),
+        });
+      }
+      return familyEntries.get(entryKey);
+    };
+
+    const getHandlerEntry = (handlerKey, classification) => {
+      const entryKey = `${handlerKey ?? "unresolved"}\u0000${classification}`;
+      if (!handlerEntries.has(entryKey)) {
+        handlerEntries.set(entryKey, {
+          key: handlerKey,
+          classification,
+          count: 0,
+          nodeIds: new Set(),
+          families: new Set(),
+          pluginIds: new Set(),
+          methodIds: new Set(),
+        });
+      }
+      return handlerEntries.get(entryKey);
+    };
+
+    for (const node of flows) {
+      if (isNodeRedTabNode(node) || isNodeRedSubflowDefinition(node)) {
+        continue;
+      }
+      if (isNodeRedConfigNode(node, workspaceIds)) {
+        continue;
+      }
+
+      const nodeId = normalizeString(node?.id, null);
+      const family = normalizeString(node?.type, "unknown") ?? "unknown";
+      if (!nodeId) {
+        continue;
+      }
+
+      if (family === "inject" || family === "http in") {
+        const entry = getFamilyEntry(
+          family,
+          SDN_FLOW_EDITOR_RUNTIME_CLASSIFICATION.COMPILED,
+        );
+        entry.count += 1;
+        entry.nodeIds.add(nodeId);
+        entry.triggerIds.add(`trigger-${nodeId}`);
+        classificationCounts.compiled += 1;
+        totalNodes += 1;
+        continue;
+      }
+
+      const runtimeNode = programNodesById.get(nodeId) ?? null;
+      const invocationIdentity = deriveRuntimeInvocationIdentity(node, runtimeNode);
+      const pluginId = normalizeString(invocationIdentity?.pluginId, null);
+      const methodId = normalizeString(invocationIdentity?.methodId, null);
+      const resolution = resolveRuntimePathClassification(nodeId, pluginId, methodId);
+
+      const familyEntry = getFamilyEntry(family, resolution.classification);
+      familyEntry.count += 1;
+      familyEntry.nodeIds.add(nodeId);
+      if (pluginId) {
+        familyEntry.pluginIds.add(pluginId);
+      }
+      if (methodId) {
+        familyEntry.methodIds.add(methodId);
+      }
+      if (resolution.handlerKey) {
+        familyEntry.handlerKeys.add(resolution.handlerKey);
+      }
+
+      const handlerEntry = getHandlerEntry(
+        resolution.handlerKey ??
+          (pluginId && methodId && `${pluginId}:${methodId}`) ??
+          pluginId ??
+          methodId ??
+          nodeId,
+        resolution.classification,
+      );
+      handlerEntry.count += 1;
+      handlerEntry.nodeIds.add(nodeId);
+      handlerEntry.families.add(family);
+      if (pluginId) {
+        handlerEntry.pluginIds.add(pluginId);
+      }
+      if (methodId) {
+        handlerEntry.methodIds.add(methodId);
+      }
+
+      classificationCounts[resolution.classification] += 1;
+      totalNodes += 1;
+    }
+
+    const nodeFamilies = Array.from(familyEntries.values())
+      .map((entry) => ({
+        family: entry.family,
+        classification: entry.classification,
+        count: entry.count,
+        nodeIds: Array.from(entry.nodeIds).sort(),
+        triggerIds: Array.from(entry.triggerIds).sort(),
+        pluginIds: Array.from(entry.pluginIds).sort(),
+        methodIds: Array.from(entry.methodIds).sort(),
+        handlerKeys: Array.from(entry.handlerKeys).sort(),
+      }))
+      .sort((left, right) =>
+        left.family.localeCompare(right.family) ||
+        left.classification.localeCompare(right.classification),
+      );
+    const handlers = Array.from(handlerEntries.values())
+      .map((entry) => ({
+        key: entry.key,
+        classification: entry.classification,
+        count: entry.count,
+        nodeIds: Array.from(entry.nodeIds).sort(),
+        families: Array.from(entry.families).sort(),
+        pluginIds: Array.from(entry.pluginIds).sort(),
+        methodIds: Array.from(entry.methodIds).sort(),
+      }))
+      .sort((left, right) =>
+        String(left.key ?? "").localeCompare(String(right.key ?? "")) ||
+        left.classification.localeCompare(right.classification),
+      );
+
+    return {
+      summary: {
+        totalNodes,
+        families: nodeFamilies.length,
+        handlers: handlers.length,
+        byClassification: classificationCounts,
+      },
+      nodeFamilies,
+      handlers,
+    };
+  }
+
   return {
     runtimeId,
     startup,
@@ -6787,6 +7110,7 @@ export function createSdnFlowEditorRuntimeManager(options = {}) {
           : null,
         compiledRuntimeLoaded: Boolean(activeRuntimeHost && activeArtifact),
         lastArtifactLoadError,
+        runtimeClassification: buildRuntimeClassificationStatus(),
         scheduledInjects: getScheduledInjectStatus(),
         debugSequence,
         debugMessages: debugMessages.map((entry) => structuredClone(entry)),

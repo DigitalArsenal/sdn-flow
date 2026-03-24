@@ -2,7 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  createInstalledFlowHost,
   listInstalledFlowHttpBindings,
+  serializeCompiledArtifact,
   startInstalledFlowAppHost,
 } from "../src/index.js";
 
@@ -108,6 +110,23 @@ function buildHttpWorkspace() {
   };
 }
 
+async function buildRuntimeHttpWorkspace() {
+  const workspace = buildHttpWorkspace();
+  const host = createInstalledFlowHost({
+    allowLiveProgramCompilation: true,
+    program: workspace.program,
+    hostPlan: workspace.hostPlan,
+    pluginPackages: workspace.pluginPackages,
+    discover: false,
+  });
+
+  await host.start();
+  return {
+    ...workspace,
+    serializedArtifact: serializeCompiledArtifact(host.getArtifact()),
+  };
+}
+
 test("listInstalledFlowHttpBindings extracts host-plan HTTP listen bindings for the active program", () => {
   const bindings = listInstalledFlowHttpBindings({
     workspace: buildHttpWorkspace(),
@@ -141,7 +160,7 @@ test("startInstalledFlowAppHost binds HTTP listeners through the injected serve 
   const serveCalls = [];
   const closedBindings = [];
   const host = await startInstalledFlowAppHost({
-    workspace: buildHttpWorkspace(),
+    workspace: await buildRuntimeHttpWorkspace(),
     serveHttp({ binding, handler }) {
       serveCalls.push({
         binding,

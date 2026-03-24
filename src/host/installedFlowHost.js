@@ -80,6 +80,40 @@ function normalizeBooleanLike(value, fallback = false) {
   return fallback;
 }
 
+function hasOwn(value, key) {
+  return Object.prototype.hasOwnProperty.call(value ?? {}, key);
+}
+
+function hasExplicitInstalledArtifactInput(options = {}) {
+  return (
+    options.artifact !== undefined && options.artifact !== null
+  ) || (
+    options.compiledArtifact !== undefined &&
+    options.compiledArtifact !== null
+  ) || (
+    options.serializedArtifact !== undefined &&
+    options.serializedArtifact !== null
+  );
+}
+
+function hasInstalledExecutionOverrides(options = {}) {
+  return [
+    "program",
+    "deploymentPlan",
+    "hostPlan",
+    "runtimeTargets",
+    "pluginId",
+    "version",
+    "artifact",
+    "compiledArtifact",
+    "serializedArtifact",
+  ].some((key) => hasOwn(options, key));
+}
+
+function shouldAllowLiveProgramCompilation(options = {}) {
+  return options.allowLiveProgramCompilation === true;
+}
+
 async function fileExists(filePath) {
   try {
     await access(filePath);
@@ -223,6 +257,12 @@ function createHttpStatusError(statusCode, message, options = {}) {
     error.headers = options.headers;
   }
   return error;
+}
+
+function createInstalledArtifactRequiredError(programId = null) {
+  return new Error(
+    `Installed flow host requires compiledArtifact, serializedArtifact, or a deployment envelope for live startup${programId ? ` for program "${programId}"` : ""}. Raw program input remains available for planning and introspection; pass allowLiveProgramCompilation: true to compile explicitly.`,
+  );
 }
 
 function normalizeMetadata(value) {
@@ -1950,39 +1990,67 @@ export function createInstalledFlowHost(options = {}) {
 
     let nextRuntimeState = null;
     if (nextProgram) {
-      const nextArtifact = await compileInstalledFlowArtifact({
-        program: nextCompiledProgram,
-        manifests: nextLoadedPackages.map((loaded) => loaded.manifest),
-        registry: validationRegistry,
-        artifactOptions: {
-          ...options,
-          ...refreshOptions,
-          artifact:
-            refreshOptions.artifact ??
-            options.artifact ??
-            refreshOptions.compiledArtifact ??
-            options.compiledArtifact ??
-            refreshOptions.serializedArtifact ??
-            options.serializedArtifact ??
-            null,
-          deploymentPlan: nextDeploymentPlan,
-          hostPlan: refreshOptions.hostPlan ?? options.hostPlan ?? null,
-          runtimeTargets:
-            refreshOptions.runtimeTargets ??
-            options.runtimeTargets ??
-            nextProgram.runtimeTargets,
-          pluginId:
-            refreshOptions.pluginId ??
-            options.pluginId ??
-            nextProgram.programId ??
-            null,
-          version:
-            refreshOptions.version ??
-            options.version ??
-            nextProgram.version ??
-            null,
-        },
-      });
+      const refreshHasExplicitArtifactInput =
+        hasExplicitInstalledArtifactInput(refreshOptions);
+      const baseHasExplicitArtifactInput =
+        hasExplicitInstalledArtifactInput(options);
+      const hasExecutionOverrides =
+        hasInstalledExecutionOverrides(refreshOptions);
+      const allowLiveProgramCompilation =
+        shouldAllowLiveProgramCompilation(refreshOptions) ||
+        shouldAllowLiveProgramCompilation(options);
+      const runtimeArtifactOptions = {
+        ...options,
+        ...refreshOptions,
+        artifact:
+          refreshOptions.artifact ??
+          options.artifact ??
+          refreshOptions.compiledArtifact ??
+          options.compiledArtifact ??
+          refreshOptions.serializedArtifact ??
+          options.serializedArtifact ??
+          null,
+        deploymentPlan: nextDeploymentPlan,
+        hostPlan: refreshOptions.hostPlan ?? options.hostPlan ?? null,
+        runtimeTargets:
+          refreshOptions.runtimeTargets ??
+          options.runtimeTargets ??
+          nextProgram.runtimeTargets,
+        pluginId:
+          refreshOptions.pluginId ??
+          options.pluginId ??
+          nextProgram.programId ??
+          null,
+        version:
+          refreshOptions.version ??
+          options.version ??
+          nextProgram.version ??
+          null,
+      };
+      let nextArtifact = null;
+
+      if (
+        refreshHasExplicitArtifactInput ||
+        (baseHasExplicitArtifactInput && !hasExecutionOverrides)
+      ) {
+        nextArtifact = await compileInstalledFlowArtifact({
+          program: nextCompiledProgram,
+          manifests: nextLoadedPackages.map((loaded) => loaded.manifest),
+          registry: validationRegistry,
+          artifactOptions: runtimeArtifactOptions,
+        });
+      } else if (!hasExecutionOverrides && runtimeState?.artifact) {
+        nextArtifact = runtimeState.artifact;
+      } else if (allowLiveProgramCompilation) {
+        nextArtifact = await compileInstalledFlowArtifact({
+          program: nextCompiledProgram,
+          manifests: nextLoadedPackages.map((loaded) => loaded.manifest),
+          registry: validationRegistry,
+          artifactOptions: runtimeArtifactOptions,
+        });
+      } else {
+        throw createInstalledArtifactRequiredError(nextProgram.programId);
+      }
 
       assertInstalledArtifactRuntimeTargets({
         artifact: nextArtifact,

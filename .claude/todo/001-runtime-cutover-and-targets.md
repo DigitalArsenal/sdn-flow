@@ -16,7 +16,7 @@ This directory is the only active TODO set for `sdn-flow`.
 ## Required Architecture Changes
 
 1. Runtime ownership
-   - [ ] Remove `FlowRuntime` from the installed/runtime path.
+   - [x] Remove `FlowRuntime` from the installed/runtime path.
    - [ ] Remove remaining Node-RED execution shims from the live runtime path.
    - [ ] Keep JavaScript limited to editor UI, orchestration, and delegated host
          adapters only.
@@ -24,10 +24,10 @@ This directory is the only active TODO set for `sdn-flow`.
 
 2. Compiler path
    - [ ] Keep the flow builder generating C++ as the canonical intermediate.
-   - [ ] Compile that C++ through the SDK emception API only.
+   - [x] Compile that C++ through the SDK emception API only.
    - [ ] Remove any remaining fake, filesystem-backed, or alternate emception
          paths.
-   - [ ] Make the compiled artifact and deployment plan the only runtime inputs
+   - [x] Make the compiled artifact and deployment plan the only runtime inputs
          for installed execution.
 
 3. Runtime data path

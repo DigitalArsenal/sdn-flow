@@ -3,9 +3,20 @@ import assert from "node:assert/strict";
 
 import {
   createFetchResponse,
+  createInstalledFlowHost,
   createInstalledFlowFetchHandler,
   normalizeFetchRequest,
+  serializeCompiledArtifact,
 } from "../src/index.js";
+
+async function compileSerializedArtifact(options = {}) {
+  const host = createInstalledFlowHost({
+    allowLiveProgramCompilation: true,
+    ...options,
+  });
+  await host.start();
+  return serializeCompiledArtifact(host.getArtifact());
+}
 
 test("normalizeFetchRequest maps Request objects into portable HTTP trigger input", async () => {
   const request = new Request(
@@ -34,79 +45,87 @@ test("normalizeFetchRequest maps Request objects into portable HTTP trigger inpu
 });
 
 test("installed flow fetch handler returns a web Response from flow output", async () => {
-  const handler = createInstalledFlowFetchHandler({
-    program: {
-      programId: "com.digitalarsenal.examples.fetch-service",
-      nodes: [
-        {
-          nodeId: "responder",
-          pluginId: "com.digitalarsenal.examples.memory.fetch",
-          methodId: "serve_http_request",
-        },
-      ],
-      edges: [],
-      triggers: [
-        {
-          triggerId: "download",
-          kind: "http-request",
-          source: "/download",
-          acceptedTypes: [
-            {
-              schemaName: "HttpRequest.fbs",
-              fileIdentifier: "HREQ",
-            },
-          ],
-        },
-      ],
-      triggerBindings: [
-        {
-          triggerId: "download",
-          targetNodeId: "responder",
-          targetPortId: "request",
-        },
-      ],
-      requiredPlugins: ["com.digitalarsenal.examples.memory.fetch"],
-    },
-    discover: false,
-    pluginPackages: [
+  const program = {
+    programId: "com.digitalarsenal.examples.fetch-service",
+    nodes: [
       {
-        manifest: {
-          pluginId: "com.digitalarsenal.examples.memory.fetch",
-          name: "In-Memory Fetch",
-          version: "1.0.0",
-          pluginFamily: "responder",
-          methods: [
-            {
-              methodId: "serve_http_request",
-              inputPorts: [{ portId: "request", required: true }],
-              outputPorts: [{ portId: "response" }],
-              maxBatch: 8,
-              drainPolicy: "drain-to-empty",
-            },
-          ],
-        },
-        handlers: {
-          serve_http_request({ inputs }) {
-            return {
-              outputs: inputs.map((frame) => ({
-                ...frame,
-                portId: "response",
-                metadata: {
-                  statusCode: 201,
-                  responseHeaders: {
-                    "content-type": "text/plain",
-                    "x-flow-trigger": frame.metadata.triggerId,
-                    "x-query-file": frame.metadata.query.file,
-                  },
-                },
-              })),
-              backlogRemaining: 0,
-              yielded: false,
-            };
-          },
-        },
+        nodeId: "responder",
+        pluginId: "com.digitalarsenal.examples.memory.fetch",
+        methodId: "serve_http_request",
       },
     ],
+    edges: [],
+    triggers: [
+      {
+        triggerId: "download",
+        kind: "http-request",
+        source: "/download",
+        acceptedTypes: [
+          {
+            schemaName: "HttpRequest.fbs",
+            fileIdentifier: "HREQ",
+          },
+        ],
+      },
+    ],
+    triggerBindings: [
+      {
+        triggerId: "download",
+        targetNodeId: "responder",
+        targetPortId: "request",
+      },
+    ],
+    requiredPlugins: ["com.digitalarsenal.examples.memory.fetch"],
+  };
+  const pluginPackages = [
+    {
+      manifest: {
+        pluginId: "com.digitalarsenal.examples.memory.fetch",
+        name: "In-Memory Fetch",
+        version: "1.0.0",
+        pluginFamily: "responder",
+        methods: [
+          {
+            methodId: "serve_http_request",
+            inputPorts: [{ portId: "request", required: true }],
+            outputPorts: [{ portId: "response" }],
+            maxBatch: 8,
+            drainPolicy: "drain-to-empty",
+          },
+        ],
+      },
+      handlers: {
+        serve_http_request({ inputs }) {
+          return {
+            outputs: inputs.map((frame) => ({
+              ...frame,
+              portId: "response",
+              metadata: {
+                statusCode: 201,
+                responseHeaders: {
+                  "content-type": "text/plain",
+                  "x-flow-trigger": frame.metadata.triggerId,
+                  "x-query-file": frame.metadata.query.file,
+                },
+              },
+            })),
+            backlogRemaining: 0,
+            yielded: false,
+          };
+        },
+      },
+    },
+  ];
+  const serializedArtifact = await compileSerializedArtifact({
+    program,
+    discover: false,
+    pluginPackages,
+  });
+  const handler = createInstalledFlowFetchHandler({
+    program,
+    serializedArtifact,
+    discover: false,
+    pluginPackages,
   });
 
   const response = await handler(
@@ -143,98 +162,108 @@ test("createFetchResponse defaults to 204 when a flow emits no HTTP response fra
 });
 
 test("installed flow fetch handler converts auth policy failures into HTTP error responses", async () => {
-  const handler = createInstalledFlowFetchHandler({
-    program: {
-      programId: "com.digitalarsenal.examples.fetch-auth-service",
-      nodes: [
-        {
-          nodeId: "responder",
-          pluginId: "com.digitalarsenal.examples.memory.fetch-auth",
-          methodId: "serve_http_request",
-        },
-      ],
-      edges: [],
-      triggers: [
-        {
-          triggerId: "secure-download",
-          kind: "http-request",
-          source: "/secure-download",
-        },
-      ],
-      triggerBindings: [
-        {
-          triggerId: "secure-download",
-          targetNodeId: "responder",
-          targetPortId: "request",
-        },
-      ],
-      requiredPlugins: ["com.digitalarsenal.examples.memory.fetch-auth"],
-    },
-    deploymentPlan: {
-      pluginId: "com.digitalarsenal.examples.fetch-auth-service",
-      version: "1.0.0",
-      scheduleBindings: [],
-      serviceBindings: [
-        {
-          serviceId: "service-secure-download",
-          triggerId: "secure-download",
-          bindingMode: "local",
-          serviceKind: "http-server",
-          routePath: "/secure-download",
-          method: "GET",
-          authPolicyId: "approved-keys",
-        },
-      ],
-      inputBindings: [],
-      publicationBindings: [],
-      authPolicies: [
-        {
-          policyId: "approved-keys",
-          bindingMode: "local",
-          targetKind: "service",
-          targetId: "service-secure-download",
-          allowServerKeys: ["ed25519:approved"],
-          requireSignedRequests: true,
-          requireEncryptedTransport: true,
-        },
-      ],
-      protocolInstallations: [],
-    },
-    discover: false,
-    pluginPackages: [
+  const program = {
+    programId: "com.digitalarsenal.examples.fetch-auth-service",
+    nodes: [
       {
-        manifest: {
-          pluginId: "com.digitalarsenal.examples.memory.fetch-auth",
-          name: "In-Memory Fetch Auth",
-          version: "1.0.0",
-          pluginFamily: "responder",
-          methods: [
-            {
-              methodId: "serve_http_request",
-              inputPorts: [{ portId: "request", required: true }],
-              outputPorts: [{ portId: "response" }],
-              maxBatch: 8,
-              drainPolicy: "drain-to-empty",
-            },
-          ],
-        },
-        handlers: {
-          serve_http_request({ inputs }) {
-            return {
-              outputs: inputs.map((frame) => ({
-                ...frame,
-                portId: "response",
-                metadata: {
-                  statusCode: 200,
-                },
-              })),
-              backlogRemaining: 0,
-              yielded: false,
-            };
-          },
-        },
+        nodeId: "responder",
+        pluginId: "com.digitalarsenal.examples.memory.fetch-auth",
+        methodId: "serve_http_request",
       },
     ],
+    edges: [],
+    triggers: [
+      {
+        triggerId: "secure-download",
+        kind: "http-request",
+        source: "/secure-download",
+      },
+    ],
+    triggerBindings: [
+      {
+        triggerId: "secure-download",
+        targetNodeId: "responder",
+        targetPortId: "request",
+      },
+    ],
+    requiredPlugins: ["com.digitalarsenal.examples.memory.fetch-auth"],
+  };
+  const deploymentPlan = {
+    pluginId: "com.digitalarsenal.examples.fetch-auth-service",
+    version: "1.0.0",
+    scheduleBindings: [],
+    serviceBindings: [
+      {
+        serviceId: "service-secure-download",
+        triggerId: "secure-download",
+        bindingMode: "local",
+        serviceKind: "http-server",
+        routePath: "/secure-download",
+        method: "GET",
+        authPolicyId: "approved-keys",
+      },
+    ],
+    inputBindings: [],
+    publicationBindings: [],
+    authPolicies: [
+      {
+        policyId: "approved-keys",
+        bindingMode: "local",
+        targetKind: "service",
+        targetId: "service-secure-download",
+        allowServerKeys: ["ed25519:approved"],
+        requireSignedRequests: true,
+        requireEncryptedTransport: true,
+      },
+    ],
+    protocolInstallations: [],
+  };
+  const pluginPackages = [
+    {
+      manifest: {
+        pluginId: "com.digitalarsenal.examples.memory.fetch-auth",
+        name: "In-Memory Fetch Auth",
+        version: "1.0.0",
+        pluginFamily: "responder",
+        methods: [
+          {
+            methodId: "serve_http_request",
+            inputPorts: [{ portId: "request", required: true }],
+            outputPorts: [{ portId: "response" }],
+            maxBatch: 8,
+            drainPolicy: "drain-to-empty",
+          },
+        ],
+      },
+      handlers: {
+        serve_http_request({ inputs }) {
+          return {
+            outputs: inputs.map((frame) => ({
+              ...frame,
+              portId: "response",
+              metadata: {
+                statusCode: 200,
+              },
+            })),
+            backlogRemaining: 0,
+            yielded: false,
+          };
+        },
+      },
+    },
+  ];
+  const serializedArtifact = await compileSerializedArtifact({
+    program,
+    deploymentPlan,
+    discover: false,
+    pluginPackages,
+  });
+  const handler = createInstalledFlowFetchHandler({
+    program,
+    deploymentPlan,
+    serializedArtifact,
+    discover: false,
+    pluginPackages,
   });
 
   const rejected = await handler(

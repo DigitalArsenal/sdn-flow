@@ -8,6 +8,8 @@ import path from "node:path";
 import {
   createBunServeHttpAdapter,
   createDenoServeHttpAdapter,
+  createInstalledFlowHost,
+  serializeCompiledArtifact,
   startInstalledFlowBunHttpHost,
   startInstalledFlowDenoHttpHost,
   startInstalledFlowNodeHttpHost,
@@ -147,6 +149,25 @@ function buildHttpWorkspace(bindingUrl = "http://127.0.0.1:9080/download") {
   };
 }
 
+async function buildRuntimeHttpWorkspace(
+  bindingUrl = "http://127.0.0.1:9080/download",
+) {
+  const workspace = buildHttpWorkspace(bindingUrl);
+  const host = createInstalledFlowHost({
+    allowLiveProgramCompilation: true,
+    program: workspace.program,
+    hostPlan: workspace.hostPlan,
+    pluginPackages: workspace.pluginPackages,
+    discover: false,
+  });
+
+  await host.start();
+  return {
+    ...workspace,
+    serializedArtifact: serializeCompiledArtifact(host.getArtifact()),
+  };
+}
+
 test("createDenoServeHttpAdapter binds host-plan URLs through a Deno.serve-compatible function", async () => {
   const serveCalls = [];
   const adapter = createDenoServeHttpAdapter({
@@ -248,7 +269,7 @@ test("createBunServeHttpAdapter binds host-plan URLs through a Bun.serve-compati
 test("startInstalledFlowDenoHttpHost uses the Deno adapter with an injected serve function", async () => {
   const serveCalls = [];
   const host = await startInstalledFlowDenoHttpHost({
-    workspace: buildHttpWorkspace(),
+    workspace: await buildRuntimeHttpWorkspace(),
     serve(options, handler) {
       serveCalls.push({
         options,
@@ -284,7 +305,7 @@ test("startInstalledFlowDenoHttpHost uses the Deno adapter with an injected serv
 test("startInstalledFlowBunHttpHost uses the Bun adapter with an injected serve function", async () => {
   const serveCalls = [];
   const host = await startInstalledFlowBunHttpHost({
-    workspace: buildHttpWorkspace(),
+    workspace: await buildRuntimeHttpWorkspace(),
     serve(options) {
       serveCalls.push(options);
       return {
@@ -316,7 +337,7 @@ test("startInstalledFlowBunHttpHost uses the Bun adapter with an injected serve 
 
 test("startInstalledFlowNodeHttpHost starts a real Node HTTP listener from the host plan", async () => {
   const host = await startInstalledFlowNodeHttpHost({
-    workspace: buildHttpWorkspace("http://127.0.0.1:0/download"),
+    workspace: await buildRuntimeHttpWorkspace("http://127.0.0.1:0/download"),
   });
 
   assert.equal(host.listeners.length, 1);
@@ -341,7 +362,7 @@ test("startInstalledFlowNodeHttpHost starts a real Node HTTP listener from the h
 test("startInstalledFlowNodeHttpHost provisions managed HTTPS certificates for https bindings", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "sdn-flow-host-https-"));
   const host = await startInstalledFlowNodeHttpHost({
-    workspace: buildHttpWorkspace("https://127.0.0.1:0/download"),
+    workspace: await buildRuntimeHttpWorkspace("https://127.0.0.1:0/download"),
     security: {
       storageDir: path.join(tempDir, ".sdn-flow-security"),
     },

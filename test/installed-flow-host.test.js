@@ -218,6 +218,20 @@ function createAuthenticatedIpfsServiceOptions(extra = {}) {
   };
 }
 
+function createProgramCompilingInstalledFlowHost(options = {}) {
+  return createInstalledFlowHost({
+    allowLiveProgramCompilation: true,
+    ...options,
+  });
+}
+
+function createProgramCompilingInstalledFlowService(options = {}) {
+  return createInstalledFlowService({
+    allowLiveProgramCompilation: true,
+    ...options,
+  });
+}
+
 test("host plan summaries track engine compatibility for the shared sdn-js family", () => {
   const summary = summarizeHostedRuntimePlan({
     hostId: "browser-host",
@@ -267,10 +281,26 @@ test("discoverInstalledPluginPackages finds example plugin packages and their JS
   assert.match(sensor.modulePath ?? "", /basic-sensor\/plugin\.js$/);
 });
 
+test("installed flow host rejects raw-program startup without an explicit runtime artifact", async () => {
+  const flow = await readJson("../examples/flows/single-plugin-flow.json");
+  const host = createInstalledFlowHost({
+    program: flow,
+    pluginRootDirectories: [
+      new URL("../examples/plugins", import.meta.url).pathname,
+    ],
+  });
+
+  assert.equal(host.getProgram()?.programId, flow.programId);
+  await assert.rejects(
+    host.start(),
+    /requires compiledArtifact, serializedArtifact, or a deployment envelope/i,
+  );
+});
+
 test("installed flow host can discover plugin packages, register them, and execute a flow", async () => {
   const flow = await readJson("../examples/flows/single-plugin-flow.json");
   const sinkOutputs = [];
-  const host = createInstalledFlowHost({
+  const host = createProgramCompilingInstalledFlowHost({
     program: flow,
     pluginRootDirectories: [new URL("../examples/plugins", import.meta.url).pathname],
     runtimeOptions: {
@@ -308,7 +338,7 @@ test("installed flow host can discover plugin packages, register them, and execu
 });
 
 test("installed flow host supports browser-style in-memory plugin packages", async () => {
-  const host = createInstalledFlowHost({
+  const host = createProgramCompilingInstalledFlowHost({
     program: {
       programId: "com.digitalarsenal.examples.browser-memory-host",
       nodes: [
@@ -391,7 +421,7 @@ test("installed flow host supports browser-style in-memory plugin packages", asy
 
 test("installed flow host defaults internal node execution to aligned-binary metadata", async () => {
   const sinkInputFormats = [];
-  const host = createInstalledFlowHost({
+  const host = createProgramCompilingInstalledFlowHost({
     program: {
       programId: "com.digitalarsenal.examples.internal-aligned-host",
       nodes: [
@@ -809,7 +839,7 @@ test("installed flow hosted runtime plans carry HE assessor protocol and wallet 
 test("installed flow service auto-starts timer triggers with positive intervals", async () => {
   const scheduledIntervals = [];
   const clearedHandles = [];
-  const service = createInstalledFlowService({
+  const service = createProgramCompilingInstalledFlowService({
     program: {
       programId: "com.digitalarsenal.examples.timer-service",
       nodes: [
@@ -957,7 +987,7 @@ test("installed flow service auto-starts timer triggers with positive intervals"
 });
 
 test("installed flow service maps HTTP requests into portable trigger dispatch", async () => {
-  const service = createInstalledFlowService({
+  const service = createProgramCompilingInstalledFlowService({
     program: {
       programId: "com.digitalarsenal.examples.http-service",
       nodes: [
@@ -1129,7 +1159,7 @@ test("installed flow service can refresh installed packages and timer bindings",
     },
   });
 
-  const service = createInstalledFlowService({
+  const service = createProgramCompilingInstalledFlowService({
     program: buildProgram("tick", 100),
     discover: false,
     pluginPackages: [buildPluginPackage(1)],
@@ -1181,7 +1211,7 @@ test("installed flow service can refresh installed packages and timer bindings",
 
 test("installed flow service only auto-starts locally bound schedules", async () => {
   const scheduledIntervals = [];
-  const service = createInstalledFlowService({
+  const service = createProgramCompilingInstalledFlowService({
     program: {
       programId: "com.digitalarsenal.examples.delegated-timer-service",
       nodes: [],
@@ -1237,7 +1267,7 @@ test("installed flow service only auto-starts locally bound schedules", async ()
 });
 
 test("installed flow service rejects delegated HTTP bindings from the local host path", async () => {
-  const service = createInstalledFlowService({
+  const service = createProgramCompilingInstalledFlowService({
     program: {
       programId: "com.digitalarsenal.examples.delegated-http-service",
       nodes: [],
@@ -1286,7 +1316,9 @@ test("installed flow service rejects delegated HTTP bindings from the local host
 });
 
 test("installed flow service enforces local HTTP auth policies from the deployment plan", async () => {
-  const service = createInstalledFlowService(createAuthenticatedHttpServiceOptions());
+  const service = createProgramCompilingInstalledFlowService(
+    createAuthenticatedHttpServiceOptions(),
+  );
 
   const startup = await service.start();
   assert.equal(startup.deploymentBindings.authPolicies.local.length, 1);
@@ -1327,7 +1359,9 @@ test("installed flow service enforces local HTTP auth policies from the deployme
 });
 
 test("installed flow service enforces local IPFS auth policies from the deployment plan", async () => {
-  const service = createInstalledFlowService(createAuthenticatedIpfsServiceOptions());
+  const service = createProgramCompilingInstalledFlowService(
+    createAuthenticatedIpfsServiceOptions(),
+  );
 
   const startup = await service.start();
   assert.deepEqual(startup.ipfsRoutes, [
@@ -1394,7 +1428,7 @@ test("installed flow service enforces local IPFS auth policies from the deployme
 test("installed flow service aligns HTTP ingress frames before node-to-node dispatch", async () => {
   const ingressFormats = [];
   const sinkFormats = [];
-  const service = createInstalledFlowService({
+  const service = createProgramCompilingInstalledFlowService({
     program: {
       programId: "com.digitalarsenal.examples.aligned-http-service",
       nodes: [
@@ -1568,7 +1602,7 @@ test("installed flow service resolves walletProfileId and trustMapId against man
     },
   });
   const trustedServerKey = `ed25519:${securityState.wallet.signingPublicKeyHex}`;
-  const service = createInstalledFlowService(
+  const service = createProgramCompilingInstalledFlowService(
     createAuthenticatedHttpServiceOptions({
       deploymentPlan: {
         pluginId: "com.digitalarsenal.examples.authenticated-http-service",
@@ -1674,7 +1708,7 @@ test("installed flow service resolves walletProfileId and trustMapId against man
     },
   });
   const trustedServerKey = `ed25519:${securityState.wallet.signingPublicKeyHex}`;
-  const service = createInstalledFlowService(
+  const service = createProgramCompilingInstalledFlowService(
     createAuthenticatedIpfsServiceOptions({
       baseDirectory: securityDirectory,
       deploymentPlan: {
@@ -1763,7 +1797,7 @@ test("installed flow service resolves walletProfileId and trustMapId against man
 });
 
 test("installed flow service exposes delegated deployment bindings explicitly", async () => {
-  const service = createInstalledFlowService({
+  const service = createProgramCompilingInstalledFlowService({
     program: {
       programId: "com.digitalarsenal.examples.delegated-binding-summary",
       nodes: [],
@@ -1843,7 +1877,7 @@ test("installed flow service exposes delegated deployment bindings explicitly", 
 });
 
 test("installed flow service captures local publication bindings from trigger ingress and node outputs", async () => {
-  const service = createInstalledFlowService({
+  const service = createProgramCompilingInstalledFlowService({
     program: {
       programId: "com.digitalarsenal.examples.local-publication-service",
       nodes: [
@@ -1971,7 +2005,7 @@ test("installed flow service captures local publication bindings from trigger in
 
 test("installed flow service dispatches local input bindings by interfaceId", async () => {
   const seenInputs = [];
-  const inputBoundService = createInstalledFlowService({
+  const inputBoundService = createProgramCompilingInstalledFlowService({
     program: {
       programId: "com.digitalarsenal.examples.input-bound-ingress",
       nodes: [
@@ -2085,7 +2119,7 @@ test("installed flow service dispatches local input bindings by interfaceId", as
 });
 
 test("installed flow service rejects input bindings without matching program nodes", async () => {
-  const inputBoundService = createInstalledFlowService({
+  const inputBoundService = createProgramCompilingInstalledFlowService({
     program: {
       programId: "com.digitalarsenal.examples.input-bound-service",
       nodes: [],
@@ -2124,7 +2158,7 @@ test("installed flow service rejects input bindings without matching program nod
 
 test("installed flow service hosts local protocol installations by protocolId with auth enforcement", async () => {
   const seenProtocolIds = [];
-  const protocolBoundService = createInstalledFlowService({
+  const protocolBoundService = createProgramCompilingInstalledFlowService({
     program: {
       programId: "com.digitalarsenal.examples.protocol-bound-service",
       nodes: [
@@ -2282,7 +2316,7 @@ test("installed flow service hosts local protocol installations by protocolId wi
 
 test("installed flow service keeps protocol identity in the manifest and uses deployment routes for local selection", async () => {
   const seenProtocolRequests = [];
-  const protocolBoundService = createInstalledFlowService({
+  const protocolBoundService = createProgramCompilingInstalledFlowService({
     program: {
       programId: "com.digitalarsenal.examples.protocol-route-service",
       nodes: [

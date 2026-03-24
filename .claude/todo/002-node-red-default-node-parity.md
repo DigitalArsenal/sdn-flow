@@ -75,6 +75,8 @@ Status: active
    - [ ] Keep the delegated bucket explicitly small and documented.
 
 3. Tests
+   - [x] Add parity drift enforcement that checks the matrix against the
+         shipped palette/runtime support in code.
    - [ ] Add end-to-end flows for every shipped node family.
    - [ ] Run the same flow artifacts against:
          standalone `wasi`, `wasmedge`, and delegated/browser profiles where

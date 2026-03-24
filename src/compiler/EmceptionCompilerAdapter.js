@@ -6,6 +6,7 @@ import { bytesToHex, toUint8Array } from "../utils/encoding.js";
 import { sha256Bytes } from "../utils/crypto.js";
 import { generateCppFlowRuntimeSource } from "./CppFlowSourceGenerator.js";
 import { SignedArtifactCatalog } from "./SignedArtifactCatalog.js";
+import { SDK_EMCEPTION_SESSION_KIND } from "./sdkEmceptionSession.js";
 
 const DEFAULT_FLAGS = Object.freeze([
   "-std=c++20",
@@ -89,6 +90,16 @@ function normalizeWorkingDirectory(value) {
   return normalized.startsWith("/")
     ? path.posix.normalize(normalized)
     : path.posix.join(DEFAULT_WORKING_DIRECTORY, normalized);
+}
+
+function isSdkEmceptionSession(session) {
+  return (
+    Boolean(session) &&
+    session.sessionKind === SDK_EMCEPTION_SESSION_KIND &&
+    typeof session.writeFile === "function" &&
+    typeof session.readFile === "function" &&
+    typeof session.run === "function"
+  );
 }
 
 function createPortableLoaderModuleSource() {
@@ -253,14 +264,14 @@ export class EmceptionCompilerAdapter {
   async compile({ program, metadata = null } = {}) {
     const compilePlan = await this.prepareCompile({ program, metadata });
     if (!this.#emception) {
-      return {
-        programId: compilePlan.program.programId,
-        manifestBuffer: compilePlan.manifestBuffer,
-        runtimeModel: compilePlan.runtimeModel,
-        runtimeExports: compilePlan.runtimeExports,
-        sourceGeneratorModel: compilePlan.sourceGeneratorModel,
-        compilePlan,
-      };
+      throw new Error(
+        "Artifact compilation requires an SDK emception session. Use prepareCompile() for preview-only C++ output.",
+      );
+    }
+    if (!isSdkEmceptionSession(this.#emception)) {
+      throw new Error(
+        "Artifact compilation only supports SDK emception sessions created via createSdkEmceptionSession().",
+      );
     }
 
     if (typeof this.#emception.init === "function") {

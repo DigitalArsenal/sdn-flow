@@ -6,10 +6,12 @@ import { mkdtemp, readFile } from "node:fs/promises";
 
 import {
   createInstalledFlowApp,
+  createInstalledFlowHost,
   installWorkspacePluginPackage,
   installWorkspacePackageReference,
   readInstalledFlowWorkspace,
   removeWorkspacePackageReference,
+  serializeCompiledArtifact,
   uninstallWorkspacePluginPackage,
   updateWorkspacePackageReference,
   writeInstalledFlowWorkspace,
@@ -60,6 +62,19 @@ function createFakePackageManager() {
     },
     async remove() {},
   };
+}
+
+async function readJsonFile(filePath) {
+  return JSON.parse(await readFile(filePath, "utf8"));
+}
+
+async function compileSerializedArtifact(options = {}) {
+  const host = createInstalledFlowHost({
+    allowLiveProgramCompilation: true,
+    ...options,
+  });
+  await host.start();
+  return serializeCompiledArtifact(host.getArtifact());
 }
 
 test("readInstalledFlowWorkspace resolves relative flow, host-plan, and plugin roots", async () => {
@@ -181,10 +196,15 @@ test("createInstalledFlowApp boots a persisted workspace and runs the installed 
     path.join(os.tmpdir(), "sdn-flow-installed-app-"),
   );
   const workspacePath = path.join(workspaceDirectory, "workspace.json");
+  const serializedArtifact = await compileSerializedArtifact({
+    program: await readJsonFile(SinglePluginFlowPath),
+    pluginRootDirectories: [ExamplePluginsDirectory],
+  });
 
   await writeInstalledFlowWorkspace(workspacePath, {
     workspaceId: "single-plugin-app",
     flowPath: path.relative(workspaceDirectory, SinglePluginFlowPath),
+    serializedArtifact,
     pluginRootDirectories: [
       path.relative(workspaceDirectory, ExamplePluginsDirectory),
     ],
@@ -226,6 +246,34 @@ test("createInstalledFlowApp boots a persisted workspace and runs the installed 
   });
 });
 
+test("createInstalledFlowApp rejects raw-program startup without a persisted runtime artifact", async () => {
+  const workspaceDirectory = await mkdtemp(
+    path.join(os.tmpdir(), "sdn-flow-installed-app-raw-program-"),
+  );
+  const workspacePath = path.join(workspaceDirectory, "workspace.json");
+
+  await writeInstalledFlowWorkspace(workspacePath, {
+    workspaceId: "raw-program-app",
+    flowPath: path.relative(workspaceDirectory, SinglePluginFlowPath),
+    pluginRootDirectories: [
+      path.relative(workspaceDirectory, ExamplePluginsDirectory),
+    ],
+  });
+
+  const app = await createInstalledFlowApp({
+    workspacePath,
+  });
+
+  assert.equal(
+    app.getWorkspace().program?.programId,
+    "com.digitalarsenal.examples.single-plugin-flow",
+  );
+  await assert.rejects(
+    app.start(),
+    /requires compiledArtifact, serializedArtifact, or a deployment envelope/i,
+  );
+});
+
 test("createInstalledFlowApp passes workspace.service trust material into the installed flow service", async () => {
   const workspaceDirectory = await mkdtemp(
     path.join(os.tmpdir(), "sdn-flow-installed-app-auth-"),
@@ -248,116 +296,123 @@ test("createInstalledFlowApp passes workspace.service trust material into the in
     },
   });
   const trustedServerKey = `ed25519:${securityState.wallet.signingPublicKeyHex}`;
-  const app = await createInstalledFlowApp({
-    workspace: {
-      workspaceId: "authenticated-app",
-      discover: false,
-      program: {
-        programId: "com.digitalarsenal.examples.authenticated-app",
-        nodes: [
-          {
-            nodeId: "responder",
-            pluginId: "com.digitalarsenal.examples.memory.workspace-auth-http",
-            methodId: "serve_http_request",
-          },
-        ],
-        edges: [],
-        triggers: [
-          {
-            triggerId: "secure-download",
-            kind: "http-request",
-            source: "/secure-download",
-          },
-        ],
-        triggerBindings: [
-          {
-            triggerId: "secure-download",
-            targetNodeId: "responder",
-            targetPortId: "request",
-          },
-        ],
-        requiredPlugins: ["com.digitalarsenal.examples.memory.workspace-auth-http"],
-      },
-      deploymentPlan: {
-        pluginId: "com.digitalarsenal.examples.authenticated-app",
-        version: "1.0.0",
-        scheduleBindings: [],
-        serviceBindings: [
-          {
-            serviceId: "service-secure-download",
-            triggerId: "secure-download",
-            bindingMode: "local",
-            serviceKind: "http-server",
-            routePath: "/secure-download",
-            method: "GET",
-            authPolicyId: "workspace-wallet-trust",
-          },
-        ],
-        inputBindings: [],
-        publicationBindings: [],
-        authPolicies: [
-          {
-            policyId: "workspace-wallet-trust",
-            bindingMode: "local",
-            targetKind: "service",
-            targetId: "service-secure-download",
-            trustMapId: "approved-callers",
-            requireSignedRequests: true,
-            requireEncryptedTransport: true,
-          },
-        ],
-        protocolInstallations: [],
-      },
-      pluginPackages: [
+  const workspace = {
+    workspaceId: "authenticated-app",
+    discover: false,
+    program: {
+      programId: "com.digitalarsenal.examples.authenticated-app",
+      nodes: [
         {
-          manifest: {
-            pluginId: "com.digitalarsenal.examples.memory.workspace-auth-http",
-            name: "In-Memory Workspace Auth HTTP",
-            version: "1.0.0",
-            pluginFamily: "responder",
-            methods: [
-              {
-                methodId: "serve_http_request",
-                inputPorts: [{ portId: "request", required: true }],
-                outputPorts: [{ portId: "response" }],
-                maxBatch: 8,
-                drainPolicy: "drain-to-empty",
-              },
-            ],
-          },
-          handlers: {
-            serve_http_request({ inputs }) {
-              return {
-                outputs: inputs.map((frame) => ({
-                  ...frame,
-                  portId: "response",
-                  metadata: {
-                    statusCode: 200,
-                  },
-                })),
-                backlogRemaining: 0,
-                yielded: false,
-              };
-            },
-          },
+          nodeId: "responder",
+          pluginId: "com.digitalarsenal.examples.memory.workspace-auth-http",
+          methodId: "serve_http_request",
         },
       ],
-      service: {
-        walletProfiles: {
-          "trusted-client": {
-            recordPath: securityState.wallet.recordPath,
-          },
+      edges: [],
+      triggers: [
+        {
+          triggerId: "secure-download",
+          kind: "http-request",
+          source: "/secure-download",
         },
-        trustMaps: {
-          "approved-callers": {
-            walletProfileId: "trusted-client",
+      ],
+      triggerBindings: [
+        {
+          triggerId: "secure-download",
+          targetNodeId: "responder",
+          targetPortId: "request",
+        },
+      ],
+      requiredPlugins: ["com.digitalarsenal.examples.memory.workspace-auth-http"],
+    },
+    deploymentPlan: {
+      pluginId: "com.digitalarsenal.examples.authenticated-app",
+      version: "1.0.0",
+      scheduleBindings: [],
+      serviceBindings: [
+        {
+          serviceId: "service-secure-download",
+          triggerId: "secure-download",
+          bindingMode: "local",
+          serviceKind: "http-server",
+          routePath: "/secure-download",
+          method: "GET",
+          authPolicyId: "workspace-wallet-trust",
+        },
+      ],
+      inputBindings: [],
+      publicationBindings: [],
+      authPolicies: [
+        {
+          policyId: "workspace-wallet-trust",
+          bindingMode: "local",
+          targetKind: "service",
+          targetId: "service-secure-download",
+          trustMapId: "approved-callers",
+          requireSignedRequests: true,
+          requireEncryptedTransport: true,
+        },
+      ],
+      protocolInstallations: [],
+    },
+    pluginPackages: [
+      {
+        manifest: {
+          pluginId: "com.digitalarsenal.examples.memory.workspace-auth-http",
+          name: "In-Memory Workspace Auth HTTP",
+          version: "1.0.0",
+          pluginFamily: "responder",
+          methods: [
+            {
+              methodId: "serve_http_request",
+              inputPorts: [{ portId: "request", required: true }],
+              outputPorts: [{ portId: "response" }],
+              maxBatch: 8,
+              drainPolicy: "drain-to-empty",
+            },
+          ],
+        },
+        handlers: {
+          serve_http_request({ inputs }) {
+            return {
+              outputs: inputs.map((frame) => ({
+                ...frame,
+                portId: "response",
+                metadata: {
+                  statusCode: 200,
+                },
+              })),
+              backlogRemaining: 0,
+              yielded: false,
+            };
           },
         },
       },
-      fetch: {
-        baseUrl: "https://example.test",
+    ],
+    service: {
+      walletProfiles: {
+        "trusted-client": {
+          recordPath: securityState.wallet.recordPath,
+        },
+      },
+      trustMaps: {
+        "approved-callers": {
+          walletProfileId: "trusted-client",
+        },
       },
     },
+    fetch: {
+      baseUrl: "https://example.test",
+    },
+  };
+  workspace.serializedArtifact = await compileSerializedArtifact({
+    program: workspace.program,
+    deploymentPlan: workspace.deploymentPlan,
+    pluginPackages: workspace.pluginPackages,
+    discover: false,
+  });
+  const app = await createInstalledFlowApp({
+    workspace,
   });
 
   await app.start();
@@ -408,113 +463,120 @@ test("createInstalledFlowApp passes workspace.service trust material into local 
     },
   });
   const trustedServerKey = `ed25519:${securityState.wallet.signingPublicKeyHex}`;
-  const app = await createInstalledFlowApp({
-    workspace: {
-      workspaceId: "authenticated-ipfs-app",
-      discover: false,
-      program: {
-        programId: "com.digitalarsenal.examples.authenticated-ipfs-app",
-        nodes: [
-          {
-            nodeId: "retention",
-            pluginId: "com.digitalarsenal.examples.memory.workspace-auth-ipfs",
-            methodId: "apply_retention",
-          },
-        ],
-        edges: [],
-        triggers: [],
-        triggerBindings: [],
-        requiredPlugins: ["com.digitalarsenal.examples.memory.workspace-auth-ipfs"],
-        externalInterfaces: [
-          {
-            interfaceId: "ipfs-pin-retention",
-            kind: "host-service",
-            direction: "bidirectional",
-            capability: "ipfs",
-            resource: "ipfs://pin-retention",
-            properties: {
-              operations: ["pin"],
-            },
-          },
-        ],
-      },
-      deploymentPlan: {
-        pluginId: "com.digitalarsenal.examples.authenticated-ipfs-app",
-        version: "1.0.0",
-        scheduleBindings: [],
-        serviceBindings: [],
-        inputBindings: [
-          {
-            bindingId: "ipfs-pin-retention-binding",
-            interfaceId: "ipfs-pin-retention",
-            targetPluginId: "com.digitalarsenal.examples.memory.workspace-auth-ipfs",
-            targetMethodId: "apply_retention",
-            targetInputPortId: "request",
-            sourceKind: "catalog-sync",
-          },
-        ],
-        publicationBindings: [],
-        authPolicies: [
-          {
-            policyId: "workspace-ipfs-wallet-trust",
-            bindingMode: "local",
-            targetKind: "ipfs-service",
-            targetId: "ipfs-pin-retention",
-            trustMapId: "approved-callers",
-            requireSignedRequests: true,
-            requireEncryptedTransport: true,
-          },
-        ],
-        protocolInstallations: [],
-      },
-      pluginPackages: [
+  const workspace = {
+    workspaceId: "authenticated-ipfs-app",
+    discover: false,
+    program: {
+      programId: "com.digitalarsenal.examples.authenticated-ipfs-app",
+      nodes: [
         {
-          manifest: {
-            pluginId: "com.digitalarsenal.examples.memory.workspace-auth-ipfs",
-            name: "In-Memory Workspace Auth IPFS",
-            version: "1.0.0",
-            pluginFamily: "transform",
-            methods: [
-              {
-                methodId: "apply_retention",
-                inputPorts: [{ portId: "request", required: true }],
-                outputPorts: [{ portId: "response" }],
-                maxBatch: 8,
-                drainPolicy: "drain-to-empty",
-              },
-            ],
-          },
-          handlers: {
-            apply_retention({ inputs }) {
-              return {
-                outputs: inputs.map((frame) => ({
-                  ...frame,
-                  portId: "response",
-                  metadata: {
-                    ...frame.metadata,
-                    statusCode: 200,
-                  },
-                })),
-                backlogRemaining: 0,
-                yielded: false,
-              };
-            },
+          nodeId: "retention",
+          pluginId: "com.digitalarsenal.examples.memory.workspace-auth-ipfs",
+          methodId: "apply_retention",
+        },
+      ],
+      edges: [],
+      triggers: [],
+      triggerBindings: [],
+      requiredPlugins: ["com.digitalarsenal.examples.memory.workspace-auth-ipfs"],
+      externalInterfaces: [
+        {
+          interfaceId: "ipfs-pin-retention",
+          kind: "host-service",
+          direction: "bidirectional",
+          capability: "ipfs",
+          resource: "ipfs://pin-retention",
+          properties: {
+            operations: ["pin"],
           },
         },
       ],
-      service: {
-        walletProfiles: {
-          "trusted-client": {
-            recordPath: securityState.wallet.recordPath,
-          },
+    },
+    deploymentPlan: {
+      pluginId: "com.digitalarsenal.examples.authenticated-ipfs-app",
+      version: "1.0.0",
+      scheduleBindings: [],
+      serviceBindings: [],
+      inputBindings: [
+        {
+          bindingId: "ipfs-pin-retention-binding",
+          interfaceId: "ipfs-pin-retention",
+          targetPluginId: "com.digitalarsenal.examples.memory.workspace-auth-ipfs",
+          targetMethodId: "apply_retention",
+          targetInputPortId: "request",
+          sourceKind: "catalog-sync",
         },
-        trustMaps: {
-          "approved-callers": {
-            walletProfileId: "trusted-client",
+      ],
+      publicationBindings: [],
+      authPolicies: [
+        {
+          policyId: "workspace-ipfs-wallet-trust",
+          bindingMode: "local",
+          targetKind: "ipfs-service",
+          targetId: "ipfs-pin-retention",
+          trustMapId: "approved-callers",
+          requireSignedRequests: true,
+          requireEncryptedTransport: true,
+        },
+      ],
+      protocolInstallations: [],
+    },
+    pluginPackages: [
+      {
+        manifest: {
+          pluginId: "com.digitalarsenal.examples.memory.workspace-auth-ipfs",
+          name: "In-Memory Workspace Auth IPFS",
+          version: "1.0.0",
+          pluginFamily: "transform",
+          methods: [
+            {
+              methodId: "apply_retention",
+              inputPorts: [{ portId: "request", required: true }],
+              outputPorts: [{ portId: "response" }],
+              maxBatch: 8,
+              drainPolicy: "drain-to-empty",
+            },
+          ],
+        },
+        handlers: {
+          apply_retention({ inputs }) {
+            return {
+              outputs: inputs.map((frame) => ({
+                ...frame,
+                portId: "response",
+                metadata: {
+                  ...frame.metadata,
+                  statusCode: 200,
+                },
+              })),
+              backlogRemaining: 0,
+              yielded: false,
+            };
           },
         },
       },
+    ],
+    service: {
+      walletProfiles: {
+        "trusted-client": {
+          recordPath: securityState.wallet.recordPath,
+        },
+      },
+      trustMaps: {
+        "approved-callers": {
+          walletProfileId: "trusted-client",
+        },
+      },
     },
+  };
+  workspace.serializedArtifact = await compileSerializedArtifact({
+    program: workspace.program,
+    deploymentPlan: workspace.deploymentPlan,
+    pluginPackages: workspace.pluginPackages,
+    discover: false,
+  });
+  const app = await createInstalledFlowApp({
+    workspace,
   });
 
   await app.start();
@@ -600,10 +662,15 @@ test("createInstalledFlowApp can install and uninstall explicit plugin packages 
     path.join(os.tmpdir(), "sdn-flow-installed-app-catalog-"),
   );
   const workspacePath = path.join(workspaceDirectory, "workspace.json");
+  const serializedArtifact = await compileSerializedArtifact({
+    program: await readJsonFile(SinglePluginFlowPath),
+    pluginRootDirectories: [ExamplePluginsDirectory],
+  });
 
   await writeInstalledFlowWorkspace(workspacePath, {
     workspaceId: "catalog-app",
     flowPath: path.relative(workspaceDirectory, SinglePluginFlowPath),
+    serializedArtifact,
     discover: false,
   });
 
@@ -704,10 +771,15 @@ test("installed flow app can persist package-reference install, update, and remo
   );
   const workspacePath = path.join(workspaceDirectory, "workspace.json");
   const packageManager = createFakePackageManager();
+  const serializedArtifact = await compileSerializedArtifact({
+    program: await readJsonFile(SinglePluginFlowPath),
+    pluginRootDirectories: [ExamplePluginsDirectory],
+  });
 
   await writeInstalledFlowWorkspace(workspacePath, {
     workspaceId: "package-reference-app",
     flowPath: path.relative(workspaceDirectory, SinglePluginFlowPath),
+    serializedArtifact,
     discover: false,
   });
 

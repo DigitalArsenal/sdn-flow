@@ -1281,6 +1281,165 @@ test("runtime manager preserves the active startup when persisted settings exist
   }
 });
 
+test("runtime manager reports compiled, delegated, and js-shim runtime classifications", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "sdn-flow-editor-runtime-classification-"));
+
+  try {
+    const runtimePaths = getSdnFlowEditorRuntimePaths({ projectRoot: tempDir });
+    await writeSdnFlowEditorBuildFile(runtimePaths.currentBuildFilePath, {
+      kind: "sdn-flow-editor-flow-build",
+      version: 1,
+      compileId: "compile-classification",
+      createdAt: "2026-03-18T12:00:00.000Z",
+      outputName: "flow-runtime",
+      runtimeModel: "compiled-cpp-wasm",
+      flows: [
+        {
+          id: "tab-1",
+          type: "tab",
+          label: "Classification Flow",
+        },
+        {
+          id: "inject-1",
+          z: "tab-1",
+          type: "inject",
+          wires: [["function-1"]],
+        },
+        {
+          id: "function-1",
+          z: "tab-1",
+          type: "function",
+          wires: [["remote-1"]],
+        },
+        {
+          id: "remote-1",
+          z: "tab-1",
+          type: "remote worker",
+          wires: [],
+        },
+      ],
+      serializedArtifact: {
+        artifactId: "flow-1:deadbeef",
+        programId: "flow-1",
+      },
+      artifactSummary: {
+        artifactId: "flow-1:deadbeef",
+        programId: "flow-1",
+      },
+      program: {
+        programId: "flow-1",
+        triggers: [
+          {
+            triggerId: "trigger-inject-1",
+          },
+        ],
+        nodes: [
+          {
+            nodeId: "function-1",
+            pluginId: "com.digitalarsenal.editor.function",
+            methodId: "invoke",
+          },
+          {
+            nodeId: "remote-1",
+            pluginId: "com.example.remote-worker",
+            methodId: "invoke",
+          },
+        ],
+      },
+    });
+
+    const manager = createSdnFlowEditorRuntimeManager({
+      projectRoot: tempDir,
+      async dependencyInvoker() {
+        return {
+          outputs: [],
+        };
+      },
+      async loadCompiledRuntimeHost(buildRecord) {
+        return {
+          artifact: {
+            programId: buildRecord.serializedArtifact.programId,
+            wasm: new Uint8Array([0x00, 0x61, 0x73, 0x6d]),
+          },
+          host: {
+            resetRuntimeState() {},
+            async destroyDependencies() {},
+          },
+        };
+      },
+      logError() {},
+    });
+
+    await manager.initialize();
+
+    const runtimeClassification = manager.getRuntimeStatus().runtimeClassification;
+    assert.deepEqual(runtimeClassification.summary, {
+      totalNodes: 3,
+      families: 3,
+      handlers: 2,
+      byClassification: {
+        compiled: 1,
+        delegated: 1,
+        "js-shim": 1,
+      },
+    });
+    assert.deepEqual(runtimeClassification.nodeFamilies, [
+      {
+        family: "function",
+        classification: "js-shim",
+        count: 1,
+        nodeIds: ["function-1"],
+        triggerIds: [],
+        pluginIds: ["com.digitalarsenal.editor.function"],
+        methodIds: ["invoke"],
+        handlerKeys: ["com.digitalarsenal.editor.function:invoke"],
+      },
+      {
+        family: "inject",
+        classification: "compiled",
+        count: 1,
+        nodeIds: ["inject-1"],
+        triggerIds: ["trigger-inject-1"],
+        pluginIds: [],
+        methodIds: [],
+        handlerKeys: [],
+      },
+      {
+        family: "remote worker",
+        classification: "delegated",
+        count: 1,
+        nodeIds: ["remote-1"],
+        triggerIds: [],
+        pluginIds: ["com.example.remote-worker"],
+        methodIds: ["invoke"],
+        handlerKeys: ["com.example.remote-worker:invoke"],
+      },
+    ]);
+    assert.deepEqual(runtimeClassification.handlers, [
+      {
+        key: "com.digitalarsenal.editor.function:invoke",
+        classification: "js-shim",
+        count: 1,
+        nodeIds: ["function-1"],
+        families: ["function"],
+        pluginIds: ["com.digitalarsenal.editor.function"],
+        methodIds: ["invoke"],
+      },
+      {
+        key: "com.example.remote-worker:invoke",
+        classification: "delegated",
+        count: 1,
+        nodeIds: ["remote-1"],
+        families: ["remote worker"],
+        pluginIds: ["com.example.remote-worker"],
+        methodIds: ["invoke"],
+      },
+    ]);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("runtime manager routes link out fan-out and link call returns through the compiled runtime", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "sdn-flow-editor-runtime-links-"));
   const runtimePaths = getSdnFlowEditorRuntimePaths({ projectRoot: tempDir });

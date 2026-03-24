@@ -2,9 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  createInstalledFlowHost,
   createInstalledFlowApp,
   createInstalledFlowBrowserFetchEventListener,
   matchesInstalledFlowHttpBindingRequest,
+  serializeCompiledArtifact,
   startInstalledFlowBrowserFetchHost,
 } from "../src/index.js";
 
@@ -110,6 +112,23 @@ function buildBrowserWorkspace() {
   };
 }
 
+async function buildRuntimeBrowserWorkspace() {
+  const workspace = buildBrowserWorkspace();
+  const host = createInstalledFlowHost({
+    allowLiveProgramCompilation: true,
+    program: workspace.program,
+    hostPlan: workspace.hostPlan,
+    pluginPackages: workspace.pluginPackages,
+    discover: false,
+  });
+
+  await host.start();
+  return {
+    ...workspace,
+    serializedArtifact: serializeCompiledArtifact(host.getArtifact()),
+  };
+}
+
 test("matchesInstalledFlowHttpBindingRequest matches fetch requests by bound path", () => {
   const bindingContext = {
     binding: {
@@ -135,7 +154,7 @@ test("matchesInstalledFlowHttpBindingRequest matches fetch requests by bound pat
 
 test("createInstalledFlowBrowserFetchEventListener routes matching fetch events into the installed flow app", async () => {
   const app = await createInstalledFlowApp({
-    workspace: buildBrowserWorkspace(),
+    workspace: await buildRuntimeBrowserWorkspace(),
   });
   await app.start();
   const listener = createInstalledFlowBrowserFetchEventListener({
@@ -171,7 +190,7 @@ test("startInstalledFlowBrowserFetchHost registers and removes a fetch listener"
   const registeredListeners = [];
   const removedListeners = [];
   const host = await startInstalledFlowBrowserFetchHost({
-    workspace: buildBrowserWorkspace(),
+    workspace: await buildRuntimeBrowserWorkspace(),
     addEventListener(eventType, listener) {
       registeredListeners.push({
         eventType,

@@ -5,9 +5,8 @@ import fs from "node:fs/promises";
 import * as flatbuffers from "flatbuffers";
 
 import {
+  createInstalledFlowHost,
   FlowDesignerSession,
-  FlowRuntime,
-  MethodRegistry,
 } from "../src/index.js";
 import { getWasmWallet } from "../src/utils/wasmCrypto.js";
 
@@ -25,6 +24,11 @@ function buildFrame(
   payload,
   overrides = {},
 ) {
+  const metadata = {
+    ...(overrides.metadata ?? {}),
+    structuredPayload: payload,
+  };
+
   return {
     portId,
     typeRef: {
@@ -41,8 +45,39 @@ function buildFrame(
     traceId: overrides.traceId ?? `${schemaName}:${portId}`,
     streamId: overrides.streamId ?? 1,
     sequence: overrides.sequence ?? 1,
-    payload,
+    payload:
+      payload instanceof Uint8Array
+        ? payload
+        : typeof payload === "string"
+          ? new TextEncoder().encode(payload)
+          : new Uint8Array(),
+    metadata,
   };
+}
+
+function payloadOf(frameValue) {
+  return frameValue?.metadata?.structuredPayload ?? null;
+}
+
+async function startReferenceHost(program, pluginPackages, runtimeOptions = {}) {
+  const host = createInstalledFlowHost({
+    program,
+    discover: false,
+    pluginPackages,
+    allowLiveProgramCompilation: true,
+    runtimeOptions,
+  });
+  await host.start();
+  return host;
+}
+
+function hostManifest(manifest, mutate = null) {
+  const normalized = structuredClone(manifest);
+  normalized.artifactDependencies = [];
+  if (typeof mutate === "function") {
+    mutate(normalized);
+  }
+  return normalized;
 }
 
 function vectorBytes(bb, tablePosition, fieldOffset) {
@@ -321,12 +356,14 @@ test("field-protection example surfaces hd-wallet-wasm and da-flatbuffers as nor
   );
 });
 
-test("field-protection example can encrypt selected FlatBuffer fields and sign the protected record inside the flow runtime", async () => {
+test("field-protection example can encrypt selected FlatBuffer fields and sign the protected record inside the installed flow host", async () => {
   const wallet = await getWasmWallet();
-  const registry = new MethodRegistry();
   const protectedRecords = [];
   const signatures = [];
   const encryptedFieldSets = [];
+  const pluginPackages = [];
+  let pendingPublicFields = null;
+  let pendingEncryptedFieldSet = null;
 
   const daFlatbuffersManifest = await readJson(
     "../examples/plugins/da-flatbuffers-codec/manifest.json",
@@ -339,11 +376,18 @@ test("field-protection example can encrypt selected FlatBuffer fields and sign t
     await readJson("../examples/flows/field-protected-catalog-entry/flow.json"),
   );
 
-  registry.registerPlugin({
-    manifest: daFlatbuffersManifest,
+  pluginPackages.push({
+    manifest: hostManifest(daFlatbuffersManifest, (manifest) => {
+      const method = manifest.methods?.find(
+        (candidate) => candidate.methodId === "pack_protected_record",
+      );
+      for (const inputPort of method?.inputPorts ?? []) {
+        inputPort.required = false;
+      }
+    }),
     handlers: {
       extract_fields: ({ inputs }) => {
-        const request = inputs.at(-1)?.payload;
+        const request = payloadOf(inputs.at(-1));
         const record = CatalogEntryRecord.getRoot(request.recordBytes);
         const protectedPaths = new Set(request.protectedFields ?? []);
         const publicFields = {
@@ -393,21 +437,31 @@ test("field-protection example can encrypt selected FlatBuffer fields and sign t
         };
       },
       pack_protected_record: ({ inputs }) => {
-        const publicFields = inputs.find(
-          (input) => input.portId === "public_fields",
-        )?.payload;
-        const encryptedFieldSet = inputs.find(
-          (input) => input.portId === "encrypted_fields",
-        )?.payload;
+        const nextPublicFields = payloadOf(
+          inputs.find((input) => input.portId === "public_fields"),
+        );
+        const nextEncryptedFieldSet = payloadOf(
+          inputs.find((input) => input.portId === "encrypted_fields"),
+        );
+        if (nextPublicFields) {
+          pendingPublicFields = nextPublicFields;
+        }
+        if (nextEncryptedFieldSet) {
+          pendingEncryptedFieldSet = nextEncryptedFieldSet;
+        }
+        const publicFields = pendingPublicFields;
+        const encryptedFieldSet = pendingEncryptedFieldSet;
         const encryptedObserverNote =
           encryptedFieldSet?.fields?.find(
             (field) => field.fieldPath === "observerNote",
           ) ?? null;
 
         if (!publicFields || !encryptedObserverNote) {
-          throw new Error(
-            "pack_protected_record requires public and encrypted fields.",
-          );
+          return {
+            outputs: [],
+            backlogRemaining: 0,
+            yielded: false,
+          };
         }
 
         const packedEncryptedField = new Uint8Array(
@@ -432,6 +486,8 @@ test("field-protection example can encrypt selected FlatBuffer fields and sign t
           encryptedObserverNote: packedEncryptedField,
           cipherSuite: encryptedObserverNote.algorithm,
         });
+        pendingPublicFields = null;
+        pendingEncryptedFieldSet = null;
 
         return {
           outputs: [
@@ -458,11 +514,11 @@ test("field-protection example can encrypt selected FlatBuffer fields and sign t
     },
   });
 
-  registry.registerPlugin({
-    manifest: hdWalletManifest,
+  pluginPackages.push({
+    manifest: hostManifest(hdWalletManifest),
     handlers: {
       encrypt_fields: ({ inputs }) => {
-        const fieldSet = inputs.at(-1)?.payload;
+        const fieldSet = payloadOf(inputs.at(-1));
         const fields = [];
 
         for (const field of fieldSet.fields ?? []) {
@@ -514,7 +570,7 @@ test("field-protection example can encrypt selected FlatBuffer fields and sign t
         };
       },
       sign_detached: ({ inputs }) => {
-        const message = inputs.at(-1)?.payload;
+        const message = payloadOf(inputs.at(-1));
         const digest = wallet.utils.sha256(message.protectedRecordBytes);
         const signature = wallet.curves.secp256k1.sign(
           digest,
@@ -550,11 +606,11 @@ test("field-protection example can encrypt selected FlatBuffer fields and sign t
     },
   });
 
-  registry.registerPlugin({
-    manifest: collectorManifest,
+  pluginPackages.push({
+    manifest: hostManifest(collectorManifest),
     handlers: {
       collect_protected: ({ inputs }) => {
-        protectedRecords.push(inputs[0].payload);
+        protectedRecords.push(payloadOf(inputs[0]));
         return {
           outputs: [],
           backlogRemaining: 0,
@@ -562,7 +618,7 @@ test("field-protection example can encrypt selected FlatBuffer fields and sign t
         };
       },
       collect_signature: ({ inputs }) => {
-        signatures.push(inputs[0].payload);
+        signatures.push(payloadOf(inputs[0]));
         return {
           outputs: [],
           backlogRemaining: 0,
@@ -572,11 +628,9 @@ test("field-protection example can encrypt selected FlatBuffer fields and sign t
     },
   });
 
-  const runtime = new FlowRuntime({
-    registry,
+  const host = await startReferenceHost(flow, pluginPackages, {
     maxInvocationsPerDrain: 64,
   });
-  runtime.loadProgram(flow);
 
   const signerPrivateKey = wallet.utils.getRandomBytes(32);
   const senderPrivateKey = wallet.utils.getRandomBytes(32);
@@ -591,7 +645,7 @@ test("field-protection example can encrypt selected FlatBuffer fields and sign t
     source: "SeeSat-L",
   });
 
-  runtime.enqueueTriggerFrames("manual-request", [
+  host.enqueueTriggerFrames("manual-request", [
     buildFrame(
       "request",
       "FieldProtectionRequest.fbs",
@@ -611,7 +665,7 @@ test("field-protection example can encrypt selected FlatBuffer fields and sign t
     ),
   ]);
 
-  const result = await runtime.drain();
+  const result = await host.drain();
 
   assert.equal(result.idle, true);
   assert.equal(protectedRecords.length, 1);

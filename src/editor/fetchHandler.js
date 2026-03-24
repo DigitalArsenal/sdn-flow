@@ -107,6 +107,23 @@ function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function createEmptyRuntimeClassificationStatus() {
+  return {
+    summary: {
+      totalNodes: 0,
+      families: 0,
+      handlers: 0,
+      byClassification: {
+        compiled: 0,
+        delegated: 0,
+        "js-shim": 0,
+      },
+    },
+    nodeFamilies: [],
+    handlers: [],
+  };
+}
+
 function mergeObjects(target, source) {
   if (!isPlainObject(source)) {
     return target;
@@ -401,6 +418,7 @@ export function createSdnFlowEditorFetchHandler(options = {}) {
           artifactArchiveLimit: 100,
           compilePending: false,
           compileId: null,
+          runtimeClassification: createEmptyRuntimeClassificationStatus(),
         };
       },
       getStartupSettings() {

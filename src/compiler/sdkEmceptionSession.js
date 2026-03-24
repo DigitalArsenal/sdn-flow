@@ -2,6 +2,9 @@ import path from "node:path";
 
 import { createSharedEmceptionSession } from "space-data-module-sdk/compiler/emception";
 
+export const SDK_EMCEPTION_SESSION_KIND =
+  "space-data-module-sdk.compiler.emception-session";
+
 function normalizePosixPath(filePath) {
   return path.posix.normalize(String(filePath ?? "").replaceAll("\\", "/"));
 }
@@ -13,6 +16,7 @@ export async function createSdkEmceptionSession(options = {}) {
   const sharedSession = createSharedEmceptionSession();
 
   return {
+    sessionKind: SDK_EMCEPTION_SESSION_KIND,
     workDir,
     async init() {
       await sharedSession.mkdirTree(workDir);

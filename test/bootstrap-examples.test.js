@@ -2,6 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
 
+import {
+  createInstalledFlowHost,
+  serializeCompiledArtifact,
+} from "../src/index.js";
 import { createBootstrapDemoWorkspace } from "../examples/bootstrap/installed-flow-http-demo.js";
 import {
   AutoBootstrapWorkspacePath,
@@ -28,6 +32,22 @@ import {
   startNodeEditorBootstrapExample,
 } from "../examples/bootstrap/start-node-editor-host.mjs";
 
+async function compileBootstrapWorkspace(workspace) {
+  const host = createInstalledFlowHost({
+    allowLiveProgramCompilation: true,
+    program: workspace.program,
+    hostPlan: workspace.hostPlan,
+    pluginPackages: workspace.pluginPackages,
+    discover: false,
+  });
+
+  await host.start();
+  return {
+    ...workspace,
+    serializedArtifact: serializeCompiledArtifact(host.getArtifact()),
+  };
+}
+
 test("bootstrap demo workspace factory produces a runnable HTTP host workspace", () => {
   const workspace = createBootstrapDemoWorkspace({
     engine: "node",
@@ -45,7 +65,14 @@ test("bootstrap demo workspace factory produces a runnable HTTP host workspace",
 
 test("Deno and Bun bootstrap scripts start through their injected serve functions", async () => {
   const serveCalls = [];
+  const denoWorkspace = await compileBootstrapWorkspace(
+    createDenoBootstrapWorkspace(),
+  );
+  const bunWorkspace = await compileBootstrapWorkspace(
+    createBunBootstrapWorkspace(),
+  );
   const denoHost = await startDenoBootstrapExample({
+    workspace: denoWorkspace,
     serve(options, handler) {
       serveCalls.push({
         platform: "deno",
@@ -58,6 +85,7 @@ test("Deno and Bun bootstrap scripts start through their injected serve function
     },
   });
   const bunHost = await startBunBootstrapExample({
+    workspace: bunWorkspace,
     serve(options) {
       serveCalls.push({
         platform: "bun",
@@ -81,8 +109,15 @@ test("Node and browser bootstrap scripts can start with injected host hooks", as
   const serveHttpCalls = [];
   const addEventListenerCalls = [];
   const removeEventListenerCalls = [];
+  const nodeWorkspace = await compileBootstrapWorkspace(
+    createNodeBootstrapWorkspace(),
+  );
+  const browserWorkspace = await compileBootstrapWorkspace(
+    createBrowserBootstrapWorkspace(),
+  );
 
   const nodeHost = await startNodeBootstrapExample({
+    workspace: nodeWorkspace,
     serveHttp: async ({ binding, handler }) => {
       serveHttpCalls.push({
         binding,
@@ -94,6 +129,7 @@ test("Node and browser bootstrap scripts can start with injected host hooks", as
     },
   });
   const browserHost = await startBrowserBootstrapExample({
+    workspace: browserWorkspace,
     addEventListener(eventType, listener) {
       addEventListenerCalls.push({
         eventType,

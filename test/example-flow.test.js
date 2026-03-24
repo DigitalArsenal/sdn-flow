@@ -3,9 +3,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 
 import {
+  createInstalledFlowHost,
   FlowDesignerSession,
-  FlowRuntime,
-  MethodRegistry,
 } from "../src/index.js";
 
 async function readJson(relativePath) {
@@ -22,6 +21,10 @@ function typeRef(schemaName, fileIdentifier) {
 }
 
 function frame(portId, schemaName, fileIdentifier, payload, overrides = {}) {
+  const metadata = {
+    ...(overrides.metadata ?? {}),
+    structuredPayload: payload,
+  };
   return {
     portId,
     typeRef: typeRef(schemaName, fileIdentifier),
@@ -36,8 +39,50 @@ function frame(portId, schemaName, fileIdentifier, payload, overrides = {}) {
       `${schemaName}:${payload?.norad ?? payload?.anchorNorad ?? payload?.objectNorad ?? "x"}`,
     streamId: overrides.streamId ?? 1,
     sequence: overrides.sequence ?? 1,
-    payload,
+    payload:
+      payload instanceof Uint8Array
+        ? payload
+        : typeof payload === "string"
+          ? new TextEncoder().encode(payload)
+          : new Uint8Array(),
+    metadata,
   };
+}
+
+function payloadOf(frameValue) {
+  if (frameValue?.metadata?.structuredPayload !== undefined) {
+    return frameValue.metadata.structuredPayload;
+  }
+  if (typeof frameValue?.payload === "string") {
+    return frameValue.payload;
+  }
+  if (frameValue?.payload instanceof Uint8Array) {
+    return new TextDecoder().decode(frameValue.payload);
+  }
+  return null;
+}
+
+function hostManifest(manifest, mutate = null) {
+  const normalized = structuredClone(manifest);
+  normalized.artifactDependencies = [];
+  if (typeof mutate === "function") {
+    mutate(normalized);
+  }
+  return normalized;
+}
+
+async function startReferenceHost(program, pluginPackages, runtimeOptions = {}) {
+  const normalizedProgram = structuredClone(program);
+  normalizedProgram.artifactDependencies = [];
+  const host = createInstalledFlowHost({
+    program: normalizedProgram,
+    discover: false,
+    pluginPackages,
+    allowLiveProgramCompilation: true,
+    runtimeOptions,
+  });
+  await host.start();
+  return host;
 }
 
 test("Flow designer requirements merge shared external interfaces by interfaceId", () => {
@@ -164,11 +209,11 @@ test("CSV OMM query service example runs through the reference harness end-to-en
     bridge: await readJson("../examples/plugins/sql-http-bridge/manifest.json"),
   };
 
-  const registry = new MethodRegistry();
   const storedRecords = new Map();
+  const pluginPackages = [];
 
-  registry.registerPlugin({
-    manifest: manifests.fetcher,
+  pluginPackages.push({
+    manifest: hostManifest(manifests.fetcher),
     handlers: {
       fetch_records: ({ inputs }) => ({
         outputs: inputs.flatMap((input) => [
@@ -189,19 +234,20 @@ test("CSV OMM query service example runs through the reference harness end-to-en
     },
   });
 
-  registry.registerPlugin({
-    manifest: manifests.flatsql,
+  pluginPackages.push({
+    manifest: hostManifest(manifests.flatsql),
     handlers: {
       upsert_records: ({ inputs }) => {
         const outputs = [];
         for (const input of inputs) {
-          storedRecords.set(input.payload.norad, input.payload);
+          const record = payloadOf(input);
+          storedRecords.set(record.norad, record);
           outputs.push(
             frame(
               "stored",
               "StoredRecordRef.fbs",
               "STRF",
-              { norad: input.payload.norad },
+              { norad: record.norad },
               {
                 sequence: input.sequence,
                 traceId: input.traceId,
@@ -212,7 +258,7 @@ test("CSV OMM query service example runs through the reference harness end-to-en
         return { outputs, backlogRemaining: 0, yielded: false };
       },
       query_sql: ({ inputs }) => {
-        const request = inputs.at(-1)?.payload ?? {};
+        const request = payloadOf(inputs.at(-1)) ?? {};
         const requestedNorad = Number(request.params?.norad ?? request.norad ?? 0);
         const rows = requestedNorad
           ? [storedRecords.get(requestedNorad)].filter(Boolean)
@@ -239,15 +285,15 @@ test("CSV OMM query service example runs through the reference harness end-to-en
     },
   });
 
-  registry.registerPlugin({
-    manifest: manifests.bridge,
+  pluginPackages.push({
+    manifest: hostManifest(manifests.bridge),
     handlers: {
       build_sql_query_from_http_request: ({ inputs }) => ({
         outputs: inputs.map((input) =>
           frame("query", "SqlQueryRequest.fbs", "SQLQ", {
             sql: "SELECT * FROM omm WHERE norad = :norad",
             params: {
-              norad: Number(input.payload.norad),
+              norad: Number(payloadOf(input)?.norad),
             },
           }),
         ),
@@ -256,9 +302,15 @@ test("CSV OMM query service example runs through the reference harness end-to-en
       }),
       build_http_response_from_rows: ({ inputs }) => ({
         outputs: inputs.map((input) =>
-          frame("response", "HttpResponse.fbs", "HRSP", JSON.stringify(input.payload), {
+          frame(
+            "response",
+            "HttpResponse.fbs",
+            "HRSP",
+            JSON.stringify(payloadOf(input)),
+            {
             traceId: input.traceId,
-          }),
+            },
+          ),
         ).map((output) => ({
           ...output,
           metadata: {
@@ -274,8 +326,7 @@ test("CSV OMM query service example runs through the reference harness end-to-en
     },
   });
 
-  const runtime = new FlowRuntime({ registry });
-  runtime.loadProgram(flow);
+  const runtime = await startReferenceHost(flow, pluginPackages);
 
   runtime.enqueueTriggerFrames("sync-celestrak-csv", [
     frame("trigger", "TimerTick.fbs", "TICK", {
@@ -287,13 +338,11 @@ test("CSV OMM query service example runs through the reference harness end-to-en
   assert.equal(storedRecords.size, 2);
 
   const sinkOutputs = [];
-  const queryRuntime = new FlowRuntime({
-    registry,
+  const queryRuntime = await startReferenceHost(flow, pluginPackages, {
     onSinkOutput(event) {
       sinkOutputs.push(event);
     },
   });
-  queryRuntime.loadProgram(flow);
   queryRuntime.enqueueTriggerFrames("query-http", [
     frame("request", "HttpRequest.fbs", "HREQ", {
       norad: 25544,
@@ -304,7 +353,7 @@ test("CSV OMM query service example runs through the reference harness end-to-en
   assert.equal(queryResult.idle, true);
   assert.equal(sinkOutputs.length, 1);
   assert.equal(sinkOutputs[0].nodeId, "respond-query");
-  assert.deepEqual(JSON.parse(sinkOutputs[0].frame.payload), {
+  assert.deepEqual(JSON.parse(payloadOf(sinkOutputs[0].frame)), {
     rows: [
       {
         norad: 25544,
@@ -401,13 +450,13 @@ test("Space weather publisher example runs through the reference harness end-to-
     ),
   };
 
-  const registry = new MethodRegistry();
   const storedRecords = new Map();
   const archivedRecords = [];
   const notifications = [];
+  const pluginPackages = [];
 
-  registry.registerPlugin({
-    manifest: manifests.fetcher,
+  pluginPackages.push({
+    manifest: hostManifest(manifests.fetcher),
     handlers: {
       fetch_records: ({ inputs }) => ({
         outputs: inputs.flatMap(() => [
@@ -430,31 +479,32 @@ test("Space weather publisher example runs through the reference harness end-to-
     },
   });
 
-  registry.registerPlugin({
-    manifest: manifests.writer,
+  pluginPackages.push({
+    manifest: hostManifest(manifests.writer),
     handlers: {
       write_records: ({ inputs }) => {
-        archivedRecords.push(...inputs.map((input) => input.payload));
+        archivedRecords.push(...inputs.map((input) => payloadOf(input)));
         return { outputs: [], backlogRemaining: 0, yielded: false };
       },
     },
   });
 
-  registry.registerPlugin({
-    manifest: manifests.flatsql,
+  pluginPackages.push({
+    manifest: hostManifest(manifests.flatsql),
     handlers: {
       upsert_records: ({ inputs }) => {
         const outputs = [];
         for (const input of inputs) {
-          storedRecords.set(input.payload.timeTag, input.payload);
+          const record = payloadOf(input);
+          storedRecords.set(record.timeTag, record);
           outputs.push(
             frame(
               "stored",
               "StoredRecordRef.fbs",
               "STRF",
               {
-                timeTag: input.payload.timeTag,
-                kp: input.payload.kp,
+                timeTag: record.timeTag,
+                kp: record.kp,
               },
               {
                 sequence: input.sequence,
@@ -466,7 +516,7 @@ test("Space weather publisher example runs through the reference harness end-to-
         return { outputs, backlogRemaining: 0, yielded: false };
       },
       query_sql: ({ inputs }) => {
-        const request = inputs.at(-1)?.payload ?? {};
+        const request = payloadOf(inputs.at(-1)) ?? {};
         const minKp = Number(request.params?.minKp ?? request.minKp ?? 0);
         const rows = Array.from(storedRecords.values()).filter(
           (record) => Number(record.kp) >= minKp,
@@ -493,25 +543,25 @@ test("Space weather publisher example runs through the reference harness end-to-
     },
   });
 
-  registry.registerPlugin({
-    manifest: manifests.pnm,
+  pluginPackages.push({
+    manifest: hostManifest(manifests.pnm),
     handlers: {
       send_notification: ({ inputs }) => {
-        notifications.push(...inputs.map((input) => input.payload));
+        notifications.push(...inputs.map((input) => payloadOf(input)));
         return { outputs: [], backlogRemaining: 0, yielded: false };
       },
     },
   });
 
-  registry.registerPlugin({
-    manifest: manifests.bridge,
+  pluginPackages.push({
+    manifest: hostManifest(manifests.bridge),
     handlers: {
       build_sql_query_from_http_request: ({ inputs }) => ({
         outputs: inputs.map((input) =>
           frame("query", "SqlQueryRequest.fbs", "SQLQ", {
             sql: "SELECT * FROM space_weather WHERE kp >= :minKp",
             params: {
-              minKp: Number(input.payload.minKp ?? 0),
+              minKp: Number(payloadOf(input)?.minKp ?? 0),
             },
           }),
         ),
@@ -524,7 +574,7 @@ test("Space weather publisher example runs through the reference harness end-to-
             "response",
             "HttpResponse.fbs",
             "HRSP",
-            JSON.stringify(input.payload),
+            JSON.stringify(payloadOf(input)),
             {
               traceId: input.traceId,
             },
@@ -544,8 +594,8 @@ test("Space weather publisher example runs through the reference harness end-to-
     },
   });
 
-  registry.registerPlugin({
-    manifest: manifests.fileServer,
+  pluginPackages.push({
+    manifest: hostManifest(manifests.fileServer),
     handlers: {
       serve_http_request: ({ inputs }) => ({
         outputs: inputs.map((input) =>
@@ -575,8 +625,7 @@ test("Space weather publisher example runs through the reference harness end-to-
     },
   });
 
-  const runtime = new FlowRuntime({ registry });
-  runtime.loadProgram(flow);
+  const runtime = await startReferenceHost(flow, pluginPackages);
   runtime.enqueueTriggerFrames("sync-space-weather", [
     frame("trigger", "TimerTick.fbs", "TICK", {
       at: "2026-03-24T00:00:00.000Z",
@@ -599,13 +648,11 @@ test("Space weather publisher example runs through the reference harness end-to-
   ]);
 
   const querySinkOutputs = [];
-  const queryRuntime = new FlowRuntime({
-    registry,
+  const queryRuntime = await startReferenceHost(flow, pluginPackages, {
     onSinkOutput(event) {
       querySinkOutputs.push(event);
     },
   });
-  queryRuntime.loadProgram(flow);
   queryRuntime.enqueueTriggerFrames("query-http", [
     frame("request", "HttpRequest.fbs", "HREQ", {
       minKp: 5,
@@ -616,7 +663,7 @@ test("Space weather publisher example runs through the reference harness end-to-
   assert.equal(queryResult.idle, true);
   assert.equal(querySinkOutputs.length, 1);
   assert.equal(querySinkOutputs[0].nodeId, "respond-query");
-  assert.deepEqual(JSON.parse(querySinkOutputs[0].frame.payload), {
+  assert.deepEqual(JSON.parse(payloadOf(querySinkOutputs[0].frame)), {
     rows: [
       {
         timeTag: "2026-03-24T03:00:00Z",
@@ -628,13 +675,11 @@ test("Space weather publisher example runs through the reference harness end-to-
   });
 
   const downloadSinkOutputs = [];
-  const downloadRuntime = new FlowRuntime({
-    registry,
+  const downloadRuntime = await startReferenceHost(flow, pluginPackages, {
     onSinkOutput(event) {
       downloadSinkOutputs.push(event);
     },
   });
-  downloadRuntime.loadProgram(flow);
   downloadRuntime.enqueueTriggerFrames("download-http", [
     frame("request", "HttpRequest.fbs", "HREQ", {
       path: "/space-weather/k-index/latest",
@@ -645,7 +690,7 @@ test("Space weather publisher example runs through the reference harness end-to-
   assert.equal(downloadResult.idle, true);
   assert.equal(downloadSinkOutputs.length, 1);
   assert.equal(downloadSinkOutputs[0].nodeId, "serve-archive");
-  assert.deepEqual(JSON.parse(downloadSinkOutputs[0].frame.payload), {
+  assert.deepEqual(JSON.parse(payloadOf(downloadSinkOutputs[0].frame)), {
     records: [
       {
         timeTag: "2026-03-24T00:00:00Z",
@@ -743,11 +788,11 @@ test("SDN IPFS pull and pin example runs through the reference harness end-to-en
     writer: await readJson("../examples/plugins/filesystem-writer/manifest.json"),
   };
 
-  const registry = new MethodRegistry();
   const watchedOffers = new Map();
   const pinnedCids = [];
   const unpinnedCids = [];
   const archivedRecords = [];
+  const pluginPackages = [];
   const ipfsStore = new Map([
     [
       "bafyspaceweather0001",
@@ -767,12 +812,12 @@ test("SDN IPFS pull and pin example runs through the reference harness end-to-en
     ],
   ]);
 
-  registry.registerPlugin({
-    manifest: manifests.importer,
+  pluginPackages.push({
+    manifest: hostManifest(manifests.importer),
     handlers: {
       import_entity_profile: ({ inputs }) => ({
         outputs: inputs.map((input) =>
-          frame("profile", "ProtectedCatalogEntry.fbs", "PRTC", input.payload, {
+          frame("profile", "ProtectedCatalogEntry.fbs", "PRTC", payloadOf(input), {
             sequence: input.sequence,
             traceId: input.traceId,
           }),
@@ -783,12 +828,12 @@ test("SDN IPFS pull and pin example runs through the reference harness end-to-en
     },
   });
 
-  registry.registerPlugin({
-    manifest: manifests.discovery,
+  pluginPackages.push({
+    manifest: hostManifest(manifests.discovery),
     handlers: {
       discover_offered_messages: ({ inputs }) => ({
         outputs: inputs.flatMap((input) =>
-          (input.payload.offeredMessages ?? []).map((offer, index) =>
+          (payloadOf(input)?.offeredMessages ?? []).map((offer, index) =>
             frame("offers", "CatalogQueryResult.fbs", "CQRS", offer, {
               sequence: index + 1,
               traceId: `${input.traceId}:offer:${offer.messageId}`,
@@ -801,20 +846,21 @@ test("SDN IPFS pull and pin example runs through the reference harness end-to-en
     },
   });
 
-  registry.registerPlugin({
-    manifest: manifests.watcher,
+  pluginPackages.push({
+    manifest: hostManifest(manifests.watcher),
     handlers: {
       watch_notifications: ({ inputs }) => {
         const outputs = [];
         for (const input of inputs) {
+          const payload = payloadOf(input);
           if (input.portId === "offers") {
-            watchedOffers.set(input.payload.messageId, input.payload);
+            watchedOffers.set(payload.messageId, payload);
             continue;
           }
           if (input.portId !== "notification") {
             continue;
           }
-          const watchedOffer = watchedOffers.get(input.payload.messageId);
+          const watchedOffer = watchedOffers.get(payload.messageId);
           if (!watchedOffer) {
             continue;
           }
@@ -824,8 +870,8 @@ test("SDN IPFS pull and pin example runs through the reference harness end-to-en
               "CidRef.fbs",
               "CIDR",
               {
-                cid: input.payload.cid,
-                messageId: input.payload.messageId,
+                cid: payload.cid,
+                messageId: payload.messageId,
                 interfaceId: watchedOffer.interfaceId,
                 retentionPolicy: watchedOffer.retentionPolicy,
               },
@@ -841,45 +887,47 @@ test("SDN IPFS pull and pin example runs through the reference harness end-to-en
     },
   });
 
-  registry.registerPlugin({
-    manifest: manifests.puller,
+  pluginPackages.push({
+    manifest: hostManifest(manifests.puller),
     handlers: {
       pull_records: ({ inputs }) => ({
-        outputs: inputs.map((input) =>
-          frame(
+        outputs: inputs.map((input) => {
+          const payload = payloadOf(input);
+          return frame(
             "records",
             "AlignedRecordBatch.fbs",
             "RECS",
             {
-              cid: input.payload.cid,
-              messageId: input.payload.messageId,
-              interfaceId: input.payload.interfaceId,
-              retentionPolicy: input.payload.retentionPolicy,
+              cid: payload.cid,
+              messageId: payload.messageId,
+              interfaceId: payload.interfaceId,
+              retentionPolicy: payload.retentionPolicy,
               source: "ipfs",
-              body: ipfsStore.get(input.payload.cid),
+              body: ipfsStore.get(payload.cid),
             },
             {
               sequence: input.sequence,
               traceId: input.traceId,
             },
-          ),
-        ),
+          );
+        }),
         backlogRemaining: 0,
         yielded: false,
       }),
     },
   });
 
-  registry.registerPlugin({
-    manifest: manifests.retention,
+  pluginPackages.push({
+    manifest: hostManifest(manifests.retention),
     handlers: {
       apply_pin_retention_policy: ({ inputs }) => {
         const outputs = [];
         for (const input of inputs) {
-          const cid = input.payload.cid;
+          const payload = payloadOf(input);
+          const cid = payload.cid;
           const maxPinned = Number(
-            input.payload.retentionPolicy?.maxPinned ??
-              input.payload.retentionPolicy?.retainLatest ??
+            payload.retentionPolicy?.maxPinned ??
+              payload.retentionPolicy?.retainLatest ??
               1,
           );
           const existingIndex = pinnedCids.indexOf(cid);
@@ -899,7 +947,7 @@ test("SDN IPFS pull and pin example runs through the reference harness end-to-en
               "AlignedRecordBatch.fbs",
               "RECS",
               {
-                ...input.payload,
+                ...payload,
                 retained: true,
               },
               {
@@ -914,21 +962,19 @@ test("SDN IPFS pull and pin example runs through the reference harness end-to-en
     },
   });
 
-  registry.registerPlugin({
-    manifest: manifests.writer,
+  pluginPackages.push({
+    manifest: hostManifest(manifests.writer),
     handlers: {
       write_records: ({ inputs }) => {
-        archivedRecords.push(...inputs.map((input) => input.payload));
+        archivedRecords.push(...inputs.map((input) => payloadOf(input)));
         return { outputs: [], backlogRemaining: 0, yielded: false };
       },
     },
   });
 
-  const runtime = new FlowRuntime({
-    registry,
+  const runtime = await startReferenceHost(flow, pluginPackages, {
     maxInvocationsPerDrain: 64,
   });
-  runtime.loadProgram(flow);
 
   runtime.enqueueTriggerFrames("entity-profile-feed", [
     frame("profile", "ProtectedCatalogEntry.fbs", "PRTC", {
@@ -1064,10 +1110,12 @@ test("HE conjunction assessor example runs through the reference harness end-to-
     ),
   };
 
-  const registry = new MethodRegistry();
+  const pluginPackages = [];
+  let pendingRequest = null;
+  let pendingSessionBundle = null;
 
-  registry.registerPlugin({
-    manifest: manifests.session,
+  pluginPackages.push({
+    manifest: hostManifest(manifests.session),
     handlers: {
       derive_public_bundle: ({ inputs }) => ({
         outputs: inputs.map((input) =>
@@ -1076,7 +1124,7 @@ test("HE conjunction assessor example runs through the reference harness end-to-
             "AlignedRecordBatch.fbs",
             "RECS",
             {
-              assessmentId: input.payload.assessmentId,
+              assessmentId: payloadOf(input).assessmentId,
               sourcePackage: "flatc-wasm",
               sourceExports: ["./he", "./he-bridge"],
               publicKey: [1, 2, 3, 4],
@@ -1095,23 +1143,43 @@ test("HE conjunction assessor example runs through the reference harness end-to-
     },
   });
 
-  registry.registerPlugin({
-    manifest: manifests.conjunction,
+  pluginPackages.push({
+    manifest: hostManifest(manifests.conjunction, (manifest) => {
+      const method = manifest.methods?.find(
+        (candidate) => candidate.methodId === "evaluate_pairwise_distance",
+      );
+      for (const inputPort of method?.inputPorts ?? []) {
+        inputPort.required = false;
+      }
+    }),
     handlers: {
       evaluate_pairwise_distance: ({ inputs }) => {
-        const request = inputs.find((input) => input.portId === "request");
-        const sessionBundle = inputs.find(
+        const nextRequest = inputs.find((input) => input.portId === "request");
+        const nextSessionBundle = inputs.find(
           (input) => input.portId === "session_bundle",
         );
-
-        if (!request || !sessionBundle) {
-          throw new Error(
-            "evaluate_pairwise_distance requires request and session_bundle inputs.",
-          );
+        if (nextRequest) {
+          pendingRequest = nextRequest;
+        }
+        if (nextSessionBundle) {
+          pendingSessionBundle = nextSessionBundle;
+        }
+        if (!pendingRequest || !pendingSessionBundle) {
+          return {
+            outputs: [],
+            backlogRemaining: 0,
+            yielded: false,
+          };
         }
 
-        const primary = request.payload.parties.primary.positionCiphertexts;
-        const secondary = request.payload.parties.secondary.positionCiphertexts;
+        const request = pendingRequest;
+        const sessionBundle = pendingSessionBundle;
+        pendingRequest = null;
+        pendingSessionBundle = null;
+        const requestPayload = payloadOf(request);
+        const sessionBundlePayload = payloadOf(sessionBundle);
+        const primary = requestPayload.parties.primary.positionCiphertexts;
+        const secondary = requestPayload.parties.secondary.positionCiphertexts;
         const dx = Number(primary.x?.[0] ?? 0) - Number(secondary.x?.[0] ?? 0);
         const dy = Number(primary.y?.[0] ?? 0) - Number(secondary.y?.[0] ?? 0);
         const dz = Number(primary.z?.[0] ?? 0) - Number(secondary.z?.[0] ?? 0);
@@ -1124,17 +1192,17 @@ test("HE conjunction assessor example runs through the reference harness end-to-
               "AlignedRecordBatch.fbs",
               "RECS",
               {
-                assessmentId: request.payload.assessmentId,
+                assessmentId: requestPayload.assessmentId,
                 operatorIds: [
-                  request.payload.parties.primary.operatorId,
-                  request.payload.parties.secondary.operatorId,
+                  requestPayload.parties.primary.operatorId,
+                  requestPayload.parties.secondary.operatorId,
                 ],
-                thresholdKm: request.payload.thresholdKm,
+                thresholdKm: requestPayload.thresholdKm,
                 distanceSqKm,
                 alert:
                   distanceSqKm <
-                  request.payload.thresholdKm * request.payload.thresholdKm,
-                sourcePackage: sessionBundle.payload.sourcePackage,
+                  requestPayload.thresholdKm * requestPayload.thresholdKm,
+                sourcePackage: sessionBundlePayload.sourcePackage,
               },
               {
                 traceId: request.traceId,
@@ -1153,12 +1221,12 @@ test("HE conjunction assessor example runs through the reference harness end-to-
             "AlignedRecordBatch.fbs",
             "RECS",
             {
-              assessmentId: input.payload.assessmentId,
-              status: input.payload.alert ? "alert" : "safe",
-              thresholdKm: input.payload.thresholdKm,
-              distanceSqKm: input.payload.distanceSqKm,
-              operatorIds: input.payload.operatorIds,
-              sourcePackage: input.payload.sourcePackage,
+              assessmentId: payloadOf(input).assessmentId,
+              status: payloadOf(input).alert ? "alert" : "safe",
+              thresholdKm: payloadOf(input).thresholdKm,
+              distanceSqKm: payloadOf(input).distanceSqKm,
+              operatorIds: payloadOf(input).operatorIds,
+              sourcePackage: payloadOf(input).sourcePackage,
             },
             {
               traceId: input.traceId,
@@ -1173,14 +1241,12 @@ test("HE conjunction assessor example runs through the reference harness end-to-
   });
 
   const sinkOutputs = [];
-  const runtime = new FlowRuntime({
-    registry,
+  const runtime = await startReferenceHost(flow, pluginPackages, {
     maxInvocationsPerDrain: 32,
     onSinkOutput(event) {
       sinkOutputs.push(event);
     },
   });
-  runtime.loadProgram(flow);
 
   runtime.enqueueTriggerFrames("assessment-request", [
     frame("request", "AlignedRecordBatch.fbs", "RECS", {
@@ -1211,7 +1277,7 @@ test("HE conjunction assessor example runs through the reference harness end-to-
   assert.equal(runtimeResult.idle, true);
   assert.equal(sinkOutputs.length, 1);
   assert.equal(sinkOutputs[0].nodeId, "emit-decision");
-  assert.deepEqual(sinkOutputs[0].frame.payload, {
+  assert.deepEqual(payloadOf(sinkOutputs[0].frame), {
     assessmentId: "assess-42",
     status: "alert",
     thresholdKm: 6,
@@ -1293,24 +1359,25 @@ test("ISS proximity OEM example runs through the temporary reference harness end
     ),
   };
 
-  const registry = new MethodRegistry();
   const ommStore = new Map();
   const writtenOems = [];
   const publishedOems = [];
+  const pluginPackages = [];
 
-  registry.registerPlugin({
-    manifest: manifests.flatsql,
+  pluginPackages.push({
+    manifest: hostManifest(manifests.flatsql),
     handlers: {
       upsert_records: ({ inputs }) => {
         const outputs = [];
         for (const input of inputs) {
-          ommStore.set(input.payload.norad, input.payload);
+          const record = payloadOf(input);
+          ommStore.set(record.norad, record);
           outputs.push(
             frame(
               "stored",
               "StoredRecordRef.fbs",
               "STRF",
-              { norad: input.payload.norad },
+              { norad: record.norad },
               {
                 sequence: input.sequence,
                 traceId: input.traceId,
@@ -1321,7 +1388,7 @@ test("ISS proximity OEM example runs through the temporary reference harness end
         return { outputs, backlogRemaining: 0, yielded: false };
       },
       query_objects_within_radius: ({ inputs }) => {
-        const query = inputs.at(-1)?.payload;
+        const query = payloadOf(inputs.at(-1));
         const matches = Array.from(ommStore.values())
           .filter((record) => record.distanceKm <= query.radiusKm)
           .map((record) => record.norad);
@@ -1351,8 +1418,8 @@ test("ISS proximity OEM example runs through the temporary reference harness end
     },
   });
 
-  registry.registerPlugin({
-    manifest: manifests.queryAnchor,
+  pluginPackages.push({
+    manifest: hostManifest(manifests.queryAnchor),
     handlers: {
       build_radius_query: ({ inputs }) => ({
         outputs: inputs.map((input) =>
@@ -1361,7 +1428,7 @@ test("ISS proximity OEM example runs through the temporary reference harness end
             radiusKm: 50,
             samplesPerOrbit: 90,
             orbitCount: 1,
-            at: input.payload.at,
+            at: payloadOf(input).at,
           }),
         ),
         backlogRemaining: 0,
@@ -1370,16 +1437,16 @@ test("ISS proximity OEM example runs through the temporary reference harness end
     },
   });
 
-  registry.registerPlugin({
-    manifest: manifests.sgp4,
+  pluginPackages.push({
+    manifest: hostManifest(manifests.sgp4),
     handlers: {
       propagate_one_orbit_samples: ({ inputs }) => ({
         outputs: inputs.flatMap((input) =>
-          input.payload.matches.map((norad) =>
+          payloadOf(input).matches.map((norad) =>
             frame("samples", "SampledOrbit.fbs", "SAMP", {
               objectNorad: norad,
-              sampleCount: input.payload.sampleCount,
-              orbitCount: input.payload.orbitCount,
+              sampleCount: payloadOf(input).sampleCount,
+              orbitCount: payloadOf(input).orbitCount,
             }),
           ),
         ),
@@ -1389,16 +1456,16 @@ test("ISS proximity OEM example runs through the temporary reference harness end
     },
   });
 
-  registry.registerPlugin({
-    manifest: manifests.oemGenerator,
+  pluginPackages.push({
+    manifest: hostManifest(manifests.oemGenerator),
     handlers: {
       generate_oem: ({ inputs }) => ({
         outputs: inputs.map((input) =>
           frame("oems", "OEM.fbs", "OEM ", {
-            objectNorad: input.payload.objectNorad,
-            sampleCount: input.payload.sampleCount,
-            orbitCount: input.payload.orbitCount,
-            name: `OEM-${input.payload.objectNorad}`,
+            objectNorad: payloadOf(input).objectNorad,
+            sampleCount: payloadOf(input).sampleCount,
+            orbitCount: payloadOf(input).orbitCount,
+            name: `OEM-${payloadOf(input).objectNorad}`,
           }),
         ),
         backlogRemaining: 0,
@@ -1407,31 +1474,29 @@ test("ISS proximity OEM example runs through the temporary reference harness end
     },
   });
 
-  registry.registerPlugin({
-    manifest: manifests.oemFileWriter,
+  pluginPackages.push({
+    manifest: hostManifest(manifests.oemFileWriter),
     handlers: {
       write_oem_files: ({ inputs }) => {
-        writtenOems.push(...inputs.map((input) => input.payload.objectNorad));
+        writtenOems.push(...inputs.map((input) => payloadOf(input).objectNorad));
         return { outputs: [], backlogRemaining: 0, yielded: false };
       },
     },
   });
 
-  registry.registerPlugin({
-    manifest: manifests.oemPublisher,
+  pluginPackages.push({
+    manifest: hostManifest(manifests.oemPublisher),
     handlers: {
       publish_oem: ({ inputs }) => {
-        publishedOems.push(...inputs.map((input) => input.payload.objectNorad));
+        publishedOems.push(...inputs.map((input) => payloadOf(input).objectNorad));
         return { outputs: [], backlogRemaining: 0, yielded: false };
       },
     },
   });
 
-  const runtime = new FlowRuntime({
-    registry,
+  const runtime = await startReferenceHost(flow, pluginPackages, {
     maxInvocationsPerDrain: 64,
   });
-  runtime.loadProgram(flow);
 
   runtime.enqueueTriggerFrames("omm-subscription", [
     frame(

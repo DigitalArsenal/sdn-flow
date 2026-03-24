@@ -6,8 +6,49 @@ import path from "node:path";
 
 import { compileNodeRedFlowsToSdnArtifact } from "../src/editor/compileArtifact.js";
 import { resolveSdnFlowEditorCompileArtifactScriptPath } from "../src/editor/compileArtifactSubprocess.js";
+import { SDK_EMCEPTION_SESSION_KIND } from "../src/compiler/sdkEmceptionSession.js";
+
+function createFakeSdkEmceptionSession({
+  files = new Map(),
+  steps = null,
+  wasmBytes = new Uint8Array([0x00, 0x61, 0x73, 0x6d]),
+} = {}) {
+  return {
+    sessionKind: SDK_EMCEPTION_SESSION_KIND,
+    async init() {
+      steps?.push(["init"]);
+    },
+    async writeFile(filePath, content) {
+      steps?.push(["write", filePath]);
+      files.set(filePath, content);
+    },
+    async run(command) {
+      steps?.push(["run", command]);
+      const outputMatch = String(command).match(/ -o (\S+\.wasm)$/);
+      assert.ok(outputMatch);
+      files.set(outputMatch[1], wasmBytes);
+      return {
+        returncode: 0,
+        stdout: "",
+        stderr: "",
+      };
+    },
+    async readFile(filePath, readOptions = {}) {
+      steps?.push(["read", filePath]);
+      const value = files.get(filePath);
+      return readOptions.encoding === "utf8" ? value : value;
+    },
+    async removeDirectory(directoryPath) {
+      steps?.push(["remove", directoryPath]);
+    },
+    async dispose() {
+      steps?.push(["dispose"]);
+    },
+  };
+}
 
 test("compileNodeRedFlowsToSdnArtifact lowers editor flows into a serialized compiled artifact payload", async () => {
+  const files = new Map();
   const result = await compileNodeRedFlowsToSdnArtifact(
     [
       {
@@ -33,37 +74,20 @@ test("compileNodeRedFlowsToSdnArtifact lowers editor flows into a serialized com
       },
     ],
     {
-      compiler: {
-        async compile({ program }) {
-          assert.equal(program.programId, "flow-1");
-          assert.equal(program.triggers.length, 1);
-          assert.equal(program.nodes.length, 1);
-          return {
-            artifactId: "flow-1:deadbeef",
-            programId: "flow-1",
-            runtimeModel: "compiled-cpp-wasm",
-            sourceGeneratorModel: "native-cpp-wasm",
-            wasm: new Uint8Array([0x00, 0x61, 0x73, 0x6d]),
-            loaderModule: "export default {};",
-            manifestBuffer: new Uint8Array([0x46, 0x4c, 0x4f, 0x57]),
-            manifestHash: "manifest-123",
-            graphHash: "graph-123",
-            runtimeExports: {
-              mallocSymbol: "malloc",
-              freeSymbol: "free",
-            },
-            entrypoint: "main",
-            requiredCapabilities: [],
-            pluginVersions: [],
-            schemaBindings: [],
-            abiVersion: 1,
-            compilePlan: {
-              source: "// generated source",
-              outputName: "flow-runtime",
-            },
-          };
-        },
+      outputName: "flow-runtime",
+      sourceGenerator: async ({ program }) => {
+        assert.equal(program.programId, "flow-1");
+        assert.equal(program.triggers.length, 1);
+        assert.equal(program.nodes.length, 1);
+        return {
+          source: "// generated source",
+          generatorModel: "native-cpp-wasm",
+        };
       },
+      emceptionSessionFactory: async () =>
+        createFakeSdkEmceptionSession({
+          files,
+        }),
     },
   );
 
@@ -98,6 +122,7 @@ test("compile artifact subprocess resolves helper scripts from the real project 
 });
 
 test("compileNodeRedFlowsToSdnArtifact derives delegated HTTP service bindings from http-in triggers", async () => {
+  const files = new Map();
   const result = await compileNodeRedFlowsToSdnArtifact(
     [
       {
@@ -135,34 +160,14 @@ test("compileNodeRedFlowsToSdnArtifact derives delegated HTTP service bindings f
           },
         ],
       },
-      compiler: {
-        async compile() {
-          return {
-            artifactId: "flow-1:deadbeef",
-            programId: "flow-1",
-            runtimeModel: "compiled-cpp-wasm",
-            sourceGeneratorModel: "native-cpp-wasm",
-            wasm: new Uint8Array([0x00, 0x61, 0x73, 0x6d]),
-            loaderModule: "export default {};",
-            manifestBuffer: new Uint8Array([0x46, 0x4c, 0x4f, 0x57]),
-            manifestHash: "manifest-123",
-            graphHash: "graph-123",
-            runtimeExports: {
-              mallocSymbol: "malloc",
-              freeSymbol: "free",
-            },
-            entrypoint: "main",
-            requiredCapabilities: [],
-            pluginVersions: [],
-            schemaBindings: [],
-            abiVersion: 1,
-            compilePlan: {
-              source: "// generated source",
-              outputName: "flow-runtime",
-            },
-          };
-        },
-      },
+      sourceGenerator: async () => ({
+        source: "// generated source",
+        generatorModel: "native-cpp-wasm",
+      }),
+      emceptionSessionFactory: async () =>
+        createFakeSdkEmceptionSession({
+          files,
+        }),
     },
   );
 
@@ -212,44 +217,19 @@ test("compileNodeRedFlowsToSdnArtifact uses the emception session interface inst
       },
     ],
     {
-      sourceGenerator: async () => ({
-        source: "int main() { return 0; }\n",
-        generatorModel: "test-generator",
-      }),
-      emceptionSessionFactory: async ({ workingDirectory }) => {
-        steps.push(["session", workingDirectory]);
-        return {
-          async init() {
-            steps.push(["init"]);
+          sourceGenerator: async () => ({
+            source: "int main() { return 0; }\n",
+            generatorModel: "test-generator",
+          }),
+          emceptionSessionFactory: async ({ workingDirectory }) => {
+            steps.push(["session", workingDirectory]);
+            return createFakeSdkEmceptionSession({
+              files,
+              steps,
+            });
           },
-          async writeFile(filePath, content) {
-            steps.push(["write", filePath]);
-            files.set(filePath, content);
-          },
-          async run(command) {
-            steps.push(["run", command]);
-            const outputMatch = String(command).match(/ -o (\S+\.wasm)$/);
-            assert.ok(outputMatch);
-            const wasmPath = outputMatch[1];
-            files.set(wasmPath, new Uint8Array([0x00, 0x61, 0x73, 0x6d]));
-            return {
-              returncode: 0,
-              stdout: "",
-              stderr: "",
-            };
-          },
-          async readFile(filePath, readOptions = {}) {
-            steps.push(["read", filePath]);
-            const value = files.get(filePath);
-            return readOptions.encoding === "utf8" ? value : value;
-          },
-          async removeDirectory(directoryPath) {
-            steps.push(["remove", directoryPath]);
-          },
-        };
-      },
-    },
-  );
+        },
+      );
 
   assert.equal(result.sourceGeneratorModel, "test-generator");
   assert.equal(result.serializedArtifact.programId, "flow-1");
@@ -263,4 +243,62 @@ test("compileNodeRedFlowsToSdnArtifact uses the emception session interface inst
   );
   assert.equal(steps.some((entry) => entry[0] === "remove"), true);
   assert.equal(result.deploymentPlan.scheduleBindings.length, 0);
+});
+
+test("compileNodeRedFlowsToSdnArtifact rejects direct compiler overrides for artifact builds", async () => {
+  await assert.rejects(
+    compileNodeRedFlowsToSdnArtifact(
+      [
+        {
+          id: "flow-1",
+          type: "tab",
+          label: "Flow 1",
+        },
+      ],
+      {
+        compiler: {
+          async compile() {
+            throw new Error("should not be called");
+          },
+        },
+      },
+    ),
+    /Artifact compilation no longer accepts compiler overrides/,
+  );
+});
+
+test("compileNodeRedFlowsToSdnArtifact rejects unmarked alternate emception session factories", async () => {
+  await assert.rejects(
+    compileNodeRedFlowsToSdnArtifact(
+      [
+        {
+          id: "flow-1",
+          type: "tab",
+          label: "Flow 1",
+        },
+      ],
+      {
+        sourceGenerator: async () => ({
+          source: "int main() { return 0; }\n",
+          generatorModel: "test-generator",
+        }),
+        emceptionSessionFactory: async () => ({
+          async init() {},
+          async writeFile() {},
+          async readFile() {
+            return new Uint8Array([0x00, 0x61, 0x73, 0x6d]);
+          },
+          async run() {
+            return {
+              returncode: 0,
+              stdout: "",
+              stderr: "",
+            };
+          },
+          async removeDirectory() {},
+        }),
+      },
+    ),
+    /only supports SDK emception sessions/,
+  );
 });

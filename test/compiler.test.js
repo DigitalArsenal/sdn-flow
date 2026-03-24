@@ -6,6 +6,7 @@ import {
   EmceptionCompilerAdapter,
   SignedArtifactCatalog,
 } from "../src/index.js";
+import { SDK_EMCEPTION_SESSION_KIND } from "../src/compiler/sdkEmceptionSession.js";
 
 async function readJson(relativePath) {
   const url = new URL(relativePath, import.meta.url);
@@ -41,6 +42,7 @@ test("emception compiler adapter prepares a single-source C++ compile plan with 
 
   const files = new Map();
   const emception = {
+    sessionKind: SDK_EMCEPTION_SESSION_KIND,
     async init() {},
     async writeFile(path, data) {
       files.set(path, data);
@@ -251,4 +253,52 @@ test("emception compiler adapter prepares a single-source C++ compile plan with 
   assert.equal(artifact.requiredCapabilities.includes("pubsub"), true);
   assert.ok(artifact.wasm instanceof Uint8Array);
   assert.equal(artifact.loaderModule.includes("export default"), true);
+});
+
+test("emception compiler adapter rejects artifact compilation without an SDK emception session", async () => {
+  const flow = await readJson("../examples/flows/iss-proximity-oem/flow.json");
+  const compiler = new EmceptionCompilerAdapter({
+    artifactCatalog: {
+      async resolveProgramDependencies() {
+        return [];
+      },
+    },
+    manifestBuilder: async () => new Uint8Array([0x46, 0x4c, 0x4f, 0x57, 0x31]),
+  });
+
+  await assert.rejects(
+    compiler.compile({ program: flow }),
+    /Artifact compilation requires an SDK emception session/,
+  );
+});
+
+test("emception compiler adapter rejects unmarked alternate emception sessions for artifact compilation", async () => {
+  const flow = await readJson("../examples/flows/iss-proximity-oem/flow.json");
+  const compiler = new EmceptionCompilerAdapter({
+    artifactCatalog: {
+      async resolveProgramDependencies() {
+        return [];
+      },
+    },
+    emception: {
+      async init() {},
+      async writeFile() {},
+      async readFile() {
+        return new Uint8Array([0x00, 0x61, 0x73, 0x6d]);
+      },
+      async run() {
+        return {
+          returncode: 0,
+          stdout: "",
+          stderr: "",
+        };
+      },
+    },
+    manifestBuilder: async () => new Uint8Array([0x46, 0x4c, 0x4f, 0x57, 0x31]),
+  });
+
+  await assert.rejects(
+    compiler.compile({ program: flow }),
+    /only supports SDK emception sessions/,
+  );
 });

@@ -114,6 +114,41 @@ test("createSdnFlowEditorFetchHandler serves editor routes and strips upstream b
             },
           },
           compiledRuntimeLoaded: true,
+          runtimeClassification: {
+            summary: {
+              totalNodes: 3,
+              families: 3,
+              handlers: 2,
+              byClassification: {
+                compiled: 1,
+                delegated: 1,
+                "js-shim": 1,
+              },
+            },
+            nodeFamilies: [
+              {
+                family: "inject",
+                classification: "compiled",
+                count: 1,
+                nodeIds: ["inject-1"],
+                triggerIds: ["trigger-inject-1"],
+                pluginIds: [],
+                methodIds: [],
+                handlerKeys: [],
+              },
+            ],
+            handlers: [
+              {
+                key: "com.digitalarsenal.editor.function:invoke",
+                classification: "js-shim",
+                count: 1,
+                nodeIds: ["function-1"],
+                families: ["function"],
+                pluginIds: ["com.digitalarsenal.editor.function"],
+                methodIds: ["invoke"],
+              },
+            ],
+          },
           activeBuild: {
             compileId: "compile-123",
             createdAt: "2026-03-18T12:00:00.000Z",
@@ -416,6 +451,18 @@ test("createSdnFlowEditorFetchHandler serves editor routes and strips upstream b
     const runtimeStatus = await runtimeStatusResponse.json();
     assert.equal(runtimeStatus.compiledRuntimeLoaded, true);
     assert.equal(runtimeStatus.activeBuild.outputName, "flow-runtime");
+    assert.deepEqual(runtimeStatus.runtimeClassification.summary, {
+      totalNodes: 3,
+      families: 3,
+      handlers: 2,
+      byClassification: {
+        compiled: 1,
+        delegated: 1,
+        "js-shim": 1,
+      },
+    });
+    assert.equal(runtimeStatus.runtimeClassification.nodeFamilies[0].classification, "compiled");
+    assert.equal(runtimeStatus.runtimeClassification.handlers[0].key, "com.digitalarsenal.editor.function:invoke");
 
     const updateRuntimeSettingsResponse = await handler(
       new Request("http://example.test/editor/api/runtime-settings", {

@@ -221,6 +221,17 @@ export async function compileNodeRedFlows(flows = [], options = {}) {
     };
   }
 
+  if (options.compiler) {
+    throw new Error(
+      "Artifact compilation no longer accepts compiler overrides. Use preview mode for compile plans, or emceptionSessionFactory/sourceGenerator for artifact tests.",
+    );
+  }
+  if (options.emception) {
+    throw new Error(
+      "Artifact compilation no longer accepts direct emception overrides. Use emceptionSessionFactory to provide an SDK-compatible session.",
+    );
+  }
+
   let emception = null;
   let ownsSession = false;
   let cleanupWorkingDirectory = null;
@@ -232,34 +243,26 @@ export async function compileNodeRedFlows(flows = [], options = {}) {
     runtimeTargets: options.runtimeTargets ?? null,
     version: options.version ?? null,
   };
-  let compiler = options.compiler ?? null;
-
-  if (!compiler) {
-    const workingDirectory = resolveEmceptionWorkingDirectory(
-      options.workingDirectory,
-    );
-    metadata.workingDirectory = workingDirectory;
-    cleanupWorkingDirectory = workingDirectory;
-    if (options.emception) {
-      emception = options.emception;
-    } else {
-      const sessionFactory =
-        options.emceptionSessionFactory ?? createSdkEmceptionSession;
-      emception = await maybeCall(
-        sessionFactory({
-          workingDirectory,
-        }),
-      );
-      ownsSession = true;
-    }
-    compiler = createEditorCompiler({
-      emception,
-      outputName,
-      artifactCatalog: options.artifactCatalog,
-      manifestBuilder: options.manifestBuilder,
-      sourceGenerator: options.sourceGenerator,
-    });
-  }
+  const workingDirectory = resolveEmceptionWorkingDirectory(
+    options.workingDirectory,
+  );
+  metadata.workingDirectory = workingDirectory;
+  cleanupWorkingDirectory = workingDirectory;
+  const sessionFactory =
+    options.emceptionSessionFactory ?? createSdkEmceptionSession;
+  emception = await maybeCall(
+    sessionFactory({
+      workingDirectory,
+    }),
+  );
+  ownsSession = true;
+  const compiler = createEditorCompiler({
+    emception,
+    outputName,
+    artifactCatalog: options.artifactCatalog,
+    manifestBuilder: options.manifestBuilder,
+    sourceGenerator: options.sourceGenerator,
+  });
 
   try {
     const artifact = await compiler.compile({
