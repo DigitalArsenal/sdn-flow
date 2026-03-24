@@ -142,19 +142,6 @@ export function resolveNodeCommand(options = {}) {
 export function resolveSdnFlowEditorCompileScriptPath(mode, options = {}) {
   const normalizedMode = normalizeCompileMode(mode);
   const scriptName = SCRIPT_NAME_BY_MODE[normalizedMode];
-  const candidateRoots = [
-    normalizeString(options.cwd, null),
-    normalizeString(options.projectRoot, null),
-    PACKAGE_ROOT,
-  ]
-    .filter(Boolean)
-    .map((entry) => path.resolve(entry));
-  for (const root of candidateRoots) {
-    const candidatePath = path.join(root, "scripts", scriptName);
-    if (existsSync(candidatePath)) {
-      return candidatePath;
-    }
-  }
   return path.join(PACKAGE_ROOT, "scripts", scriptName);
 }
 
@@ -223,12 +210,22 @@ export async function compileNodeRedFlows(flows = [], options = {}) {
 
   if (options.compiler) {
     throw new Error(
-      "Artifact compilation no longer accepts compiler overrides. Use preview mode for compile plans, or emceptionSessionFactory/sourceGenerator for artifact tests.",
+      "Artifact compilation no longer accepts compiler overrides. Use preview mode for compile plans instead.",
     );
   }
   if (options.emception) {
     throw new Error(
-      "Artifact compilation no longer accepts direct emception overrides. Use emceptionSessionFactory to provide an SDK-compatible session.",
+      "Artifact compilation no longer accepts direct emception overrides.",
+    );
+  }
+  if (options.emceptionSessionFactory) {
+    throw new Error(
+      "Artifact compilation no longer accepts custom emceptionSessionFactory overrides.",
+    );
+  }
+  if (options.sourceGenerator) {
+    throw new Error(
+      "Artifact compilation no longer accepts sourceGenerator overrides. Use preview mode for custom compile plans instead.",
     );
   }
 
@@ -248,10 +245,8 @@ export async function compileNodeRedFlows(flows = [], options = {}) {
   );
   metadata.workingDirectory = workingDirectory;
   cleanupWorkingDirectory = workingDirectory;
-  const sessionFactory =
-    options.emceptionSessionFactory ?? createSdkEmceptionSession;
   emception = await maybeCall(
-    sessionFactory({
+    createSdkEmceptionSession({
       workingDirectory,
     }),
   );
@@ -261,7 +256,6 @@ export async function compileNodeRedFlows(flows = [], options = {}) {
     outputName,
     artifactCatalog: options.artifactCatalog,
     manifestBuilder: options.manifestBuilder,
-    sourceGenerator: options.sourceGenerator,
   });
 
   try {

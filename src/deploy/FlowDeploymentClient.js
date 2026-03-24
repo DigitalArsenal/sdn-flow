@@ -73,17 +73,31 @@ function serializeTarget(target = null) {
   };
 }
 
+function resolveRequestedRuntimeTargets(artifact, targetDescriptor = null) {
+  const embeddedTargets = normalizeStringArray(
+    listCompiledArtifactRuntimeTargets(artifact),
+  );
+  if (embeddedTargets.length > 0) {
+    return {
+      runtimeTargets: embeddedTargets,
+      source: "embedded",
+    };
+  }
+  const metadataTargets = normalizeStringArray(targetDescriptor?.runtimeTargets);
+  return {
+    runtimeTargets: metadataTargets,
+    source: metadataTargets.length > 0 ? "metadata" : null,
+  };
+}
+
 function assertDeploymentTargetCompatibility({
   artifact,
   targetDescriptor,
 } = {}) {
-  const requestedTargets = normalizeStringArray(
-    listCompiledArtifactRuntimeTargets(artifact),
-  );
-  const runtimeTargets =
-    requestedTargets.length > 0
-      ? requestedTargets
-      : normalizeStringArray(targetDescriptor?.runtimeTargets);
+  const {
+    runtimeTargets,
+    source,
+  } = resolveRequestedRuntimeTargets(artifact, targetDescriptor);
   const hasHostProfile = Boolean(
     normalizeString(targetDescriptor?.hostKind, null) ??
       normalizeString(targetDescriptor?.adapter, null) ??
@@ -104,7 +118,7 @@ function assertDeploymentTargetCompatibility({
   }
 
   throw new Error(
-    `Deployment target cannot satisfy embedded runtimeTargets ${runtimeTargets.join(", ")} for host profile ${[
+    `Deployment target cannot satisfy ${source === "embedded" ? "embedded" : "deployment metadata"} runtimeTargets ${runtimeTargets.join(", ")} for host profile ${[
       evaluation.hostKind,
       evaluation.adapter,
       evaluation.engine,
@@ -137,6 +151,10 @@ export class FlowDeploymentClient {
     const requestedDeploymentPlan = deploymentPlan ?? artifact?.deploymentPlan ?? null;
     const normalizedArtifact = await normalizeCompiledArtifact(artifact);
     const targetDescriptor = serializeTarget(target);
+    targetDescriptor.runtimeTargets = resolveRequestedRuntimeTargets(
+      normalizedArtifact,
+      targetDescriptor,
+    ).runtimeTargets;
     assertDeploymentTargetCompatibility({
       artifact: normalizedArtifact,
       targetDescriptor,

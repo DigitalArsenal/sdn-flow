@@ -229,6 +229,17 @@ test("FlowDeploymentClient.prepareDeployment reads embedded PMAN runtimeTargets 
     RuntimeTarget.WASMEDGE,
   ]);
 
+  const deployment = await client.prepareDeployment({
+    artifact,
+    target: {
+      kind: "local",
+      runtimeId: "runtime-metadata-stamp",
+    },
+  });
+  assert.deepEqual(deployment.payload.target.runtimeTargets, [
+    RuntimeTarget.WASMEDGE,
+  ]);
+
   await assert.rejects(
     client.prepareDeployment({
       artifact,
@@ -254,6 +265,66 @@ test("FlowDeploymentClient.prepareDeployment reads embedded PMAN runtimeTargets 
         engine: HostedRuntimeEngine.WASI,
       },
     }),
+  );
+});
+
+test("createInstalledFlowHost enforces configured runtimeTargets when explicit artifacts omit embedded targets", async () => {
+  const runtimeHost = {
+    enqueueTriggerFrame() {},
+    async drain() {
+      return {
+        idle: true,
+        iterations: 0,
+        executions: [],
+      };
+    },
+    resetRuntimeState() {},
+    async destroyDependencies() {},
+    resolvedByRole: {
+      readyNodeSymbol() {
+        return 0xffffffff;
+      },
+    },
+  };
+  const program = createProgram({
+    triggers: [
+      {
+        triggerId: "manual",
+        kind: "manual",
+      },
+    ],
+    runtimeTargets: [RuntimeTarget.WASMEDGE],
+  });
+  const artifactWithoutTargets = await normalizeCompiledArtifact({
+    programId: program.programId,
+    wasm: new Uint8Array([0x00, 0x61, 0x73, 0x6d]),
+    manifestBuffer: new Uint8Array([0x46, 0x4c, 0x4f, 0x57]),
+  });
+
+  const incompatibleHost = createInstalledFlowHost({
+    program,
+    discover: false,
+    artifact: artifactWithoutTargets,
+    runtimeHost,
+    runtimeTargets: [RuntimeTarget.WASMEDGE],
+    hostPlan: {
+      hostId: "browser-host",
+      hostKind: "orbpro",
+      adapter: HostedRuntimeAdapter.SDN_JS,
+      engine: HostedRuntimeEngine.BROWSER,
+      runtimes: [
+        {
+          runtimeId: "browser-runtime",
+          kind: "flow",
+          programId: program.programId,
+        },
+      ],
+    },
+  });
+
+  await assert.rejects(
+    incompatibleHost.start(),
+    /configured runtimeTargets wasmedge/i,
   );
 });
 
@@ -504,4 +575,60 @@ test("startStandaloneFlowRuntime defaults wasmedge artifacts onto the host-inter
     }),
     /Standalone runtime cannot satisfy embedded runtimeTargets wasmedge/i,
   );
+});
+
+test("startStandaloneFlowRuntime enforces deployment runtime-target metadata when embedded targets are unavailable", async () => {
+  const client = new FlowDeploymentClient();
+  const artifactWithoutTargets = await normalizeCompiledArtifact({
+    programId: "com.digitalarsenal.tests.standalone-metadata-only",
+    wasm: new Uint8Array([0x00, 0x61, 0x73, 0x6d]),
+    manifestBuffer: new Uint8Array([0x46, 0x4c, 0x4f, 0x57]),
+  });
+  const deployment = await client.prepareDeployment({
+    artifact: artifactWithoutTargets,
+    target: {
+      kind: "local",
+      runtimeId: "metadata-runtime",
+      runtimeTargets: [RuntimeTarget.WASI],
+    },
+  });
+
+  await assert.rejects(
+    startStandaloneFlowRuntime({
+      input: deployment,
+      target: {
+        hostKind: "orbpro",
+        adapter: HostedRuntimeAdapter.SDN_JS,
+        engine: HostedRuntimeEngine.BROWSER,
+      },
+      bindRuntimeHost: async () => ({
+        resetRuntimeState() {},
+        async destroyDependencies() {},
+      }),
+    }),
+    /Standalone runtime cannot satisfy runtime metadata runtimeTargets wasi/i,
+  );
+
+  const runtime = await startStandaloneFlowRuntime({
+    input: deployment,
+    bindRuntimeHost: async () => ({
+      runEntrypoint() {
+        return {
+          entrypoint: "_start",
+          argc: 0,
+          argv: [],
+          exitCode: 0,
+        };
+      },
+      resetRuntimeState() {},
+      async destroyDependencies() {},
+    }),
+  });
+
+  assert.equal(runtime.target.hostKind, "standalone-wasi");
+  assert.deepEqual(runtime.target.runtimeTargets, [RuntimeTarget.WASI]);
+  assert.deepEqual(runtime.runtimeTargets, [RuntimeTarget.WASI]);
+  assert.equal(runtime.runtimeCompatibility?.ok, true);
+
+  await runtime.close();
 });

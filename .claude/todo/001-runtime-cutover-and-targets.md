@@ -37,11 +37,11 @@ This directory is the only active TODO set for `sdn-flow`.
    - [ ] Preserve regular FlatBuffer and aligned-binary negotiation end to end.
 
 4. Target enforcement
-   - [ ] Read `runtimeTargets` from the embedded `PMAN` manifest in the compiled
+   - [x] Read `runtimeTargets` from the embedded `PMAN` manifest in the compiled
          artifact, not only from source JSON.
-   - [ ] Reject deployments whose host profile cannot satisfy the selected
+   - [x] Reject deployments whose host profile cannot satisfy the selected
          target.
-   - [ ] Treat `runtimeTargets: ["wasi"]` as strict no-wrapper standalone WASI.
+   - [x] Treat `runtimeTargets: ["wasi"]` as strict no-wrapper standalone WASI.
    - [ ] Treat `runtimeTargets: ["wasmedge"]` as the standard server-side
          deployment target for guest networking.
 

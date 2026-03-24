@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { convertNodeRedFlowsToSdnProgram } from "../src/editor/compilePreview.js";
 import { resolveSdnFlowEditorCompilePreviewScriptPath } from "../src/editor/compilePreviewSubprocess.js";
@@ -176,9 +177,12 @@ test("convertNodeRedFlowsToSdnProgram lowers http in nodes into HTTP triggers", 
   ]);
 });
 
-test("compile preview subprocess resolves helper scripts from the real project root when provided", async () => {
+test("compile preview subprocess always resolves the packaged helper script", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "sdn-flow-editor-preview-script-"));
   const scriptPath = path.join(tempDir, "scripts", "editor-compile-preview.mjs");
+  const packagedScriptPath = fileURLToPath(
+    new URL("../scripts/editor-compile-preview.mjs", import.meta.url),
+  );
 
   try {
     await fs.mkdir(path.dirname(scriptPath), { recursive: true });
@@ -188,7 +192,7 @@ test("compile preview subprocess resolves helper scripts from the real project r
       resolveSdnFlowEditorCompilePreviewScriptPath({
         cwd: tempDir,
       }),
-      scriptPath,
+      packagedScriptPath,
     );
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });

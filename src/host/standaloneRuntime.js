@@ -65,6 +65,7 @@ function normalizeStandaloneTargetDescriptor(
       engine: fallback.engine,
       transport: null,
       kind: "local",
+      runtimeTargets: normalizeStringArray(runtimeTargets),
     };
   }
   return {
@@ -83,18 +84,56 @@ function normalizeStandaloneTargetDescriptor(
       ) ?? fallback.engine,
     transport: normalizeString(target?.transport, null) ?? null,
     kind: normalizeString(target?.kind, "local"),
+    runtimeTargets: normalizeStringArray(
+      target?.runtimeTargets ?? target?.runtime_targets ?? runtimeTargets,
+    ),
+  };
+}
+
+function resolveStandaloneRuntimeTargets({
+  artifact,
+  target = null,
+  deploymentTarget = null,
+} = {}) {
+  const embeddedTargets = normalizeStringArray(
+    listCompiledArtifactRuntimeTargets(artifact),
+  );
+  if (embeddedTargets.length > 0) {
+    return {
+      runtimeTargets: embeddedTargets,
+      source: "embedded",
+    };
+  }
+  const targetTargets = normalizeStringArray(
+    target?.runtimeTargets ?? target?.runtime_targets,
+  );
+  if (targetTargets.length > 0) {
+    return {
+      runtimeTargets: targetTargets,
+      source: "metadata",
+    };
+  }
+  const deploymentTargets = normalizeStringArray(
+    deploymentTarget?.runtimeTargets ?? deploymentTarget?.runtime_targets,
+  );
+  return {
+    runtimeTargets: deploymentTargets,
+    source: deploymentTargets.length > 0 ? "metadata" : null,
   };
 }
 
 function evaluateStandaloneRuntimeCompatibility({
   artifact,
   target = null,
+  deploymentTarget = null,
 } = {}) {
-  const runtimeTargets = normalizeStringArray(
-    listCompiledArtifactRuntimeTargets(artifact),
-  );
-  const normalizedTarget = normalizeStandaloneTargetDescriptor(
+  const { runtimeTargets, source } = resolveStandaloneRuntimeTargets({
+    artifact,
     target,
+    deploymentTarget,
+  });
+  const normalizedTarget = normalizeStandaloneTargetDescriptor(
+    target ?? deploymentTarget,
     runtimeTargets,
   );
   const hasHostProfile = Boolean(
@@ -118,7 +157,7 @@ function evaluateStandaloneRuntimeCompatibility({
   });
   if (!compatibility.ok) {
     throw new Error(
-      `Standalone runtime cannot satisfy embedded runtimeTargets ${runtimeTargets.join(", ")} for host profile ${[
+      `Standalone runtime cannot satisfy ${source === "embedded" ? "embedded" : "runtime metadata"} runtimeTargets ${runtimeTargets.join(", ")} for host profile ${[
         compatibility.hostKind,
         compatibility.adapter,
         compatibility.engine,
@@ -181,6 +220,7 @@ export async function startStandaloneFlowRuntime(options = {}) {
   const compatibilityState = evaluateStandaloneRuntimeCompatibility({
     artifact: resolvedInput.artifact,
     target: options.target ?? resolvedInput.deploymentTarget,
+    deploymentTarget: resolvedInput.deploymentTarget,
   });
 
   const instantiateArtifact =

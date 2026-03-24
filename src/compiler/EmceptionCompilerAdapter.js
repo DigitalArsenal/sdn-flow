@@ -6,7 +6,7 @@ import { bytesToHex, toUint8Array } from "../utils/encoding.js";
 import { sha256Bytes } from "../utils/crypto.js";
 import { generateCppFlowRuntimeSource } from "./CppFlowSourceGenerator.js";
 import { SignedArtifactCatalog } from "./SignedArtifactCatalog.js";
-import { SDK_EMCEPTION_SESSION_KIND } from "./sdkEmceptionSession.js";
+import { isSdkEmceptionSession } from "./sdkEmceptionSession.js";
 
 const DEFAULT_FLAGS = Object.freeze([
   "-std=c++20",
@@ -90,16 +90,6 @@ function normalizeWorkingDirectory(value) {
   return normalized.startsWith("/")
     ? path.posix.normalize(normalized)
     : path.posix.join(DEFAULT_WORKING_DIRECTORY, normalized);
-}
-
-function isSdkEmceptionSession(session) {
-  return (
-    Boolean(session) &&
-    session.sessionKind === SDK_EMCEPTION_SESSION_KIND &&
-    typeof session.writeFile === "function" &&
-    typeof session.readFile === "function" &&
-    typeof session.run === "function"
-  );
 }
 
 function createPortableLoaderModuleSource() {

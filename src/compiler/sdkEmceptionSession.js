@@ -4,6 +4,7 @@ import { createSharedEmceptionSession } from "space-data-module-sdk/compiler/emc
 
 export const SDK_EMCEPTION_SESSION_KIND =
   "space-data-module-sdk.compiler.emception-session";
+const SDK_EMCEPTION_SESSION_TOKEN = Symbol("sdn-flow.sdk-emception-session");
 
 function normalizePosixPath(filePath) {
   return path.posix.normalize(String(filePath ?? "").replaceAll("\\", "/"));
@@ -16,6 +17,7 @@ export async function createSdkEmceptionSession(options = {}) {
   const sharedSession = createSharedEmceptionSession();
 
   return {
+    [SDK_EMCEPTION_SESSION_TOKEN]: true,
     sessionKind: SDK_EMCEPTION_SESSION_KIND,
     workDir,
     async init() {
@@ -42,6 +44,17 @@ export async function createSdkEmceptionSession(options = {}) {
     },
     async dispose() {},
   };
+}
+
+export function isSdkEmceptionSession(session) {
+  return (
+    Boolean(session) &&
+    session[SDK_EMCEPTION_SESSION_TOKEN] === true &&
+    session.sessionKind === SDK_EMCEPTION_SESSION_KIND &&
+    typeof session.writeFile === "function" &&
+    typeof session.readFile === "function" &&
+    typeof session.run === "function"
+  );
 }
 
 export default createSdkEmceptionSession;

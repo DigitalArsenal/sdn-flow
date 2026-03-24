@@ -995,9 +995,14 @@ function assertInstalledArtifactRuntimeTargets({
   artifact,
   program,
   hostPlan = null,
+  runtimeTargets = null,
 } = {}) {
-  const runtimeTargets = listCompiledArtifactRuntimeTargets(artifact);
-  if (runtimeTargets.length === 0 || !hostPlan) {
+  const embeddedRuntimeTargets = listCompiledArtifactRuntimeTargets(artifact);
+  const effectiveRuntimeTargets =
+    embeddedRuntimeTargets.length > 0
+      ? embeddedRuntimeTargets
+      : toSortedUniqueStrings(runtimeTargets);
+  if (effectiveRuntimeTargets.length === 0 || !hostPlan) {
     return;
   }
   for (const profile of resolveHostProfiles(hostPlan, program?.programId ?? null)) {
@@ -1005,11 +1010,11 @@ function assertInstalledArtifactRuntimeTargets({
       hostKind: profile.hostKind,
       adapter: profile.adapter,
       engine: profile.engine,
-      runtimeTargets,
+      runtimeTargets: effectiveRuntimeTargets,
     });
     if (!compatibility.ok) {
       throw new Error(
-        `Installed flow host cannot start runtime "${profile.runtimeId}" on host "${profile.hostId}" because embedded runtimeTargets ${runtimeTargets.join(", ")} require ${compatibility.unsupportedTargets.join(", ")} support.`,
+        `Installed flow host cannot start runtime "${profile.runtimeId}" on host "${profile.hostId}" because ${embeddedRuntimeTargets.length > 0 ? "embedded" : "configured"} runtimeTargets ${effectiveRuntimeTargets.join(", ")} require ${compatibility.unsupportedTargets.join(", ")} support.`,
       );
     }
   }
@@ -2056,6 +2061,7 @@ export function createInstalledFlowHost(options = {}) {
         artifact: nextArtifact,
         program: nextProgram,
         hostPlan: refreshOptions.hostPlan ?? options.hostPlan ?? null,
+        runtimeTargets: runtimeArtifactOptions.runtimeTargets,
       });
 
       nextRuntimeState = {
