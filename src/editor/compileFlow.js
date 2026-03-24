@@ -86,7 +86,6 @@ function createEditorCompiler(options = {}) {
           version: metadata?.version ?? null,
         })),
     outputName: options.outputName ?? SDN_FLOW_EDITOR_ARTIFACT_OUTPUT_NAME,
-    sourceGenerator: options.sourceGenerator,
   });
 }
 
@@ -189,14 +188,21 @@ export async function compileNodeRedFlows(flows = [], options = {}) {
   });
 
   if (mode === SdnFlowEditorCompileMode.PREVIEW) {
-    const compiler =
-      options.compiler ??
-      createEditorCompiler({
-        outputName,
-        artifactCatalog: options.artifactCatalog,
-        manifestBuilder: options.manifestBuilder,
-        sourceGenerator: options.sourceGenerator,
-      });
+    if (options.compiler) {
+      throw new Error(
+        "Preview compilation no longer accepts compiler overrides. Use the canonical compile plan returned by preview mode instead.",
+      );
+    }
+    if (options.sourceGenerator) {
+      throw new Error(
+        "Preview compilation no longer accepts sourceGenerator overrides. Use the canonical compile plan returned by preview mode instead.",
+      );
+    }
+    const compiler = createEditorCompiler({
+      outputName,
+      artifactCatalog: options.artifactCatalog,
+      manifestBuilder: options.manifestBuilder,
+    });
     const compilePlan = await compiler.prepareCompile({
       program,
       metadata: {
@@ -215,6 +221,7 @@ export async function compileNodeRedFlows(flows = [], options = {}) {
       outputName: compilePlan.outputName,
       runtimeModel: compilePlan.runtimeModel,
       sourceGeneratorModel: compilePlan.sourceGeneratorModel,
+      compilePlan,
       program,
       deploymentPlan,
       warnings,
@@ -286,6 +293,7 @@ export async function compileNodeRedFlows(flows = [], options = {}) {
         artifact.compilePlan?.outputName ?? outputName,
       runtimeModel: artifact.runtimeModel,
       sourceGeneratorModel: artifact.sourceGeneratorModel,
+      compilePlan: artifact.compilePlan ?? null,
       program,
       deploymentPlan,
       warnings,
