@@ -1,0 +1,63 @@
+{
+  "pluginId": "com.digitalarsenal.flow.entity-profile-importer",
+  "name": "Entity Profile Importer",
+  "version": "1.0.0",
+  "pluginFamily": "ingest",
+  "capabilities": ["pubsub"],
+  "externalInterfaces": [
+    {
+      "interfaceId": "entity-profile-feed",
+      "kind": "pubsub",
+      "direction": "input",
+      "capability": "pubsub",
+      "resource": "/sdn/entity/profile",
+      "description": "Receives entity profile messages from the SDN fabric."
+    }
+  ],
+  "methods": [
+    {
+      "methodId": "import_entity_profile",
+      "displayName": "Import Entity Profile",
+      "inputPorts": [
+        {
+          "portId": "profile",
+          "acceptedTypeSets": [
+            {
+              "setId": "entity-profile",
+              "allowedTypes": [
+                {
+                  "schemaName": "EntityProfile.fbs",
+                  "fileIdentifier": "ENPF"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 16,
+          "required": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portId": "profile",
+          "acceptedTypeSets": [
+            {
+              "setId": "entity-profile",
+              "allowedTypes": [
+                {
+                  "schemaName": "EntityProfile.fbs",
+                  "fileIdentifier": "ENPF"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 16,
+          "required": true
+        }
+      ],
+      "maxBatch": 32,
+      "drainPolicy": "drain-until-yield"
+    }
+  ]
+}

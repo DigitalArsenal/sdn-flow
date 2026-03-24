@@ -1,0 +1,70 @@
+{
+  "pluginId": "com.digitalarsenal.flow.pin-retention",
+  "name": "Pin Retention",
+  "version": "1.0.0",
+  "pluginFamily": "transform",
+  "capabilities": ["ipfs"],
+  "externalInterfaces": [
+    {
+      "interfaceId": "ipfs-pin-retention",
+      "kind": "host-service",
+      "direction": "bidirectional",
+      "capability": "ipfs",
+      "resource": "ipfs://pin-retention",
+      "description": "Pins newly pulled content and evicts older content according to the active policy."
+    },
+    {
+      "interfaceId": "pin-policy-config",
+      "kind": "local-runtime",
+      "direction": "input",
+      "resource": "policy://retain-latest-1",
+      "description": "Local policy input that keeps only the most recent pulled content pinned."
+    }
+  ],
+  "methods": [
+    {
+      "methodId": "apply_pin_retention_policy",
+      "displayName": "Apply Pin Retention Policy",
+      "inputPorts": [
+        {
+          "portId": "records",
+          "acceptedTypeSets": [
+            {
+              "setId": "aligned-record-batch",
+              "allowedTypes": [
+                {
+                  "schemaName": "AlignedRecordBatch.fbs",
+                  "fileIdentifier": "RECS"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 64,
+          "required": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portId": "retained-records",
+          "acceptedTypeSets": [
+            {
+              "setId": "aligned-record-batch",
+              "allowedTypes": [
+                {
+                  "schemaName": "AlignedRecordBatch.fbs",
+                  "fileIdentifier": "RECS"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 64,
+          "required": true
+        }
+      ],
+      "maxBatch": 64,
+      "drainPolicy": "drain-until-yield"
+    }
+  ]
+}

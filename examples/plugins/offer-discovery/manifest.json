@@ -1,0 +1,54 @@
+{
+  "pluginId": "com.digitalarsenal.flow.offer-discovery",
+  "name": "Offer Discovery",
+  "version": "1.0.0",
+  "pluginFamily": "analysis",
+  "capabilities": [],
+  "externalInterfaces": [],
+  "methods": [
+    {
+      "methodId": "discover_offered_messages",
+      "displayName": "Discover Offered Messages",
+      "inputPorts": [
+        {
+          "portId": "profile",
+          "acceptedTypeSets": [
+            {
+              "setId": "entity-profile",
+              "allowedTypes": [
+                {
+                  "schemaName": "EntityProfile.fbs",
+                  "fileIdentifier": "ENPF"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 16,
+          "required": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portId": "offers",
+          "acceptedTypeSets": [
+            {
+              "setId": "offered-message",
+              "allowedTypes": [
+                {
+                  "schemaName": "OfferedMessage.fbs",
+                  "fileIdentifier": "OFMS"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 64,
+          "required": true
+        }
+      ],
+      "maxBatch": 32,
+      "drainPolicy": "drain-until-yield"
+    }
+  ]
+}

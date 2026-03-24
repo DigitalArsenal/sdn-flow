@@ -1,0 +1,81 @@
+{
+  "pluginId": "com.digitalarsenal.flow.pnm-watch",
+  "name": "PNM Watch",
+  "version": "1.0.0",
+  "pluginFamily": "analysis",
+  "capabilities": ["protocol_handle"],
+  "externalInterfaces": [
+    {
+      "interfaceId": "pnm-notification-feed",
+      "kind": "protocol",
+      "direction": "input",
+      "capability": "protocol_handle",
+      "resource": "/sds/pnm/1.0.0",
+      "protocolId": "/sds/pnm/1.0.0",
+      "description": "Receives SDS publish notifications for watched messages."
+    }
+  ],
+  "methods": [
+    {
+      "methodId": "watch_notifications",
+      "displayName": "Watch Notifications",
+      "inputPorts": [
+        {
+          "portId": "offers",
+          "acceptedTypeSets": [
+            {
+              "setId": "offered-message",
+              "allowedTypes": [
+                {
+                  "schemaName": "OfferedMessage.fbs",
+                  "fileIdentifier": "OFMS"
+                }
+              ]
+            }
+          ],
+          "minStreams": 0,
+          "maxStreams": 64,
+          "required": false
+        },
+        {
+          "portId": "notification",
+          "acceptedTypeSets": [
+            {
+              "setId": "publish-notification",
+              "allowedTypes": [
+                {
+                  "schemaName": "PublishNotification.fbs",
+                  "fileIdentifier": "PNOT"
+                }
+              ]
+            }
+          ],
+          "minStreams": 0,
+          "maxStreams": 64,
+          "required": false
+        }
+      ],
+      "outputPorts": [
+        {
+          "portId": "pull-requests",
+          "acceptedTypeSets": [
+            {
+              "setId": "ipfs-pull-request",
+              "allowedTypes": [
+                {
+                  "schemaName": "IpfsPullRequest.fbs",
+                  "fileIdentifier": "IPRQ"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 64,
+          "required": true
+        }
+      ],
+      "maxBatch": 64,
+      "drainPolicy": "drain-until-yield"
+    }
+  ]
+}

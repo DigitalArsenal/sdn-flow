@@ -1,0 +1,63 @@
+{
+  "pluginId": "com.digitalarsenal.flow.ipfs-puller",
+  "name": "IPFS Puller",
+  "version": "1.0.0",
+  "pluginFamily": "ingest",
+  "capabilities": ["ipfs"],
+  "externalInterfaces": [
+    {
+      "interfaceId": "ipfs-content-pull",
+      "kind": "host-service",
+      "direction": "output",
+      "capability": "ipfs",
+      "resource": "ipfs://content-pull",
+      "description": "Pulls aligned records from IPFS by content address."
+    }
+  ],
+  "methods": [
+    {
+      "methodId": "pull_records",
+      "displayName": "Pull Records",
+      "inputPorts": [
+        {
+          "portId": "request",
+          "acceptedTypeSets": [
+            {
+              "setId": "ipfs-pull-request",
+              "allowedTypes": [
+                {
+                  "schemaName": "IpfsPullRequest.fbs",
+                  "fileIdentifier": "IPRQ"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 64,
+          "required": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portId": "records",
+          "acceptedTypeSets": [
+            {
+              "setId": "aligned-record-batch",
+              "allowedTypes": [
+                {
+                  "schemaName": "AlignedRecordBatch.fbs",
+                  "fileIdentifier": "RECS"
+                }
+              ]
+            }
+          ],
+          "minStreams": 1,
+          "maxStreams": 64,
+          "required": true
+        }
+      ],
+      "maxBatch": 64,
+      "drainPolicy": "drain-until-yield"
+    }
+  ]
+}

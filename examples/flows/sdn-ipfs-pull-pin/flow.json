@@ -1,0 +1,273 @@
+{
+  "programId": "com.digitalarsenal.examples.sdn-ipfs-pull-pin",
+  "name": "SDN IPFS Pull And Pin",
+  "version": "0.1.0",
+  "description": "Imports entity profile messages, discovers offered SDS messages, watches SDS publish notifications, pulls aligned records from IPFS, and applies a pin retention policy before archiving retained records.",
+  "runtimeTargets": [
+    "wasmedge"
+  ],
+  "nodes": [
+    {
+      "nodeId": "import-profile",
+      "pluginId": "com.digitalarsenal.flow.entity-profile-importer",
+      "methodId": "import_entity_profile",
+      "kind": "ingest",
+      "drainPolicy": "drain-until-yield"
+    },
+    {
+      "nodeId": "discover-offers",
+      "pluginId": "com.digitalarsenal.flow.offer-discovery",
+      "methodId": "discover_offered_messages",
+      "kind": "analyzer",
+      "drainPolicy": "drain-until-yield"
+    },
+    {
+      "nodeId": "watch-pnm",
+      "pluginId": "com.digitalarsenal.flow.pnm-watch",
+      "methodId": "watch_notifications",
+      "kind": "analyzer",
+      "drainPolicy": "drain-until-yield"
+    },
+    {
+      "nodeId": "pull-ipfs",
+      "pluginId": "com.digitalarsenal.flow.ipfs-puller",
+      "methodId": "pull_records",
+      "kind": "ingest",
+      "drainPolicy": "drain-until-yield"
+    },
+    {
+      "nodeId": "apply-retention",
+      "pluginId": "com.digitalarsenal.flow.pin-retention",
+      "methodId": "apply_pin_retention_policy",
+      "kind": "transform",
+      "drainPolicy": "drain-until-yield"
+    },
+    {
+      "nodeId": "archive-retained",
+      "pluginId": "com.digitalarsenal.flow.filesystem-writer",
+      "methodId": "write_records",
+      "kind": "sink",
+      "drainPolicy": "drain-until-yield"
+    }
+  ],
+  "edges": [
+    {
+      "edgeId": "profile-to-discovery",
+      "fromNodeId": "import-profile",
+      "fromPortId": "profile",
+      "toNodeId": "discover-offers",
+      "toPortId": "profile",
+      "backpressurePolicy": "queue",
+      "queueDepth": 64
+    },
+    {
+      "edgeId": "discovery-to-watch",
+      "fromNodeId": "discover-offers",
+      "fromPortId": "offers",
+      "toNodeId": "watch-pnm",
+      "toPortId": "offers",
+      "backpressurePolicy": "queue",
+      "queueDepth": 128
+    },
+    {
+      "edgeId": "watch-to-ipfs",
+      "fromNodeId": "watch-pnm",
+      "fromPortId": "pull-requests",
+      "toNodeId": "pull-ipfs",
+      "toPortId": "request",
+      "backpressurePolicy": "queue",
+      "queueDepth": 128
+    },
+    {
+      "edgeId": "ipfs-to-retention",
+      "fromNodeId": "pull-ipfs",
+      "fromPortId": "records",
+      "toNodeId": "apply-retention",
+      "toPortId": "records",
+      "backpressurePolicy": "queue",
+      "queueDepth": 128
+    },
+    {
+      "edgeId": "retention-to-archive",
+      "fromNodeId": "apply-retention",
+      "fromPortId": "retained-records",
+      "toNodeId": "archive-retained",
+      "toPortId": "records",
+      "backpressurePolicy": "queue",
+      "queueDepth": 128
+    }
+  ],
+  "triggers": [
+    {
+      "triggerId": "entity-profile-feed",
+      "kind": "pubsub-subscription",
+      "source": "/sdn/entity/profile",
+      "acceptedTypes": [
+        {
+          "schemaName": "EntityProfile.fbs",
+          "fileIdentifier": "ENPF"
+        }
+      ],
+      "description": "Imports entity profile messages that advertise offered SDS content."
+    },
+    {
+      "triggerId": "pnm-notification-feed",
+      "kind": "protocol-request",
+      "source": "/sds/pnm/1.0.0",
+      "protocolId": "/sds/pnm/1.0.0",
+      "acceptedTypes": [
+        {
+          "schemaName": "PublishNotification.fbs",
+          "fileIdentifier": "PNOT"
+        }
+      ],
+      "description": "Receives SDS publish notifications for watched content offers."
+    }
+  ],
+  "triggerBindings": [
+    {
+      "triggerId": "entity-profile-feed",
+      "targetNodeId": "import-profile",
+      "targetPortId": "profile",
+      "backpressurePolicy": "queue",
+      "queueDepth": 64
+    },
+    {
+      "triggerId": "pnm-notification-feed",
+      "targetNodeId": "watch-pnm",
+      "targetPortId": "notification",
+      "backpressurePolicy": "queue",
+      "queueDepth": 128
+    }
+  ],
+  "requiredPlugins": [
+    "com.digitalarsenal.flow.entity-profile-importer",
+    "com.digitalarsenal.flow.offer-discovery",
+    "com.digitalarsenal.flow.pnm-watch",
+    "com.digitalarsenal.flow.ipfs-puller",
+    "com.digitalarsenal.flow.pin-retention",
+    "com.digitalarsenal.flow.filesystem-writer"
+  ],
+  "externalInterfaces": [
+    {
+      "interfaceId": "entity-profile-feed",
+      "kind": "pubsub",
+      "direction": "input",
+      "capability": "pubsub",
+      "resource": "/sdn/entity/profile",
+      "description": "Receives entity profile messages that advertise offered SDS content."
+    },
+    {
+      "interfaceId": "pnm-notification-feed",
+      "kind": "protocol",
+      "direction": "input",
+      "capability": "protocol_handle",
+      "resource": "/sds/pnm/1.0.0",
+      "protocolId": "/sds/pnm/1.0.0",
+      "description": "Receives SDS publish notifications for watched content offers."
+    },
+    {
+      "interfaceId": "ipfs-content-pull",
+      "kind": "host-service",
+      "direction": "output",
+      "capability": "ipfs",
+      "resource": "ipfs://content-pull",
+      "description": "Pulls aligned records from IPFS by content address."
+    },
+    {
+      "interfaceId": "ipfs-pin-retention",
+      "kind": "host-service",
+      "direction": "bidirectional",
+      "capability": "ipfs",
+      "resource": "ipfs://pin-retention",
+      "description": "Pins new content and evicts older content according to the active retention policy."
+    },
+    {
+      "interfaceId": "pin-policy-config",
+      "kind": "local-runtime",
+      "direction": "input",
+      "resource": "policy://retain-latest-1",
+      "description": "User-configured policy that keeps only the most recent pulled content pinned."
+    },
+    {
+      "interfaceId": "filesystem-output",
+      "kind": "filesystem",
+      "direction": "output",
+      "capability": "filesystem",
+      "resource": "file:///var/lib/sdn/ipfs-pull-cache",
+      "description": "Archives retained aligned records after the retention policy is applied."
+    }
+  ],
+  "artifactDependencies": [
+    {
+      "dependencyId": "entity-profile-importer-signed",
+      "pluginId": "com.digitalarsenal.flow.entity-profile-importer",
+      "version": "1.0.0",
+      "artifactUri": "signed://plugins/entity-profile-importer/1.0.0",
+      "sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+      "signature": "ed25519:demo-entity-profile-importer-signature",
+      "signerPublicKey": "ed25519:demo-signer-1",
+      "requiredCapabilities": [
+        "pubsub"
+      ]
+    },
+    {
+      "dependencyId": "offer-discovery-signed",
+      "pluginId": "com.digitalarsenal.flow.offer-discovery",
+      "version": "1.0.0",
+      "artifactUri": "signed://plugins/offer-discovery/1.0.0",
+      "sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+      "signature": "ed25519:demo-offer-discovery-signature",
+      "signerPublicKey": "ed25519:demo-signer-1",
+      "requiredCapabilities": []
+    },
+    {
+      "dependencyId": "pnm-watch-signed",
+      "pluginId": "com.digitalarsenal.flow.pnm-watch",
+      "version": "1.0.0",
+      "artifactUri": "signed://plugins/pnm-watch/1.0.0",
+      "sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+      "signature": "ed25519:demo-pnm-watch-signature",
+      "signerPublicKey": "ed25519:demo-signer-1",
+      "requiredCapabilities": [
+        "protocol_handle"
+      ]
+    },
+    {
+      "dependencyId": "ipfs-puller-signed",
+      "pluginId": "com.digitalarsenal.flow.ipfs-puller",
+      "version": "1.0.0",
+      "artifactUri": "signed://plugins/ipfs-puller/1.0.0",
+      "sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+      "signature": "ed25519:demo-ipfs-puller-signature",
+      "signerPublicKey": "ed25519:demo-signer-1",
+      "requiredCapabilities": [
+        "ipfs"
+      ]
+    },
+    {
+      "dependencyId": "pin-retention-signed",
+      "pluginId": "com.digitalarsenal.flow.pin-retention",
+      "version": "1.0.0",
+      "artifactUri": "signed://plugins/pin-retention/1.0.0",
+      "sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+      "signature": "ed25519:demo-pin-retention-signature",
+      "signerPublicKey": "ed25519:demo-signer-1",
+      "requiredCapabilities": [
+        "ipfs"
+      ]
+    },
+    {
+      "dependencyId": "filesystem-writer-signed",
+      "pluginId": "com.digitalarsenal.flow.filesystem-writer",
+      "version": "1.0.0",
+      "artifactUri": "signed://plugins/filesystem-writer/1.0.0",
+      "sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+      "signature": "ed25519:demo-filesystem-writer-signature",
+      "signerPublicKey": "ed25519:demo-signer-1",
+      "requiredCapabilities": [
+        "filesystem"
+      ]
+    }
+  ]
+}

@@ -38,10 +38,10 @@ Status: active
    - [x] Serve authenticated HTTPS REST queries over that store.
 
 2. SDN/IPFS pull and pin workflow
-   - [ ] Import an entity profile message.
-   - [ ] Discover offered messages.
-   - [ ] Watch for publish notifications.
-   - [ ] Pull the data and apply user-configured pin/retention policy.
+   - [x] Import an entity profile message.
+   - [x] Discover offered messages.
+   - [x] Watch for publish notifications.
+   - [x] Pull the data and apply user-configured pin/retention policy.
 
 3. Scheduled space weather publisher
    - [x] Poll an upstream site on a schedule.

@@ -663,6 +663,341 @@ test("Space weather publisher example runs through the reference harness end-to-
   });
 });
 
+test("SDN IPFS pull and pin example summarizes profile import, PNM watch, and retention requirements", async () => {
+  const flow = await readJson("../examples/flows/sdn-ipfs-pull-pin/flow.json");
+  const manifests = await Promise.all([
+    readJson("../examples/plugins/entity-profile-importer/manifest.json"),
+    readJson("../examples/plugins/offer-discovery/manifest.json"),
+    readJson("../examples/plugins/pnm-watch/manifest.json"),
+    readJson("../examples/plugins/ipfs-puller/manifest.json"),
+    readJson("../examples/plugins/pin-retention/manifest.json"),
+    readJson("../examples/plugins/filesystem-writer/manifest.json"),
+  ]);
+
+  const session = new FlowDesignerSession({ program: flow });
+  const summary = session.inspectRequirements({ manifests });
+
+  assert.deepEqual(summary.capabilities, [
+    "filesystem",
+    "ipfs",
+    "protocol_handle",
+    "pubsub",
+  ]);
+  assert.equal(summary.artifactDependencies.length, 6);
+  assert.equal(
+    summary.externalInterfaces.some(
+      (item) =>
+        item.kind === "pubsub" &&
+        item.direction === "input" &&
+        item.resource === "/sdn/entity/profile",
+    ),
+    true,
+  );
+  assert.equal(
+    summary.externalInterfaces.some(
+      (item) =>
+        item.kind === "protocol" &&
+        item.direction === "input" &&
+        item.protocolId === "/sds/pnm/1.0.0",
+    ),
+    true,
+  );
+  assert.equal(
+    summary.externalInterfaces.some(
+      (item) =>
+        item.kind === "host-service" &&
+        item.resource === "ipfs://content-pull",
+    ),
+    true,
+  );
+  assert.equal(
+    summary.externalInterfaces.some(
+      (item) =>
+        item.kind === "host-service" &&
+        item.resource === "ipfs://pin-retention",
+    ),
+    true,
+  );
+  assert.equal(
+    summary.externalInterfaces.some(
+      (item) =>
+        item.kind === "filesystem" &&
+        item.resource === "file:///var/lib/sdn/ipfs-pull-cache",
+    ),
+    true,
+  );
+});
+
+test("SDN IPFS pull and pin example runs through the reference harness end-to-end", async () => {
+  const flow = await readJson("../examples/flows/sdn-ipfs-pull-pin/flow.json");
+  const manifests = {
+    importer: await readJson(
+      "../examples/plugins/entity-profile-importer/manifest.json",
+    ),
+    discovery: await readJson(
+      "../examples/plugins/offer-discovery/manifest.json",
+    ),
+    watcher: await readJson("../examples/plugins/pnm-watch/manifest.json"),
+    puller: await readJson("../examples/plugins/ipfs-puller/manifest.json"),
+    retention: await readJson("../examples/plugins/pin-retention/manifest.json"),
+    writer: await readJson("../examples/plugins/filesystem-writer/manifest.json"),
+  };
+
+  const registry = new MethodRegistry();
+  const watchedOffers = new Map();
+  const pinnedCids = [];
+  const unpinnedCids = [];
+  const archivedRecords = [];
+  const ipfsStore = new Map([
+    [
+      "bafyspaceweather0001",
+      {
+        product: "planetary-k-index",
+        kp: 4.67,
+        publishedAt: "2026-03-24T00:05:00Z",
+      },
+    ],
+    [
+      "bafyspaceweather0002",
+      {
+        product: "planetary-k-index",
+        kp: 6.33,
+        publishedAt: "2026-03-24T00:10:00Z",
+      },
+    ],
+  ]);
+
+  registry.registerPlugin({
+    manifest: manifests.importer,
+    handlers: {
+      import_entity_profile: ({ inputs }) => ({
+        outputs: inputs.map((input) =>
+          frame("profile", "EntityProfile.fbs", "ENPF", input.payload, {
+            sequence: input.sequence,
+            traceId: input.traceId,
+          }),
+        ),
+        backlogRemaining: 0,
+        yielded: false,
+      }),
+    },
+  });
+
+  registry.registerPlugin({
+    manifest: manifests.discovery,
+    handlers: {
+      discover_offered_messages: ({ inputs }) => ({
+        outputs: inputs.flatMap((input) =>
+          (input.payload.offeredMessages ?? []).map((offer, index) =>
+            frame("offers", "OfferedMessage.fbs", "OFMS", offer, {
+              sequence: index + 1,
+              traceId: `${input.traceId}:offer:${offer.messageId}`,
+            }),
+          ),
+        ),
+        backlogRemaining: 0,
+        yielded: false,
+      }),
+    },
+  });
+
+  registry.registerPlugin({
+    manifest: manifests.watcher,
+    handlers: {
+      watch_notifications: ({ inputs }) => {
+        const outputs = [];
+        for (const input of inputs) {
+          if (input.portId === "offers") {
+            watchedOffers.set(input.payload.messageId, input.payload);
+            continue;
+          }
+          if (input.portId !== "notification") {
+            continue;
+          }
+          const watchedOffer = watchedOffers.get(input.payload.messageId);
+          if (!watchedOffer) {
+            continue;
+          }
+          outputs.push(
+            frame(
+              "pull-requests",
+              "IpfsPullRequest.fbs",
+              "IPRQ",
+              {
+                cid: input.payload.cid,
+                messageId: input.payload.messageId,
+                interfaceId: watchedOffer.interfaceId,
+                retentionPolicy: watchedOffer.retentionPolicy,
+              },
+              {
+                sequence: input.sequence,
+                traceId: input.traceId,
+              },
+            ),
+          );
+        }
+        return { outputs, backlogRemaining: 0, yielded: false };
+      },
+    },
+  });
+
+  registry.registerPlugin({
+    manifest: manifests.puller,
+    handlers: {
+      pull_records: ({ inputs }) => ({
+        outputs: inputs.map((input) =>
+          frame(
+            "records",
+            "AlignedRecordBatch.fbs",
+            "RECS",
+            {
+              cid: input.payload.cid,
+              messageId: input.payload.messageId,
+              interfaceId: input.payload.interfaceId,
+              retentionPolicy: input.payload.retentionPolicy,
+              source: "ipfs",
+              body: ipfsStore.get(input.payload.cid),
+            },
+            {
+              sequence: input.sequence,
+              traceId: input.traceId,
+            },
+          ),
+        ),
+        backlogRemaining: 0,
+        yielded: false,
+      }),
+    },
+  });
+
+  registry.registerPlugin({
+    manifest: manifests.retention,
+    handlers: {
+      apply_pin_retention_policy: ({ inputs }) => {
+        const outputs = [];
+        for (const input of inputs) {
+          const cid = input.payload.cid;
+          const maxPinned = Number(
+            input.payload.retentionPolicy?.maxPinned ??
+              input.payload.retentionPolicy?.retainLatest ??
+              1,
+          );
+          const existingIndex = pinnedCids.indexOf(cid);
+          if (existingIndex >= 0) {
+            pinnedCids.splice(existingIndex, 1);
+          }
+          pinnedCids.push(cid);
+          while (pinnedCids.length > maxPinned) {
+            const evictedCid = pinnedCids.shift();
+            if (evictedCid) {
+              unpinnedCids.push(evictedCid);
+            }
+          }
+          outputs.push(
+            frame(
+              "retained-records",
+              "AlignedRecordBatch.fbs",
+              "RECS",
+              {
+                ...input.payload,
+                retained: true,
+              },
+              {
+                sequence: input.sequence,
+                traceId: input.traceId,
+              },
+            ),
+          );
+        }
+        return { outputs, backlogRemaining: 0, yielded: false };
+      },
+    },
+  });
+
+  registry.registerPlugin({
+    manifest: manifests.writer,
+    handlers: {
+      write_records: ({ inputs }) => {
+        archivedRecords.push(...inputs.map((input) => input.payload));
+        return { outputs: [], backlogRemaining: 0, yielded: false };
+      },
+    },
+  });
+
+  const runtime = new FlowRuntime({
+    registry,
+    maxInvocationsPerDrain: 64,
+  });
+  runtime.loadProgram(flow);
+
+  runtime.enqueueTriggerFrames("entity-profile-feed", [
+    frame("profile", "EntityProfile.fbs", "ENPF", {
+      entityId: "space-weather-node",
+      offeredMessages: [
+        {
+          messageId: "space-weather.k-index",
+          interfaceId: "ipfs-space-weather-feed",
+          retentionPolicy: {
+            maxPinned: 1,
+          },
+        },
+      ],
+    }),
+  ]);
+  const importResult = await runtime.drain();
+
+  assert.equal(importResult.idle, true);
+  assert.deepEqual(Array.from(watchedOffers.keys()), ["space-weather.k-index"]);
+
+  runtime.enqueueTriggerFrames("pnm-notification-feed", [
+    frame("notification", "PublishNotification.fbs", "PNOT", {
+      messageId: "space-weather.k-index",
+      cid: "bafyspaceweather0001",
+      publishedAt: "2026-03-24T00:05:00Z",
+    }),
+  ]);
+  const firstPullResult = await runtime.drain();
+
+  assert.equal(firstPullResult.idle, true);
+  assert.deepEqual(pinnedCids, ["bafyspaceweather0001"]);
+  assert.deepEqual(unpinnedCids, []);
+  assert.deepEqual(archivedRecords.map((record) => record.cid), [
+    "bafyspaceweather0001",
+  ]);
+
+  runtime.enqueueTriggerFrames("pnm-notification-feed", [
+    frame("notification", "PublishNotification.fbs", "PNOT", {
+      messageId: "space-weather.k-index",
+      cid: "bafyspaceweather0002",
+      publishedAt: "2026-03-24T00:10:00Z",
+    }),
+  ]);
+  const secondPullResult = await runtime.drain();
+
+  assert.equal(secondPullResult.idle, true);
+  assert.deepEqual(pinnedCids, ["bafyspaceweather0002"]);
+  assert.deepEqual(unpinnedCids, ["bafyspaceweather0001"]);
+  assert.deepEqual(
+    archivedRecords.map((record) => ({
+      cid: record.cid,
+      kp: record.body?.kp,
+      retained: record.retained,
+    })),
+    [
+      {
+        cid: "bafyspaceweather0001",
+        kp: 4.67,
+        retained: true,
+      },
+      {
+        cid: "bafyspaceweather0002",
+        kp: 6.33,
+        retained: true,
+      },
+    ],
+  );
+});
+
 test("ISS proximity OEM example summarizes external requirements for the visual editor", async () => {
   const flow = await readJson("../examples/flows/iss-proximity-oem/flow.json");
   const manifests = await Promise.all([
