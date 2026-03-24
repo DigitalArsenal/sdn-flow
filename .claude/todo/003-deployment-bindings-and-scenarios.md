@@ -62,6 +62,6 @@ Status: active
 ## Release Criteria
 
 - [x] `npm test`
-- [ ] `node --test test/compiler.test.js test/compiled-artifact.test.js test/host.test.js`
-- [ ] `node --test test/editor-compile-artifact.test.js test/runtime.test.js`
+- [x] `node --test test/compiler.test.js test/compiled-artifact.test.js test/host.test.js`
+- [x] `node --test test/editor-compile-artifact.test.js test/runtime.test.js`
 - [x] scenario-specific regression flows checked into the repo
