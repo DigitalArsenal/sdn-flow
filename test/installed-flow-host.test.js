@@ -1274,10 +1274,10 @@ test("installed flow service exposes delegated deployment bindings explicitly", 
       publicationBindings: [
         {
           publicationId: "publication-catalog",
+          interfaceId: "catalog-publication",
           bindingMode: "delegated",
           sourceKind: "node-output",
           sourceNodeId: "publisher",
-          topic: "catalog/items",
         },
       ],
       authPolicies: [
@@ -1342,12 +1342,14 @@ test("installed flow service captures local publication bindings from trigger in
       publicationBindings: [
         {
           publicationId: "publication-ingress",
+          interfaceId: "manual-ingress-publication",
           bindingMode: "local",
           sourceKind: "trigger-ingress",
           sourceTriggerId: "manual",
         },
         {
           publicationId: "publication-local",
+          interfaceId: "publisher-output-publication",
           bindingMode: "local",
           sourceKind: "node-output",
           sourceNodeId: "publisher",
@@ -1431,7 +1433,7 @@ test("installed flow service captures local publication bindings from trigger in
   assert.equal(service.getPublicationEventCount(), 0);
 });
 
-test("installed flow service dispatches local input bindings by bindingId", async () => {
+test("installed flow service dispatches local input bindings by interfaceId", async () => {
   const seenInputs = [];
   const inputBoundService = createInstalledFlowService({
     program: {
@@ -1456,6 +1458,7 @@ test("installed flow service dispatches local input bindings by bindingId", asyn
       inputBindings: [
         {
           bindingId: "catalog-feed",
+          interfaceId: "catalog-input",
           targetPluginId: "com.digitalarsenal.examples.memory.input-consumer",
           targetMethodId: "consume_input",
           targetInputPortId: "request",
@@ -1518,7 +1521,7 @@ test("installed flow service dispatches local input bindings by bindingId", asyn
 
   const startup = await inputBoundService.start();
   const response = await inputBoundService.dispatchInputBindingFrames(
-    "catalog-feed",
+    "catalog-input",
     [
       {
         streamId: 1,
@@ -1533,13 +1536,14 @@ test("installed flow service dispatches local input bindings by bindingId", asyn
     ["catalog-feed"],
   );
   assert.equal(response.bindingId, "catalog-feed");
+  assert.equal(response.interfaceId, "catalog-input");
   assert.equal(response.triggerId, "__sdn_input_binding__:catalog-feed");
   assert.equal(response.outputs.length, 1);
   assert.deepEqual(Array.from(response.outputs[0].frame.payload), [1, 2, 3]);
   assert.equal(seenInputs.length, 1);
   assert.equal(seenInputs[0].portId, "request");
   assert.equal(seenInputs[0].metadata.inputBindingId, "catalog-feed");
-  assert.equal(seenInputs[0].metadata.interfaceId, "catalog-feed");
+  assert.equal(seenInputs[0].metadata.interfaceId, "catalog-input");
   assert.equal(seenInputs[0].typeRef.schemaName, "CatalogRecord.fbs");
   assert.equal(seenInputs[0].typeRef.fileIdentifier, "CTLG");
 });
@@ -1562,6 +1566,7 @@ test("installed flow service rejects input bindings without matching program nod
       inputBindings: [
         {
           bindingId: "catalog-feed",
+          interfaceId: "catalog-input",
           targetPluginId: "com.digitalarsenal.examples.memory.input-consumer",
           targetMethodId: "consume_input",
           targetInputPortId: "request",

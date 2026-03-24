@@ -827,6 +827,7 @@ function prepareProgramInputBindingRoutes({
 
   for (const binding of inputBindings) {
     const bindingId = normalizeString(binding?.bindingId, null);
+    const interfaceId = normalizeString(binding?.interfaceId, null);
     if (!bindingId) {
       continue;
     }
@@ -879,6 +880,7 @@ function prepareProgramInputBindingRoutes({
         `Deployment input binding ${bindingId}.`,
       metadata: {
         synthetic: true,
+        interfaceId,
         inputBindingId: bindingId,
         sourceKind: normalizeString(binding?.sourceKind, null),
       },
@@ -896,6 +898,7 @@ function prepareProgramInputBindingRoutes({
 
     inputBindingRoutes.push({
       bindingId,
+      interfaceId,
       triggerId,
       sourceKind: normalizeString(binding?.sourceKind, null),
       targetMethodId: normalizeString(binding?.targetMethodId, null),
@@ -3544,12 +3547,14 @@ export function createInstalledFlowService(options = {}) {
       normalizedBindingId === null
         ? null
         : listInputBindingRoutes().find(
-            (candidate) => candidate.bindingId === normalizedBindingId,
+            (candidate) =>
+              candidate.bindingId === normalizedBindingId ||
+              candidate.interfaceId === normalizedBindingId,
           ) ?? null;
     if (!route) {
       throw createHttpStatusError(
         404,
-        `No local input binding matches "${normalizedBindingId ?? "binding"}".`,
+        `No local input binding or interface matches "${normalizedBindingId ?? "binding"}".`,
         {
           code: "input-binding-not-found",
         },
@@ -3560,6 +3565,7 @@ export function createInstalledFlowService(options = {}) {
 
   function buildInputBindingFrame(route, input = {}) {
     const bindingId = normalizeString(route?.bindingId, null);
+    const interfaceId = normalizeString(route?.interfaceId, null);
     const traceId =
       normalizeString(input.traceId, null) ??
       `input:${bindingId ?? "binding"}:${Date.now()}`;
@@ -3570,7 +3576,7 @@ export function createInstalledFlowService(options = {}) {
       sequence: Number(input.sequence ?? 0),
       payload: input.payload ?? input.body ?? null,
       metadata: {
-        interfaceId: bindingId,
+        interfaceId,
         inputBindingId: bindingId,
         inputBindingSourceKind: normalizeString(route?.sourceKind, null),
         description: normalizeString(route?.description, null),
@@ -3609,6 +3615,7 @@ export function createInstalledFlowService(options = {}) {
     const drainResult = await host.drain(options.drainOptions);
     return {
       bindingId: route.bindingId,
+      interfaceId: route.interfaceId ?? null,
       triggerId: route.triggerId,
       outputs: host.getSinkOutputsSince(startIndex),
       publications: publicationEvents.slice(startPublicationIndex),
