@@ -95,11 +95,28 @@ native interop against the WasmEdge C API. See
 - deployment clients and hosted runtime plans
 - startup surfaces for hosts that launch compiled flows
 
-## Install
+## Distribution
+
+`sdn-flow` is currently consumed from source checkouts and submodules.
+This repo is not currently published to npm, so do not rely on
+`npm install sdn-flow` from the public registry.
+
+Use one of these source-based dependency paths instead:
 
 ```bash
-npm install sdn-flow
+npm install ../sdn-flow
 ```
+
+```json
+{
+  "dependencies": {
+    "sdn-flow": "file:../sdn-flow"
+  }
+}
+```
+
+If you need a remote dependency outside the sibling-workspace flow, use a git
+reference rather than an npm registry version.
 
 The editor runtime is also available through the dedicated export surface:
 

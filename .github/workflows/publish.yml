@@ -1,4 +1,4 @@
-name: Publish
+name: Release Validation
 
 on:
   push:
@@ -8,12 +8,8 @@ on:
 env:
   EMSDK_VERSION: 4.0.23
 
-permissions:
-  contents: read
-  id-token: write
-
 jobs:
-  publish:
+  validate-release-tag:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -51,4 +47,7 @@ jobs:
           registry-url: https://registry.npmjs.org
       - run: npm ci
       - run: npm test
-      - run: npm publish
+      - name: Record source-only distribution
+        run: |
+          echo "sdn-flow tag validation completed."
+          echo "This repo is consumed from source/submodules and is not published to npm."
