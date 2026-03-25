@@ -388,7 +388,7 @@ test("emception compiler adapter compiles standalone flow wasm with a stub sourc
       "sdn_flow_get_editor_metadata_size",
     );
     assert.ok(artifact.wasm instanceof Uint8Array);
-    assert.equal(artifact.loaderModule.includes("export default"), true);
+    assert.equal(artifact.loaderModule, null);
   } finally {
     await emception.removeDirectory(workingDirectory).catch(() => {});
     await emception.dispose().catch(() => {});
@@ -424,6 +424,7 @@ test("emception compiler adapter compiles fully linked standalone flow wasm with
     exportNames.includes("sdn_flow_dispatch_next_ready_node_with_host"),
     true,
   );
+  assert.equal(artifact.loaderModule, null);
   const wasi = new WASI({
     version: "preview1",
     args: ["flow-runtime"],

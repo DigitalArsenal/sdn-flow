@@ -1,7 +1,10 @@
 import path from "node:path";
 
 import { summarizeProgramRequirements } from "../designer/requirements.js";
-import { normalizeProgram } from "../runtime/index.js";
+import {
+  canUseDirectFlowWasmInstantiation,
+  normalizeProgram,
+} from "../runtime/index.js";
 import { bytesToHex, toUint8Array } from "../utils/encoding.js";
 import { sha256Bytes } from "../utils/crypto.js";
 import { generateCppFlowRuntimeSource } from "./CppFlowSourceGenerator.js";
@@ -366,7 +369,9 @@ export class EmceptionCompilerAdapter {
         ),
       ),
     );
-    const loaderModule = createPortableLoaderModuleSource();
+    const loaderModule = canUseDirectFlowWasmInstantiation(wasm)
+      ? null
+      : createPortableLoaderModuleSource();
     const requirements = summarizeProgramRequirements({
       program: compilePlan.program,
     });
