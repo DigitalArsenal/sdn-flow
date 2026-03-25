@@ -18,6 +18,10 @@
     "./deploy": "./src/deploy/index.js",
     "./compiler": "./src/compiler/index.js",
     "./compliance": "./src/compliance/index.js",
+    "./wrappers": "./src/wrappers/index.js",
+    "./wrappers/browser": "./src/wrappers/browser.js",
+    "./wrappers/bun": "./src/wrappers/bun.js",
+    "./wrappers/deno": "./src/wrappers/deno.js",
     "./schemas/*": "./schemas/*"
   },
   "files": [

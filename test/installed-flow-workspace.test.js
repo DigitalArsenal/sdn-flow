@@ -170,7 +170,6 @@ test("installed flow workspaces persist deployment plans and serialized artifact
       programId: "com.digitalarsenal.examples.single-plugin-flow",
       wasmBase64: "AGFzbQ==",
       manifestBase64: "RkxPVw==",
-      loaderModule: "export default function createRuntime() {}",
     },
   });
 
@@ -181,14 +180,8 @@ test("installed flow workspaces persist deployment plans and serialized artifact
     workspace.deploymentPlan?.pluginId,
     "com.digitalarsenal.examples.single-plugin-flow",
   );
-  assert.equal(
-    workspace.serializedArtifact?.loaderModule,
-    "export default function createRuntime() {}",
-  );
-  assert.equal(
-    rawWorkspace.serializedArtifact.loaderModule,
-    "export default function createRuntime() {}",
-  );
+  assert.equal(workspace.serializedArtifact?.programId, "com.digitalarsenal.examples.single-plugin-flow");
+  assert.equal(rawWorkspace.serializedArtifact.programId, "com.digitalarsenal.examples.single-plugin-flow");
 });
 
 test("createInstalledFlowApp boots a persisted workspace and runs the installed flow host", async () => {

@@ -1181,6 +1181,7 @@ test("compiled flow runtime host can instantiate the root artifact when exports 
   const artifact = {
     ...compiledArtifactStub(),
     programId: "com.digitalarsenal.compiled.host.instantiate",
+    wasm: buildWasmWithImportedFunction("wasi_snapshot_preview1", "fd_write"),
     runtimeExports: {
       mallocSymbol: "malloc",
       freeSymbol: "free",
@@ -1201,6 +1202,8 @@ test("compiled flow runtime host can instantiate the root artifact when exports 
       prepareInvocationDescriptorSymbol:
         "sdn_flow_prepare_node_invocation_descriptor",
       applyInvocationResultSymbol: "sdn_flow_apply_node_invocation_result",
+      dispatchCurrentInvocationSymbol:
+        "sdn_flow_dispatch_current_invocation_direct",
       nodeDispatchDescriptorsSymbol: "sdn_flow_get_node_dispatch_descriptors",
       nodeDispatchDescriptorCountSymbol:
         "sdn_flow_get_node_dispatch_descriptor_count",
@@ -1278,9 +1281,20 @@ test("compiled flow runtime host can instantiate the root artifact when exports 
     _sdn_flow_get_dependency_count() {
       return 0;
     },
+    _sdn_flow_dispatch_current_invocation_direct() {
+      view.setUint32(outputPortPointer + 0, resultsPortPointer, true);
+      view.setUint32(outputPortPointer + 4, 0, true);
+      view.setUint32(outputPortPointer + 8, resultsPortPointer, true);
+      view.setUint32(outputPortPointer + 12, 0, true);
+      view.setUint32(outputPortPointer + 16, outputPayloadPointer, true);
+      view.setUint32(outputPortPointer + 20, 5, true);
+      view.setUint32(outputPortPointer + 24, 8, true);
+      bytes.set([1, 2, 3, 9, 10], outputPayloadPointer);
+      return wasmExports._sdn_flow_apply_node_invocation_result(0, 0, 0, 0, outputPortPointer, 1);
+    },
     _main() {
       wasmExports._sdn_flow_begin_node_invocation(0, 1);
-      return currentImports.sdn_flow_host.dispatch_current_invocation(16);
+      return wasmExports._sdn_flow_dispatch_current_invocation_direct(16);
     },
     _sdn_flow_apply_node_invocation_result(
       _nodeIndex,
@@ -1309,7 +1323,10 @@ test("compiled flow runtime host can instantiate the root artifact when exports 
       return outputCount;
     },
   };
-  let currentImports = null;
+  const resultsPortPointer = 768;
+  const outputPortPointer = 1536;
+  const outputPayloadPointer = 1664;
+  writeCString(resultsPortPointer, "results");
 
   const host = await bindCompiledFlowRuntimeHost({
     artifact,
@@ -1317,26 +1334,14 @@ test("compiled flow runtime host can instantiate the root artifact when exports 
       instantiateCalls += 1;
       assert.deepEqual(Array.from(moduleBytes), Array.from(artifact.wasm));
       assert.equal(
-        typeof imports.sdn_flow_host.dispatch_current_invocation,
+        typeof imports.wasi_snapshot_preview1.fd_write,
         "function",
       );
-      currentImports = imports;
       return {
         instance: {
           exports: wasmExports,
         },
       };
-    },
-    handlers: {
-      "com.digitalarsenal.propagator.sgp4:catalog_query": ({ inputs }) => ({
-        outputs: [
-          {
-            portId: "results",
-            bytes: new Uint8Array([...inputs[0].bytes, 9, 10]),
-            alignment: 8,
-          },
-        ],
-      }),
     },
   });
 

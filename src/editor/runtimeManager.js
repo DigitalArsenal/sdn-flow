@@ -21,10 +21,6 @@ import {
   normalizeManagedSecuritySettings,
   normalizeStartupProtocol,
 } from "../host/managedSecurity.js";
-import {
-  canUseDirectFlowWasmInstantiation,
-  instantiateArtifactWithLoaderModule,
-} from "../runtime/wasmCompatibility.js";
 import { compileNodeRedFlowsToSdnArtifactInSubprocess } from "./compileArtifactSubprocess.js";
 import {
   createSdnFlowEditorDelegatedRuntimeUnavailableError,
@@ -6523,15 +6519,6 @@ export function createSdnFlowEditorRuntimeManager(options = {}) {
     options.loadCompiledRuntimeHost ??
     (async (buildRecord) => {
       const artifact = await deserializeCompiledArtifact(buildRecord.serializedArtifact);
-      const prefersDirectInstantiation = canUseDirectFlowWasmInstantiation(
-        artifact?.wasm,
-      );
-      const instantiateArtifact =
-        !prefersDirectInstantiation &&
-        typeof buildRecord?.loaderModule === "string" && buildRecord.loaderModule.length > 0
-          ? (moduleBytes, imports) =>
-              instantiateArtifactWithLoaderModule(buildRecord.loaderModule, moduleBytes, imports)
-          : WebAssembly.instantiate;
       const host = await bindCompiledFlowRuntimeHost({
         artifact,
         handlers: buildBoundRuntimeHandlers(),
@@ -6539,7 +6526,7 @@ export function createSdnFlowEditorRuntimeManager(options = {}) {
         dependencyStreamBridge,
         artifactImports,
         dependencyImports,
-        instantiateArtifact,
+        instantiateArtifact: WebAssembly.instantiate,
       });
       return {
         artifact,
@@ -6735,7 +6722,6 @@ export function createSdnFlowEditorRuntimeManager(options = {}) {
         flows,
         artifactSummary: compiledBuild.artifactSummary ?? null,
         serializedArtifact: compiledBuild.serializedArtifact,
-        loaderModule: compiledBuild.loaderModule ?? null,
         source: compiledBuild.source ?? "",
         outputName: compiledBuild.outputName ?? "sdn-flow-flow-runtime",
         runtimeModel: compiledBuild.runtimeModel ?? "compiled-cpp-wasm",

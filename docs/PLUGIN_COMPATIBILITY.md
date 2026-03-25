@@ -4,8 +4,8 @@
 
 `space-data-module-sdk` is the canonical module/plugin artifact model, and
 `sdn-flow` is the canonical flow-composition model built on top of it.
-Compatibility layers exist only to bridge older hosts and older metadata
-formats into those models.
+Compatibility wrappers exist only to bridge runtimes that cannot embed
+WasmEdge directly into the same guest ABI.
 
 ## What Stays Canonical
 

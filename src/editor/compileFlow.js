@@ -288,7 +288,6 @@ export async function compileNodeRedFlows(flows = [], options = {}) {
       artifactSummary: buildArtifactSummary(artifact, warnings),
       language: "cpp",
       source: artifact.compilePlan?.source ?? "",
-      loaderModule: artifact.loaderModule ?? null,
       outputName:
         artifact.compilePlan?.outputName ?? outputName,
       runtimeModel: artifact.runtimeModel,

@@ -30,8 +30,6 @@ test("compiled artifacts require an embedded manifest and default manifest expor
   );
   assert.equal(artifact.runtimeExports.descriptorSymbol, null);
   assert.equal(artifact.runtimeExports.dispatchCurrentInvocationSymbol, null);
-  assert.equal(artifact.runtimeExports.dispatchHostInvocationSymbol, null);
-  assert.equal(artifact.runtimeExports.drainWithHostDispatchSymbol, null);
 });
 
 test("compiled artifacts reject missing embedded manifest bytes", async () => {
@@ -67,9 +65,6 @@ test("compiled artifacts normalize extended runtime descriptor exports", async (
       apply_invocation_result_symbol: "sdn_flow_apply_node_invocation_result",
       dispatch_current_invocation_symbol:
         "sdn_flow_dispatch_current_invocation_direct",
-      dispatch_host_invocation_symbol:
-        "sdn_flow_dispatch_next_ready_node_with_host",
-      drain_with_host_dispatch_symbol: "sdn_flow_drain_with_host_dispatch",
       editor_metadata_json_symbol: "sdn_flow_get_editor_metadata_json",
       editor_metadata_size_symbol: "sdn_flow_get_editor_metadata_size",
       enqueue_trigger_frame_symbol: "sdn_flow_enqueue_trigger_frame",
@@ -124,14 +119,6 @@ test("compiled artifacts normalize extended runtime descriptor exports", async (
     "sdn_flow_dispatch_current_invocation_direct",
   );
   assert.equal(
-    artifact.runtimeExports.dispatchHostInvocationSymbol,
-    "sdn_flow_dispatch_next_ready_node_with_host",
-  );
-  assert.equal(
-    artifact.runtimeExports.drainWithHostDispatchSymbol,
-    "sdn_flow_drain_with_host_dispatch",
-  );
-  assert.equal(
     artifact.runtimeExports.editorMetadataJsonSymbol,
     "sdn_flow_get_editor_metadata_json",
   );
@@ -170,10 +157,10 @@ test("serialized compiled artifacts can be decoded back into runtime artifacts",
     programId: "flow.artifact.serialized",
     wasm: new Uint8Array([0x00, 0x61, 0x73, 0x6d]),
     manifestBuffer: new Uint8Array([0x46, 0x4c, 0x4f, 0x57]),
-    loaderModule: "export default function createRuntime() {}",
     runtimeExports: {
       readyNodeSymbol: "sdn_flow_get_ready_node_index",
-      drainWithHostDispatchSymbol: "sdn_flow_drain_with_host_dispatch",
+      dispatchCurrentInvocationSymbol:
+        "sdn_flow_dispatch_current_invocation_direct",
     },
   });
   const serialized = serializeCompiledArtifact(normalized);
@@ -190,12 +177,8 @@ test("serialized compiled artifacts can be decoded back into runtime artifacts",
     "sdn_flow_get_ready_node_index",
   );
   assert.equal(
-    decoded.runtimeExports.drainWithHostDispatchSymbol,
-    "sdn_flow_drain_with_host_dispatch",
-  );
-  assert.equal(
-    decoded.loaderModule,
-    "export default function createRuntime() {}",
+    decoded.runtimeExports.dispatchCurrentInvocationSymbol,
+    "sdn_flow_dispatch_current_invocation_direct",
   );
 });
 

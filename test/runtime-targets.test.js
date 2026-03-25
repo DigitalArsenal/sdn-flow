@@ -727,12 +727,11 @@ test("startStandaloneFlowRuntime executes fully linked wasi and wasmedge artifac
   }
 });
 
-test("startStandaloneFlowRuntime prefers direct instantiation for host-compatible artifacts even when a loader module is present", async () => {
+test("startStandaloneFlowRuntime instantiates host-compatible artifacts directly", async () => {
   const { artifact } = await compileLinkedFlowArtifact({
     runtimeTargets: [RuntimeTarget.WASMEDGE],
     workingDirectory: `/working/runtime-targets-direct-preferred-${randomUUID()}`,
   });
-  artifact.loaderModule = "export default 1;";
 
   const runtime = await startStandaloneFlowRuntime({
     artifact,

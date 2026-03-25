@@ -64,6 +64,18 @@ Node, and it includes environment profiles for `go-sdn` and WasmEdge-style
 hosts. Non-JS runtimes consume the same compiled artifact through the runtime,
 invocation, and descriptor ABIs exposed from `src/host`.
 
+For runtimes that cannot embed WasmEdge directly, `sdn-flow` now ships only the
+thin compatibility wrappers that are actually needed:
+
+- `sdn-flow/wrappers/browser`
+- `sdn-flow/wrappers/bun`
+- `sdn-flow/wrappers/deno`
+
+Go, Rust, Java, Python, Node, and C/C++ stay on direct WasmEdge SDK paths.
+Kotlin stays on the JVM path through Java interop, and C# / Swift stay on
+native interop against the WasmEdge C API. See
+[WasmEdge-Like Wrappers](./docs/WASMEDGE_WRAPPERS.md).
+
 ## Relationship To Module SDK
 
 `space-data-module-sdk` is the canonical module contract:
@@ -93,6 +105,15 @@ The editor runtime is also available through the dedicated export surface:
 
 ```js
 import { createSdnFlowEditorFetchHandler } from "sdn-flow/editor";
+```
+
+The WasmEdge-like compatibility wrappers are available as explicit installable
+subpath exports:
+
+```js
+import { startBrowserWasmEdgeLikeRuntime } from "sdn-flow/wrappers/browser";
+import { startBunWasmEdgeLikeRuntime } from "sdn-flow/wrappers/bun";
+import { startDenoWasmEdgeLikeRuntime } from "sdn-flow/wrappers/deno";
 ```
 
 ## Hosted Editor

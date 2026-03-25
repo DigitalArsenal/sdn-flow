@@ -375,14 +375,6 @@ test("emception compiler adapter compiles standalone flow wasm with a stub sourc
       "sdn_flow_dispatch_current_invocation_direct",
     );
     assert.equal(
-      artifact.runtimeExports.dispatchHostInvocationSymbol,
-      undefined,
-    );
-    assert.equal(
-      artifact.runtimeExports.drainWithHostDispatchSymbol,
-      undefined,
-    );
-    assert.equal(
       artifact.runtimeExports.editorMetadataJsonSymbol,
       "sdn_flow_get_editor_metadata_json",
     );
@@ -391,7 +383,6 @@ test("emception compiler adapter compiles standalone flow wasm with a stub sourc
       "sdn_flow_get_editor_metadata_size",
     );
     assert.ok(artifact.wasm instanceof Uint8Array);
-    assert.equal(artifact.loaderModule, null);
   } finally {
     await emception.removeDirectory(workingDirectory).catch(() => {});
     await emception.dispose().catch(() => {});
@@ -431,7 +422,6 @@ test("emception compiler adapter compiles fully linked standalone flow wasm with
     exportNames.includes("sdn_flow_dispatch_next_ready_node_with_host"),
     false,
   );
-  assert.equal(artifact.loaderModule, null);
   const wasi = new WASI({
     version: "preview1",
     args: ["flow-runtime"],
@@ -509,8 +499,6 @@ test("emception compiler adapter compiles hosted server flows without emitting t
       artifact.runtimeExports.dispatchCurrentInvocationSymbol,
       "sdn_flow_dispatch_current_invocation_direct",
     );
-    assert.equal(artifact.runtimeExports.dispatchHostInvocationSymbol, undefined);
-    assert.equal(artifact.runtimeExports.drainWithHostDispatchSymbol, undefined);
   } finally {
     await emception.removeDirectory(workingDirectory).catch(() => {});
     await emception.dispose().catch(() => {});

@@ -7,3 +7,4 @@ export * from "./transport/index.js";
 export * from "./deploy/index.js";
 export * from "./compiler/index.js";
 export * from "./compliance/index.js";
+export * from "./wrappers/index.js";

@@ -194,14 +194,6 @@ function normalizeRuntimeExports(exports = {}) {
       exports.dispatchCurrentInvocationSymbol ??
       exports.dispatch_current_invocation_symbol ??
       null,
-    dispatchHostInvocationSymbol:
-      exports.dispatchHostInvocationSymbol ??
-      exports.dispatch_host_invocation_symbol ??
-      null,
-    drainWithHostDispatchSymbol:
-      exports.drainWithHostDispatchSymbol ??
-      exports.drain_with_host_dispatch_symbol ??
-      null,
     editorMetadataJsonSymbol:
       exports.editorMetadataJsonSymbol ??
       exports.editor_metadata_json_symbol ??
@@ -267,10 +259,6 @@ export async function normalizeCompiledArtifact(artifact = {}) {
     runtimeExports: normalizeRuntimeExports(
       artifact.runtimeExports ?? artifact.runtime_exports,
     ),
-    loaderModule: normalizeOptionalString(
-      artifact.loaderModule ?? artifact.loader_module,
-      null,
-    ),
     entrypoint: artifact.entrypoint ?? "_start",
     graphHash,
     manifestHash,
@@ -297,7 +285,6 @@ export function serializeCompiledArtifact(artifact) {
     manifestBase64: bytesToBase64(artifact.manifestBuffer),
     manifestExports: artifact.manifestExports,
     runtimeExports: artifact.runtimeExports,
-    loaderModule: artifact.loaderModule ?? null,
     entrypoint: artifact.entrypoint,
     graphHash: artifact.graphHash,
     manifestHash: artifact.manifestHash,
@@ -322,8 +309,6 @@ export async function deserializeCompiledArtifact(serializedArtifact = {}) {
         serializedArtifact.manifest_exports,
       runtimeExports:
         serializedArtifact.runtimeExports ?? serializedArtifact.runtime_exports,
-      loaderModule:
-        serializedArtifact.loaderModule ?? serializedArtifact.loader_module,
     });
   }
 

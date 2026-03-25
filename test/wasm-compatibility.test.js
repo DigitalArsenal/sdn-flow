@@ -67,14 +67,13 @@ test("describeFlowWasmImportContract classifies fully linked flow artifacts as w
   assert.deepEqual(describeFlowWasmImportContract(artifact.wasm), {
     valid: true,
     modules: ["wasi_snapshot_preview1"],
-    requiresFlowHostDispatch: false,
     compatibilityProfile: "wasmedge-compatible",
     isWasmEdgeCompatible: true,
     isHostCompatible: true,
   });
 });
 
-test("describeFlowWasmImportContract distinguishes flow-host shims from custom guest imports", () => {
+test("describeFlowWasmImportContract treats any non-wasi guest imports as custom and unsupported", () => {
   const flowHostContract = describeFlowWasmImportContract(
     buildWasmWithImportedFunction(
       "sdn_flow_host",
@@ -84,10 +83,9 @@ test("describeFlowWasmImportContract distinguishes flow-host shims from custom g
   assert.deepEqual(flowHostContract, {
     valid: true,
     modules: ["sdn_flow_host"],
-    requiresFlowHostDispatch: true,
-    compatibilityProfile: "flow-host-compatible",
+    compatibilityProfile: "custom",
     isWasmEdgeCompatible: false,
-    isHostCompatible: true,
+    isHostCompatible: false,
   });
 
   const customContract = describeFlowWasmImportContract(
@@ -96,7 +94,6 @@ test("describeFlowWasmImportContract distinguishes flow-host shims from custom g
   assert.deepEqual(customContract, {
     valid: true,
     modules: ["custom_runtime"],
-    requiresFlowHostDispatch: false,
     compatibilityProfile: "custom",
     isWasmEdgeCompatible: false,
     isHostCompatible: false,

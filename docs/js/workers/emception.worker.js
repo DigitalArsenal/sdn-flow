@@ -124,15 +124,10 @@ self.onmessage = async ({ data }) => {
           log(`$ ${cmd}`, "cmd");
           const result = emception.run(cmd);
 
-          let wasmModule = null;
-          let loaderModule = null;
           if (result.returncode === 0) {
-            try {
-              const readFn = emception.readFile?.bind(emception) || emception.fileSystem?.readFile?.bind(emception.fileSystem);
-              loaderModule = readFn(`/working/${outName}.mjs`, { encoding: "utf8" });
-            } catch (e) {}
+            // The worker keeps the compiler result as the single source of truth.
           }
-          reply(id, { ...result, loaderModule });
+          reply(id, result);
         }
         break;
       }
