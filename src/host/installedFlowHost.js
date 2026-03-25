@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { DeploymentBindingMode } from "space-data-module-sdk";
+import { DeploymentBindingMode } from "space-data-module-sdk/deployment";
 import {
   EmceptionCompilerAdapter,
   buildDefaultFlowManifestBuffer,

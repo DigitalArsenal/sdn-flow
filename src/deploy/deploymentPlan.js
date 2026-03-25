@@ -3,7 +3,7 @@ import {
   ScheduleBindingKind,
   normalizeDeploymentPlan,
   validateDeploymentPlan,
-} from "space-data-module-sdk";
+} from "space-data-module-sdk/deployment";
 
 import { normalizeProgram } from "../runtime/index.js";
 

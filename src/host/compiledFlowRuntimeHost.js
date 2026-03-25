@@ -1,4 +1,4 @@
-import { decodePluginManifest } from "space-data-module-sdk";
+import { decodePluginManifest } from "space-data-module-sdk/manifest";
 
 import { InvokeSurface } from "../runtime/constants.js";
 import {

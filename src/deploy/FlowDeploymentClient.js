@@ -3,7 +3,7 @@ import {
   createDeploymentAuthorization,
   signAuthorization,
 } from "../auth/index.js";
-import { normalizeDeploymentPlan } from "space-data-module-sdk";
+import { normalizeDeploymentPlan } from "space-data-module-sdk/deployment";
 import { evaluateHostedRuntimeTargetSupport } from "../host/profile.js";
 import {
   listCompiledArtifactRuntimeTargets,

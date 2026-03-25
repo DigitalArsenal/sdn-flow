@@ -4,7 +4,7 @@ import {
   normalizePayloadWireFormatName,
   payloadTypeRefsMatch,
   selectPreferredPayloadTypeRef,
-} from "space-data-module-sdk";
+} from "space-data-module-sdk/manifest";
 import { normalizeFrame, normalizeManifest } from "./normalize.js";
 
 const INTERNAL_ALIGNED_BINARY_EXCEPTION_INTERFACE_KINDS = new Set([

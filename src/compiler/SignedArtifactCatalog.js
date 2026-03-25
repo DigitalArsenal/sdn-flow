@@ -7,7 +7,7 @@ import {
   SDS_GUEST_LINK_METADATA_ENTRY_ID,
   SDS_GUEST_LINK_OBJECT_ENTRY_ID,
   SDS_GUEST_LINK_SECTION_NAME,
-} from "space-data-module-sdk";
+} from "space-data-module-sdk/bundle";
 import { sha256Bytes } from "../utils/crypto.js";
 import { bytesToHex, toUint8Array } from "../utils/encoding.js";
 

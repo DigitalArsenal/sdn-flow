@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { normalizeDeploymentPlan } from "space-data-module-sdk";
+import { normalizeDeploymentPlan } from "space-data-module-sdk/deployment";
 import { normalizeProgram } from "../runtime/index.js";
 import {
   createInstalledFlowFetchHandler,

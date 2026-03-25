@@ -1,6 +1,6 @@
 import path from "node:path";
 
-import { decodePluginManifest } from "space-data-module-sdk";
+import { decodePluginManifest } from "space-data-module-sdk/manifest";
 
 import { summarizeProgramRequirements } from "../designer/requirements.js";
 import {

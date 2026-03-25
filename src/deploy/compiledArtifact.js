@@ -2,12 +2,12 @@ import {
   appendPublicationRecordCollection,
   createEncryptedEnvelopePayload,
   createPublicationNotice,
-  decodePluginManifest,
   decryptBytesFromEnvelope,
   encodePublicationRecordCollection,
   encryptBytesForRecipient,
   extractPublicationRecordCollection,
-} from "space-data-module-sdk";
+} from "space-data-module-sdk/transport";
+import { decodePluginManifest } from "space-data-module-sdk/manifest";
 
 import { normalizeManifest } from "../runtime/index.js";
 import { DefaultManifestExports } from "../runtime/constants.js";

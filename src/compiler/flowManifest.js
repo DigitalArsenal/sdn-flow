@@ -1,4 +1,4 @@
-import { encodePluginManifest } from "space-data-module-sdk";
+import { encodePluginManifest } from "space-data-module-sdk/manifest";
 
 import { summarizeProgramRequirements } from "../designer/requirements.js";
 import {
