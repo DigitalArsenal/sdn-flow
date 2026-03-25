@@ -3,6 +3,7 @@ import { decodePluginManifest } from "space-data-module-sdk";
 import { InvokeSurface } from "../runtime/constants.js";
 import {
   assertSupportedFlowWasmImportContract,
+  createDefaultFlowWasmCompatImports,
   describeFlowWasmImportContract,
   filterImportObjectToWasmModules,
   mergeWasmImportObjects,
@@ -457,25 +458,26 @@ export async function bindCompiledFlowRuntimeHost({
   const hostContext = {
     current: null,
   };
-  const internalImports = {
-    sdn_flow_host: {
-      dispatch_current_invocation(outputStreamCap = 16) {
-        const currentHost = hostContext.current;
-        if (!currentHost) {
-          throw new Error(
-            "Compiled flow host dispatch import was called before host initialization completed.",
-          );
-        }
-        return (
-          Number(
-            currentHost.dispatchCurrentInvocation({
-              outputStreamCap: Number(outputStreamCap) >>> 0,
-            }),
-          ) >>> 0
-        );
-      },
-    },
+  const artifactRuntimeRef = {
+    instance,
+    exports: wasmExports,
+    memory,
   };
+  const internalImports = createDefaultFlowWasmCompatImports({
+    getMemory: () =>
+      artifactRuntimeRef.exports?.memory ?? artifactRuntimeRef.memory ?? null,
+    dispatchCurrentInvocation(outputStreamCap = 16) {
+      const currentHost = hostContext.current;
+      if (!currentHost) {
+        throw new Error(
+          "Compiled flow host dispatch import was called before host initialization completed.",
+        );
+      }
+      return currentHost.dispatchCurrentInvocation({
+        outputStreamCap: Number(outputStreamCap) >>> 0,
+      });
+    },
+  });
   const resolvedRuntime = await resolveCompiledArtifactRuntime({
     artifact,
     instance,
@@ -487,6 +489,9 @@ export async function bindCompiledFlowRuntimeHost({
   const resolvedInstance = resolvedRuntime.instance ?? instance;
   const resolvedWasmExports = resolvedRuntime.wasmExports ?? wasmExports;
   const resolvedMemory = memory ?? resolvedWasmExports?.memory ?? null;
+  artifactRuntimeRef.instance = resolvedInstance;
+  artifactRuntimeRef.exports = resolvedWasmExports;
+  artifactRuntimeRef.memory = resolvedMemory;
   const [bound, descriptors] = await Promise.all([
     bindCompiledInvocationAbi({
       artifact,

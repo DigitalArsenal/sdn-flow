@@ -38,6 +38,51 @@ function compiledArtifactStub() {
   };
 }
 
+function encodeU32(value) {
+  const bytes = [];
+  let remaining = value >>> 0;
+  do {
+    let byte = remaining & 0x7f;
+    remaining >>>= 7;
+    if (remaining > 0) {
+      byte |= 0x80;
+    }
+    bytes.push(byte);
+  } while (remaining > 0);
+  return bytes;
+}
+
+function encodeString(value) {
+  const bytes = Array.from(new TextEncoder().encode(value));
+  return [...encodeU32(bytes.length), ...bytes];
+}
+
+function createSection(sectionId, payload) {
+  return [sectionId, ...encodeU32(payload.length), ...payload];
+}
+
+function buildWasmWithImportedFunction(moduleName, importName = "invoke") {
+  const magicAndVersion = [0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00];
+  const typeSection = createSection(1, [
+    ...encodeU32(1),
+    0x60,
+    ...encodeU32(0),
+    ...encodeU32(0),
+  ]);
+  const importSection = createSection(2, [
+    ...encodeU32(1),
+    ...encodeString(moduleName),
+    ...encodeString(importName),
+    0x00,
+    ...encodeU32(0),
+  ]);
+  return new Uint8Array([
+    ...magicAndVersion,
+    ...typeSection,
+    ...importSection,
+  ]);
+}
+
 test("host plan models an early-start local licensing runtime for disconnected OrbPro", () => {
   const plan = normalizeHostedRuntimePlan({
     hostId: "orbpro-browser",
@@ -1304,6 +1349,132 @@ test("compiled flow runtime host can instantiate the root artifact when exports 
   assert.deepEqual(lastOutputBytes, [1, 2, 3, 9, 10]);
 });
 
+test("compiled flow runtime host supplies default wasi preview1 compatibility imports for wasi-only artifacts", async () => {
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  const bytes = new Uint8Array(memory.buffer);
+  const view = new DataView(memory.buffer);
+  const invocationFramePointer = 512;
+  const invocationPointer = 640;
+  let instantiateCalls = 0;
+
+  const artifact = {
+    ...compiledArtifactStub(),
+    wasm: buildWasmWithImportedFunction("wasi_snapshot_preview1", "fd_write"),
+    runtimeExports: {
+      mallocSymbol: "malloc",
+      freeSymbol: "free",
+      descriptorSymbol: "sdn_flow_get_runtime_descriptor",
+      resetStateSymbol: "sdn_flow_reset_runtime_state",
+      enqueueTriggerSymbol: "sdn_flow_enqueue_trigger_frames",
+      enqueueTriggerFrameSymbol: "sdn_flow_enqueue_trigger_frame",
+      enqueueEdgeSymbol: "sdn_flow_enqueue_edge_frames",
+      enqueueEdgeFrameSymbol: "sdn_flow_enqueue_edge_frame",
+      readyNodeSymbol: "sdn_flow_get_ready_node_index",
+      beginInvocationSymbol: "sdn_flow_begin_node_invocation",
+      completeInvocationSymbol: "sdn_flow_complete_node_invocation",
+      ingressFrameDescriptorsSymbol: "sdn_flow_get_ingress_frame_descriptors",
+      ingressFrameDescriptorCountSymbol:
+        "sdn_flow_get_ingress_frame_descriptor_count",
+      currentInvocationDescriptorSymbol:
+        "sdn_flow_get_current_invocation_descriptor",
+      prepareInvocationDescriptorSymbol:
+        "sdn_flow_prepare_node_invocation_descriptor",
+      applyInvocationResultSymbol: "sdn_flow_apply_node_invocation_result",
+      nodeDispatchDescriptorsSymbol: "sdn_flow_get_node_dispatch_descriptors",
+      nodeDispatchDescriptorCountSymbol:
+        "sdn_flow_get_node_dispatch_descriptor_count",
+      dependencyDescriptorsSymbol: "sdn_flow_get_dependency_descriptors",
+      dependencyCountSymbol: "sdn_flow_get_dependency_count",
+    },
+  };
+
+  const host = await bindCompiledFlowRuntimeHost({
+    artifact,
+    instantiateArtifact: async (moduleBytes, imports) => {
+      instantiateCalls += 1;
+      assert.deepEqual(Array.from(moduleBytes), Array.from(artifact.wasm));
+      assert.deepEqual(Object.keys(imports).sort(), ["wasi_snapshot_preview1"]);
+      assert.equal(typeof imports.wasi_snapshot_preview1.fd_write, "function");
+      assert.equal(typeof imports.wasi_snapshot_preview1.fd_seek, "function");
+      assert.equal(typeof imports.wasi_snapshot_preview1.args_get, "function");
+      return {
+        instance: {
+          exports: {
+            memory,
+            _malloc() {
+              return 0;
+            },
+            _free() {},
+            _sdn_flow_get_runtime_descriptor() {
+              return 64;
+            },
+            _sdn_flow_reset_runtime_state() {},
+            _sdn_flow_enqueue_trigger_frames() {},
+            _sdn_flow_enqueue_trigger_frame() {
+              return 1;
+            },
+            _sdn_flow_enqueue_edge_frames() {},
+            _sdn_flow_enqueue_edge_frame() {
+              return 1;
+            },
+            _sdn_flow_get_ready_node_index() {
+              return 0xffffffff;
+            },
+            _sdn_flow_begin_node_invocation() {
+              return 0;
+            },
+            _sdn_flow_complete_node_invocation() {},
+            _sdn_flow_get_ingress_frame_descriptors() {
+              return invocationFramePointer;
+            },
+            _sdn_flow_get_ingress_frame_descriptor_count() {
+              return 0;
+            },
+            _sdn_flow_get_current_invocation_descriptor() {
+              return invocationPointer;
+            },
+            _sdn_flow_prepare_node_invocation_descriptor() {
+              return 0;
+            },
+            _sdn_flow_get_node_dispatch_descriptors() {
+              return 0;
+            },
+            _sdn_flow_get_node_dispatch_descriptor_count() {
+              return 0;
+            },
+            _sdn_flow_get_dependency_descriptors() {
+              return 0;
+            },
+            _sdn_flow_get_dependency_count() {
+              return 0;
+            },
+            _sdn_flow_apply_node_invocation_result() {
+              return 0;
+            },
+          },
+        },
+      };
+    },
+  });
+
+  assert.equal(instantiateCalls, 1);
+  assert.deepEqual(host.guestImportContract?.modules, ["wasi_snapshot_preview1"]);
+  const iovsPointer = 32;
+  view.setUint32(iovsPointer + 0, 128, true);
+  view.setUint32(iovsPointer + 4, 12, true);
+  const bytesWrittenPointer = 80;
+  assert.equal(
+    host.artifactImports.wasi_snapshot_preview1.fd_write(
+      1,
+      iovsPointer,
+      1,
+      bytesWrittenPointer,
+    ),
+    0,
+  );
+  assert.equal(view.getUint32(bytesWrittenPointer, true), 12);
+});
+
 test("embedded dependencies can be instantiated from the compiled bundle and used by a dependency stream bridge", async () => {
   const memory = new WebAssembly.Memory({ initial: 1 });
   const bytes = new Uint8Array(memory.buffer);
@@ -1745,6 +1916,165 @@ test("embedded dependency instantiation falls back to SDK direct invoke exports 
   );
   assert.equal(dependency?.resolvedExports.init, null);
   assert.equal(dependency?.resolvedExports.destroy, null);
+});
+
+test("embedded dependency instantiation supplies default wasi preview1 compatibility imports for wasi-only modules", async () => {
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  const bytes = new Uint8Array(memory.buffer);
+  const view = new DataView(memory.buffer);
+  const dependencyIdPointer = 512;
+  const pluginIdPointer = 576;
+  const versionPointer = 640;
+  const nodeDispatchPointer = 1024;
+  const dependencyPointer = 1280;
+  const dependencyWasmPointer = 1536;
+  const dependencyWasm = buildWasmWithImportedFunction(
+    "wasi_snapshot_preview1",
+    "fd_write",
+  );
+
+  const writeCString = (pointer, value) => {
+    bytes.set(new TextEncoder().encode(`${value}\0`), pointer);
+  };
+  writeCString(dependencyIdPointer, "dep-wasi-defaults");
+  writeCString(pluginIdPointer, "com.digitalarsenal.sdk.wasi-defaults");
+  writeCString(versionPointer, "1.0.0");
+  bytes.set(dependencyWasm, dependencyWasmPointer);
+
+  view.setUint32(
+    nodeDispatchPointer +
+      FlowNodeDispatchDescriptorLayout.fields.dependencyIdPointer.offset,
+    dependencyIdPointer,
+    true,
+  );
+  view.setUint32(
+    nodeDispatchPointer +
+      FlowNodeDispatchDescriptorLayout.fields.pluginIdPointer.offset,
+    pluginIdPointer,
+    true,
+  );
+
+  view.setUint32(
+    dependencyPointer +
+      SignedArtifactDependencyDescriptorLayout.fields.dependencyIdPointer
+        .offset,
+    dependencyIdPointer,
+    true,
+  );
+  view.setUint32(
+    dependencyPointer +
+      SignedArtifactDependencyDescriptorLayout.fields.pluginIdPointer.offset,
+    pluginIdPointer,
+    true,
+  );
+  view.setUint32(
+    dependencyPointer +
+      SignedArtifactDependencyDescriptorLayout.fields.versionPointer.offset,
+    versionPointer,
+    true,
+  );
+  view.setUint32(
+    dependencyPointer +
+      SignedArtifactDependencyDescriptorLayout.fields.wasmBytesPointer.offset,
+    dependencyWasmPointer,
+    true,
+  );
+  view.setUint32(
+    dependencyPointer +
+      SignedArtifactDependencyDescriptorLayout.fields.wasmSize.offset,
+    dependencyWasm.length,
+    true,
+  );
+
+  const dependencyRuntime = await instantiateEmbeddedDependencies({
+    artifact: {
+      ...compiledArtifactStub(),
+      runtimeExports: {
+        descriptorSymbol: "sdn_flow_get_runtime_descriptor",
+        resetStateSymbol: "sdn_flow_reset_runtime_state",
+        enqueueTriggerSymbol: "sdn_flow_enqueue_trigger_frames",
+        enqueueEdgeSymbol: "sdn_flow_enqueue_edge_frames",
+        readyNodeSymbol: "sdn_flow_get_ready_node_index",
+        beginInvocationSymbol: "sdn_flow_begin_node_invocation",
+        completeInvocationSymbol: "sdn_flow_complete_node_invocation",
+        applyInvocationResultSymbol: "sdn_flow_apply_node_invocation_result",
+        nodeDispatchDescriptorsSymbol: "sdn_flow_get_node_dispatch_descriptors",
+        nodeDispatchDescriptorCountSymbol:
+          "sdn_flow_get_node_dispatch_descriptor_count",
+        dependencyDescriptorsSymbol: "sdn_flow_get_dependency_descriptors",
+        dependencyCountSymbol: "sdn_flow_get_dependency_count",
+      },
+    },
+    wasmExports: {
+      memory,
+      sdn_flow_get_runtime_descriptor() {
+        return 64;
+      },
+      sdn_flow_reset_runtime_state() {},
+      sdn_flow_enqueue_trigger_frames() {},
+      sdn_flow_enqueue_edge_frames() {},
+      sdn_flow_get_ready_node_index() {
+        return 0xffffffff;
+      },
+      sdn_flow_begin_node_invocation() {
+        return 0;
+      },
+      sdn_flow_complete_node_invocation() {},
+      sdn_flow_apply_node_invocation_result() {
+        return 0;
+      },
+      sdn_flow_get_node_dispatch_descriptors() {
+        return nodeDispatchPointer;
+      },
+      sdn_flow_get_node_dispatch_descriptor_count() {
+        return 0;
+      },
+      sdn_flow_get_dependency_descriptors() {
+        return dependencyPointer;
+      },
+      sdn_flow_get_dependency_count() {
+        return 1;
+      },
+    },
+    instantiate: async (moduleBytes, imports) => {
+      assert.deepEqual(Array.from(moduleBytes), Array.from(dependencyWasm));
+      assert.deepEqual(Object.keys(imports).sort(), ["wasi_snapshot_preview1"]);
+      assert.equal(typeof imports.wasi_snapshot_preview1.fd_write, "function");
+      return {
+        instance: {
+          exports: {
+            memory,
+            [DefaultInvokeExports.invokeSymbol]() {
+              return 0;
+            },
+            [DefaultInvokeExports.allocSymbol]() {
+              return 0;
+            },
+            [DefaultInvokeExports.freeSymbol]() {},
+          },
+        },
+      };
+    },
+  });
+
+  const dependency = dependencyRuntime.byDependencyId.get("dep-wasi-defaults");
+  assert.deepEqual(dependency?.guestImportContract?.modules, [
+    "wasi_snapshot_preview1",
+  ]);
+  const iovsPointer = 96;
+  view.setUint32(iovsPointer + 0, 144, true);
+  view.setUint32(iovsPointer + 4, 21, true);
+  const bytesWrittenPointer = 176;
+  assert.equal(
+    dependency?.importObject?.wasi_snapshot_preview1?.fd_write(
+      1,
+      iovsPointer,
+      1,
+      bytesWrittenPointer,
+    ),
+    0,
+  );
+  assert.equal(view.getUint32(bytesWrittenPointer, true), 21);
 });
 
 test("compiled flow host prefers the command bridge for command-only embedded dependencies", async () => {

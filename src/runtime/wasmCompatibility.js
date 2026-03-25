@@ -12,6 +12,83 @@ export const FLOW_WASM_HOST_COMPAT_IMPORT_MODULES = Object.freeze([
   "sdn_flow_host",
 ]);
 
+function getMemoryFromResolver(getMemory = null) {
+  if (typeof getMemory !== "function") {
+    return null;
+  }
+  const memory = getMemory();
+  return memory && memory.buffer instanceof ArrayBuffer ? memory : null;
+}
+
+function writeCompatU32(getMemory, pointer, value) {
+  const memory = getMemoryFromResolver(getMemory);
+  if (!memory || !pointer) {
+    return;
+  }
+  new DataView(memory.buffer).setUint32(Number(pointer) >>> 0, Number(value) >>> 0, true);
+}
+
+function writeCompatU64(getMemory, pointer, value) {
+  const memory = getMemoryFromResolver(getMemory);
+  if (!memory || !pointer) {
+    return;
+  }
+  new DataView(memory.buffer).setBigUint64(Number(pointer) >>> 0, BigInt(value), true);
+}
+
+export function createDefaultWasiPreview1CompatImports({ getMemory } = {}) {
+  return {
+    wasi_snapshot_preview1: {
+      args_sizes_get() {
+        return 0;
+      },
+      args_get() {
+        return 0;
+      },
+      proc_exit() {
+        return 0;
+      },
+      fd_close() {
+        return 0;
+      },
+      fd_seek(_fd, _offsetLow, _offsetHigh, _whence, newOffsetPtr) {
+        writeCompatU64(getMemory, newOffsetPtr, 0n);
+        return 0;
+      },
+      fd_write(_fd, iovs, iovsLen, bytesWrittenPtr) {
+        const memory = getMemoryFromResolver(getMemory);
+        if (!memory) {
+          writeCompatU32(getMemory, bytesWrittenPtr, 0);
+          return 0;
+        }
+        const view = new DataView(memory.buffer);
+        let written = 0;
+        for (let index = 0; index < Number(iovsLen ?? 0); index += 1) {
+          const base = (Number(iovs) >>> 0) + index * 8;
+          written += view.getUint32(base + 4, true);
+        }
+        writeCompatU32(getMemory, bytesWrittenPtr, written);
+        return 0;
+      },
+    },
+  };
+}
+
+export function createDefaultFlowWasmCompatImports({
+  getMemory,
+  dispatchCurrentInvocation = null,
+} = {}) {
+  const imports = createDefaultWasiPreview1CompatImports({ getMemory });
+  if (typeof dispatchCurrentInvocation === "function") {
+    imports.sdn_flow_host = {
+      dispatch_current_invocation(outputStreamCap = 16) {
+        return Number(dispatchCurrentInvocation(outputStreamCap)) >>> 0;
+      },
+    };
+  }
+  return imports;
+}
+
 export function mergeWasmImportObjects(base = {}, extra = {}) {
   const merged = { ...(base ?? {}) };
   for (const [moduleName, moduleValue] of Object.entries(extra ?? {})) {
@@ -201,6 +278,8 @@ export default {
   FLOW_WASM_HOST_COMPAT_IMPORT_MODULES,
   FLOW_WASM_WASMEDGE_IMPORT_MODULES,
   assertSupportedFlowWasmImportContract,
+  createDefaultFlowWasmCompatImports,
+  createDefaultWasiPreview1CompatImports,
   describeFlowWasmImportContract,
   filterImportObjectToWasmModules,
   instantiateArtifactWithLoaderModule,

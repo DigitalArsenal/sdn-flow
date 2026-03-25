@@ -1,27 +1,56 @@
 import { bindCompiledDescriptorAbi } from "./descriptorAbi.js";
 import { DefaultInvokeExports } from "space-data-module-sdk/runtime";
+import {
+  createDefaultWasiPreview1CompatImports,
+  describeFlowWasmImportContract,
+  filterImportObjectToWasmModules,
+  mergeWasmImportObjects,
+} from "../runtime/wasmCompatibility.js";
 
 function resolveDependencyImportObject(imports, descriptor) {
+  const importContract = describeFlowWasmImportContract(descriptor?.wasmBytes);
+  const memoryRef = { current: null };
+  const defaultImports = createDefaultWasiPreview1CompatImports({
+    getMemory: () => memoryRef.current,
+  });
+  const finalizeImports = (resolvedImports = {}) => {
+    const merged = mergeWasmImportObjects(defaultImports, resolvedImports);
+    if (!importContract.valid) {
+      return {
+        importObject: merged,
+        importContract,
+        memoryRef,
+      };
+    }
+    return {
+      importObject: filterImportObjectToWasmModules(
+        merged,
+        importContract.modules,
+      ),
+      importContract,
+      memoryRef,
+    };
+  };
   if (typeof imports === "function") {
-    return imports(descriptor) ?? {};
+    return finalizeImports(imports(descriptor) ?? {});
   }
   if (imports instanceof Map) {
-    return (
+    return finalizeImports(
       imports.get(descriptor.dependencyId) ??
-      imports.get(descriptor.pluginId) ??
-      imports.get("default") ??
-      {}
+        imports.get(descriptor.pluginId) ??
+        imports.get("default") ??
+        {},
     );
   }
   if (imports && typeof imports === "object") {
-    return (
+    return finalizeImports(
       imports[descriptor.dependencyId] ??
-      imports[descriptor.pluginId] ??
-      imports.default ??
-      {}
+        imports[descriptor.pluginId] ??
+        imports.default ??
+        {},
     );
   }
-  return {};
+  return finalizeImports({});
 }
 
 function resolveNamedExport(exports, symbol) {
@@ -145,15 +174,21 @@ export async function instantiateEmbeddedDependencies({
   const instantiated = [];
   for (let index = 0; index < descriptors.length; index += 1) {
     const descriptor = descriptors[index];
-    const importObject = resolveDependencyImportObject(imports, descriptor);
+    const {
+      importObject,
+      importContract,
+      memoryRef,
+    } = resolveDependencyImportObject(imports, descriptor);
     const instantiatedModule = await instantiate(descriptor.wasmBytes, importObject);
     const exports = getWasmExports(instantiatedModule);
+    memoryRef.current = exports?.memory ?? null;
     instantiated.push({
       index,
       dependencyId: descriptor.dependencyId,
       pluginId: descriptor.pluginId,
       descriptor,
       importObject,
+      guestImportContract: importContract,
       module: instantiatedModule?.module ?? null,
       instance: instantiatedModule?.instance ?? instantiatedModule ?? null,
       exports,
