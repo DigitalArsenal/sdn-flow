@@ -1,13 +1,21 @@
 import path from "node:path";
 
+import { decodePluginManifest } from "space-data-module-sdk";
+
 import { summarizeProgramRequirements } from "../designer/requirements.js";
 import {
+  RuntimeTarget,
   canUseDirectFlowWasmInstantiation,
+  normalizeManifest,
   normalizeProgram,
 } from "../runtime/index.js";
 import { bytesToHex, toUint8Array } from "../utils/encoding.js";
 import { sha256Bytes } from "../utils/crypto.js";
-import { generateCppFlowRuntimeSource } from "./CppFlowSourceGenerator.js";
+import {
+  createGeneratorRequest,
+  generateCppFlowRuntimeSource,
+  INVALID_INDEX,
+} from "./CppFlowSourceGenerator.js";
 import { SignedArtifactCatalog } from "./SignedArtifactCatalog.js";
 import { isSdkEmceptionSession } from "./sdkEmceptionSession.js";
 
@@ -22,6 +30,11 @@ const DEFAULT_FLAGS = Object.freeze([
 
 const DEFAULT_RUNTIME_MODEL = "compiled-cpp-wasm";
 const DEFAULT_WORKING_DIRECTORY = "/working";
+const PureGuestRuntimeTargets = new Set([
+  RuntimeTarget.EDGE,
+  RuntimeTarget.WASI,
+  RuntimeTarget.WASMEDGE,
+]);
 const DEFAULT_RUNTIME_EXPORTS = Object.freeze({
   mallocSymbol: "malloc",
   freeSymbol: "free",
@@ -225,6 +238,86 @@ function createPortableLoaderModuleSource() {
   ].join("\n");
 }
 
+function decodeManifestRuntimeTargets(manifestBuffer) {
+  try {
+    return normalizeManifest(decodePluginManifest(manifestBuffer)).runtimeTargets;
+  } catch {
+    return [];
+  }
+}
+
+function describeHostDispatchRequirement({ request, dependencies = [] }) {
+  const issues = [];
+  request.nodes.forEach((node) => {
+    if (typeof node.linkedMethodSymbol === "string" && node.linkedMethodSymbol) {
+      return;
+    }
+    const dependency =
+      node.dependencyIndex !== INVALID_INDEX
+        ? dependencies[node.dependencyIndex] ?? null
+        : null;
+    let reason = "no guest-link symbol is available";
+    if (!dependency) {
+      reason = "no resolved artifact dependency was found";
+    } else if (dependency?.guestLink?.methodSymbols) {
+      reason = `guestLink metadata does not export method "${node.methodId}"`;
+    } else if (dependency?.runtimeExports?.streamInvokeSymbol) {
+      reason = "dependency only exposes host-side stream/command invocation";
+    } else {
+      reason = "dependency does not expose guest-link metadata";
+    }
+    issues.push({
+      nodeId: node.nodeId,
+      pluginId: node.pluginId,
+      methodId: node.methodId,
+      dependencyId:
+        node.dependencyId ??
+        dependency?.dependencyId ??
+        dependency?.pluginId ??
+        "",
+      reason,
+    });
+  });
+  return issues;
+}
+
+function assertPureGuestCompilationCompatibility({
+  program,
+  manifestBuffer,
+  dependencies,
+}) {
+  const runtimeTargets = decodeManifestRuntimeTargets(manifestBuffer);
+  const pureGuestTargets = runtimeTargets.filter((target) =>
+    PureGuestRuntimeTargets.has(target),
+  );
+  if (pureGuestTargets.length === 0) {
+    return;
+  }
+
+  const request = createGeneratorRequest({
+    program,
+    manifestBuffer,
+    dependencies,
+  });
+  const hostDispatchNodes = describeHostDispatchRequirement({
+    request,
+    dependencies,
+  });
+  if (hostDispatchNodes.length === 0) {
+    return;
+  }
+
+  const issueSummary = hostDispatchNodes
+    .map(
+      (issue) =>
+        `${issue.nodeId} (${issue.pluginId}.${issue.methodId}): ${issue.reason}`,
+    )
+    .join("; ");
+  throw new Error(
+    `Runtime targets ${pureGuestTargets.join(", ")} require a fully guest-linkable flow artifact. The following nodes would still require sdn_flow_host dispatch: ${issueSummary}`,
+  );
+}
+
 export class EmceptionCompilerAdapter {
   #emception;
 
@@ -280,6 +373,11 @@ export class EmceptionCompilerAdapter {
     const manifestBuffer = await this.#buildManifestBuffer({
       program: normalizedProgram,
       metadata,
+      dependencies,
+    });
+    assertPureGuestCompilationCompatibility({
+      program: normalizedProgram,
+      manifestBuffer,
       dependencies,
     });
     const generatedSource = await maybeCall(

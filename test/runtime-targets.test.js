@@ -75,6 +75,38 @@ test("buildDefaultFlowManifestBuffer narrows invoke surfaces from dependency met
   assert.deepEqual(manifest?.invokeSurfaces, [InvokeSurface.COMMAND]);
 });
 
+test("buildDefaultFlowManifestBuffer infers hosted server targets for package-hosted nodes without guest-link artifacts", () => {
+  const manifest = decodeCompiledArtifactManifest({
+    manifestBuffer: buildDefaultFlowManifestBuffer({
+      program: createProgram({
+        nodes: [
+          {
+            nodeId: "processor",
+            pluginId: "com.digitalarsenal.examples.basic-propagator",
+            methodId: "propagate",
+          },
+        ],
+        triggers: [
+          {
+            triggerId: "manual",
+            kind: "manual",
+          },
+        ],
+        triggerBindings: [
+          {
+            triggerId: "manual",
+            targetNodeId: "processor",
+            targetPortId: "request",
+          },
+        ],
+        requiredPlugins: ["com.digitalarsenal.examples.basic-propagator"],
+      }),
+    }),
+  });
+
+  assert.deepEqual(manifest?.runtimeTargets, [RuntimeTarget.SERVER]);
+});
+
 test("buildDefaultFlowManifestBuffer infers hosted server targets and honors explicit wasmedge overrides", () => {
   const hostedManifest = decodeCompiledArtifactManifest({
     manifestBuffer: buildDefaultFlowManifestBuffer({

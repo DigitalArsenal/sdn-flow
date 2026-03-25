@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "Imports entity profile messages, discovers offered SDS messages, watches SDS publish notifications, pulls aligned records from IPFS, and applies a pin retention policy before archiving retained records.",
   "runtimeTargets": [
-    "wasmedge"
+    "server"
   ],
   "nodes": [
     {

@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "Polls NOAA SWPC space-weather data on a schedule, archives the records to disk, emits SDS PNM notifications, and serves both archive downloads and FlatSQL REST queries.",
   "runtimeTargets": [
-    "wasmedge"
+    "server"
   ],
   "nodes": [
     {

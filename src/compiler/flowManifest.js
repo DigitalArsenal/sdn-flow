@@ -30,6 +30,57 @@ function normalizeStringArray(values) {
   ).sort();
 }
 
+function hasGuestLinkMetadata(dependency = {}) {
+  const guestLink = dependency?.guestLink ?? dependency?.guest_link ?? null;
+  if (!guestLink || typeof guestLink !== "object") {
+    return false;
+  }
+  const methodSymbols =
+    guestLink.methodSymbols ?? guestLink.method_symbols ?? null;
+  if (
+    methodSymbols &&
+    typeof methodSymbols === "object" &&
+    Object.keys(methodSymbols).length > 0
+  ) {
+    return true;
+  }
+  const objectBytes = guestLink.objectBytes ?? guestLink.object_bytes ?? null;
+  if (objectBytes instanceof Uint8Array) {
+    return objectBytes.length > 0;
+  }
+  if (ArrayBuffer.isView(objectBytes)) {
+    return objectBytes.byteLength > 0;
+  }
+  if (objectBytes instanceof ArrayBuffer) {
+    return objectBytes.byteLength > 0;
+  }
+  return false;
+}
+
+function flowContainsHostedOnlyNodes(program, dependencies = []) {
+  const normalizedProgram = normalizeProgram(program ?? {});
+  const guestLinkablePluginIds = new Set(
+    normalizeStringArray(
+      dependencies
+        .map((dependency) =>
+          hasGuestLinkMetadata(dependency) ? dependency?.pluginId : null,
+        )
+        .filter(Boolean),
+    ),
+  );
+
+  for (const node of normalizedProgram.nodes) {
+    const pluginId = normalizeString(node?.pluginId, null);
+    if (!pluginId) {
+      return true;
+    }
+    if (!guestLinkablePluginIds.has(pluginId)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 const BrowserOnlyCapabilities = new Set([
   "entity_access",
   "render_hooks",
@@ -192,11 +243,6 @@ export function inferFlowRuntimeTargets(options = {}) {
     return explicitTargets;
   }
 
-  const hostPlanTargets = inferRuntimeTargetsFromHostPlan(options.hostPlan);
-  if (hostPlanTargets.length > 0) {
-    return hostPlanTargets;
-  }
-
   const requirements =
     options.requirements ??
     summarizeProgramRequirements({
@@ -213,6 +259,18 @@ export function inferFlowRuntimeTargets(options = {}) {
 
   if (Array.from(capabilities).some((capability) => BrowserOnlyCapabilities.has(capability))) {
     return [RuntimeTarget.BROWSER];
+  }
+
+  const hostPlanTargets = inferRuntimeTargetsFromHostPlan(options.hostPlan);
+  if (hostPlanTargets.includes(RuntimeTarget.BROWSER)) {
+    return [RuntimeTarget.BROWSER];
+  }
+
+  if (flowContainsHostedOnlyNodes(normalizedProgram, options.dependencies ?? [])) {
+    return [RuntimeTarget.SERVER];
+  }
+  if (hostPlanTargets.length > 0) {
+    return hostPlanTargets;
   }
 
   const usesGuestNetworking =

@@ -436,6 +436,136 @@ test("emception compiler adapter compiles fully linked standalone flow wasm with
   assert.equal(wasi.start(instance), 0);
 });
 
+test("emception compiler adapter rejects pure guest runtime targets when a node still requires host dispatch", async () => {
+  const program = {
+    programId: "com.digitalarsenal.tests.mixed-mode-guest-reject",
+    version: "0.2.8",
+    nodes: [
+      {
+        nodeId: "command-node",
+        pluginId: "com.digitalarsenal.runtime.command-only",
+        methodId: "tick",
+        kind: "method",
+      },
+    ],
+    edges: [],
+    triggers: [],
+    triggerBindings: [],
+    requiredPlugins: ["com.digitalarsenal.runtime.command-only"],
+    artifactDependencies: [
+      {
+        dependencyId: "dep-command",
+        pluginId: "com.digitalarsenal.runtime.command-only",
+        version: "1.0.0",
+      },
+    ],
+  };
+  const catalog = new SignedArtifactCatalog();
+  catalog.registerArtifact({
+    dependencyId: "dep-command",
+    pluginId: "com.digitalarsenal.runtime.command-only",
+    version: "1.0.0",
+    signature: "sig",
+    signerPublicKey: "pub",
+    runtimeExports: {
+      initSymbol: "plugin_init",
+      destroySymbol: "plugin_destroy",
+      mallocSymbol: "malloc",
+      freeSymbol: "free",
+      streamInvokeSymbol: "plugin_stream_invoke",
+    },
+    wasm: wasmBytes(11),
+  });
+
+  for (const runtimeTarget of [
+    RuntimeTarget.EDGE,
+    RuntimeTarget.WASI,
+    RuntimeTarget.WASMEDGE,
+  ]) {
+    const compiler = new EmceptionCompilerAdapter({
+      artifactCatalog: catalog,
+      sourceGenerator: async () => ({
+        source: createStubFlowRuntimeSource(),
+        generatorModel: "test-stub-cpp",
+      }),
+      manifestBuilder: async ({ program: flowProgram, dependencies }) =>
+        buildDefaultFlowManifestBuffer({
+          program: flowProgram,
+          dependencies,
+          runtimeTargets: [runtimeTarget],
+        }),
+    });
+
+    await assert.rejects(
+      compiler.prepareCompile({ program }),
+      new RegExp(
+        `Runtime targets ${runtimeTarget} require a fully guest-linkable flow artifact`,
+        "i",
+      ),
+    );
+  }
+});
+
+test("emception compiler adapter still allows hosted server targets to use host dispatch paths", async () => {
+  const program = {
+    programId: "com.digitalarsenal.tests.mixed-mode-server-allowed",
+    version: "0.2.8",
+    nodes: [
+      {
+        nodeId: "command-node",
+        pluginId: "com.digitalarsenal.runtime.command-only",
+        methodId: "tick",
+        kind: "method",
+      },
+    ],
+    edges: [],
+    triggers: [],
+    triggerBindings: [],
+    requiredPlugins: ["com.digitalarsenal.runtime.command-only"],
+    artifactDependencies: [
+      {
+        dependencyId: "dep-command",
+        pluginId: "com.digitalarsenal.runtime.command-only",
+        version: "1.0.0",
+      },
+    ],
+  };
+  const catalog = new SignedArtifactCatalog();
+  catalog.registerArtifact({
+    dependencyId: "dep-command",
+    pluginId: "com.digitalarsenal.runtime.command-only",
+    version: "1.0.0",
+    signature: "sig",
+    signerPublicKey: "pub",
+    runtimeExports: {
+      initSymbol: "plugin_init",
+      destroySymbol: "plugin_destroy",
+      mallocSymbol: "malloc",
+      freeSymbol: "free",
+      streamInvokeSymbol: "plugin_stream_invoke",
+    },
+    wasm: wasmBytes(12),
+  });
+
+  const compiler = new EmceptionCompilerAdapter({
+    artifactCatalog: catalog,
+    sourceGenerator: async () => ({
+      source: createStubFlowRuntimeSource(),
+      generatorModel: "test-stub-cpp",
+    }),
+    manifestBuilder: async ({ program: flowProgram, dependencies }) =>
+      buildDefaultFlowManifestBuffer({
+        program: flowProgram,
+        dependencies,
+        runtimeTargets: [RuntimeTarget.SERVER],
+      }),
+  });
+
+  const prepared = await compiler.prepareCompile({ program });
+  assert.equal(prepared.program.programId, program.programId);
+  assert.equal(prepared.dependencies.length, 1);
+});
+
 test("emception compiler adapter carries dependency invoke-surface metadata into the manifest buffer", async () => {
   const program = {
     programId: "com.digitalarsenal.tests.command-only",

@@ -3,17 +3,14 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 
 import {
-  bindCompiledFlowRuntimeHost,
   createInstalledFlowHost,
+  RuntimeTarget,
   serializeCompiledArtifact,
   startInstalledFlowBrowserFetchHost,
   startStandaloneFlowRuntime,
   normalizeProgram,
 } from "../src/index.js";
-import {
-  handlers as basicPropagatorHandlers,
-  manifest as basicPropagatorManifest,
-} from "../examples/plugins/basic-propagator/plugin.js";
+import { compileLinkedFlowArtifact } from "../test-support/linkedFlowArtifact.js";
 
 async function readJson(relativePath) {
   const url = new URL(relativePath, import.meta.url);
@@ -38,6 +35,16 @@ function createTestFrame(payload, overrides = {}) {
     sequence: overrides.sequence ?? 1,
     payload,
   };
+}
+
+function createLinkedTestFrame(payload, overrides = {}) {
+  return createTestFrame(payload, {
+    typeRef: {
+      schemaName: "PluginManifest.fbs",
+      fileIdentifier: "PMAN",
+    },
+    ...overrides,
+  });
 }
 
 function createNoopPluginPackage(manifest) {
@@ -65,39 +72,14 @@ function stripArtifactDependencies(manifest) {
   return clone;
 }
 
-function buildStandaloneWorkspace() {
+async function buildStandaloneWorkspace() {
+  const { artifact, program, manifest } = await compileLinkedFlowArtifact({
+    runtimeTargets: [RuntimeTarget.WASI],
+    workingDirectory: "/working/parity-linked-standalone",
+  });
   return {
     workspaceId: "parity-single-plugin",
-    program: {
-      programId: "com.digitalarsenal.examples.single-plugin-flow",
-      nodes: [
-        {
-          nodeId: "processor",
-          pluginId: "com.digitalarsenal.examples.basic-propagator",
-          methodId: "propagate",
-          kind: "transform",
-          drainPolicy: "drain-to-empty",
-        },
-      ],
-      edges: [],
-      triggers: [
-        {
-          triggerId: "manual-request",
-          kind: "manual",
-          source: "user",
-        },
-      ],
-      triggerBindings: [
-        {
-          triggerId: "manual-request",
-          targetNodeId: "processor",
-          targetPortId: "request",
-          backpressurePolicy: "queue",
-          queueDepth: 16,
-        },
-      ],
-      requiredPlugins: ["com.digitalarsenal.examples.basic-propagator"],
-    },
+    program,
     hostPlan: {
       hostId: "parity-single-plugin",
       hostKind: "standalone-wasi",
@@ -107,10 +89,19 @@ function buildStandaloneWorkspace() {
     },
     pluginPackages: [
       {
-        manifest: basicPropagatorManifest,
-        handlers: basicPropagatorHandlers,
+        manifest,
+        handlers: {
+          tick() {
+            return {
+              outputs: [],
+              backlogRemaining: 0,
+              yielded: false,
+            };
+          },
+        },
       },
     ],
+    serializedArtifact: serializeCompiledArtifact(artifact),
   };
 }
 
@@ -119,6 +110,7 @@ function buildBrowserWorkspace() {
     workspaceId: "parity-browser",
     program: {
       programId: "com.digitalarsenal.examples.browser-fetch-host",
+      runtimeTargets: ["browser"],
       nodes: [
         {
           nodeId: "responder",
@@ -353,6 +345,9 @@ async function buildWasmedgeUdpWorkspace() {
 }
 
 async function compileWorkspace(workspace) {
+  if (workspace.serializedArtifact) {
+    return workspace;
+  }
   const host = createInstalledFlowHost({
     allowLiveProgramCompilation: true,
     program: workspace.program,
@@ -389,9 +384,9 @@ test("wasmedge server example reuses compiled artifacts on a WasmEdge host plan"
   assert.equal(startup.started, true);
   assert.equal(startup.programId, workspace.program.programId);
   assert.equal(normalizedProgram.runtimeTargetClass, null);
-  assert.deepEqual(startup.runtimeTargets, ["wasmedge"]);
+  assert.deepEqual(startup.runtimeTargets, ["server"]);
   assert.equal(startup.runtimeTargetClass, "server-side");
-  assert.equal(startup.standardRuntimeTarget, "wasmedge");
+  assert.equal(startup.standardRuntimeTarget, "server");
   assert.deepEqual(
     deploymentPlan.inputBindings.map(
       (binding) => binding.bindingId,
@@ -418,10 +413,10 @@ test("wasmedge guest-network example reuses compiled artifacts on a WasmEdge hos
   assert.equal(startup.started, true);
   assert.equal(startup.programId, workspace.program.programId);
   assert.equal(normalizedProgram.runtimeTargetClass, "server-side");
-  assert.equal(normalizedProgram.standardRuntimeTarget, "wasmedge");
-  assert.deepEqual(startup.runtimeTargets, ["wasmedge"]);
+  assert.equal(normalizedProgram.standardRuntimeTarget, "server");
+  assert.deepEqual(startup.runtimeTargets, ["server"]);
   assert.equal(startup.runtimeTargetClass, "server-side");
-  assert.equal(startup.standardRuntimeTarget, "wasmedge");
+  assert.equal(startup.standardRuntimeTarget, "server");
   assert.deepEqual(
     deploymentPlan.inputBindings.map(
       (binding) => binding.bindingId,
@@ -431,42 +426,32 @@ test("wasmedge guest-network example reuses compiled artifacts on a WasmEdge hos
 });
 
 test("compiled artifacts stay compatible across standalone and runtime-host profiles", async () => {
-  const workspace = await compileWorkspace(buildStandaloneWorkspace());
-  const outputs = [];
+  const workspace = await compileWorkspace(await buildStandaloneWorkspace());
   const installedHost = createInstalledFlowHost({
     program: workspace.program,
     serializedArtifact: workspace.serializedArtifact,
     hostPlan: workspace.hostPlan,
     pluginPackages: workspace.pluginPackages,
     discover: false,
-    runtimeOptions: {
-      onSinkOutput(event) {
-        outputs.push(event);
-      },
-    },
   });
 
   const runtimeHost = await startStandaloneFlowRuntime({
     input: workspace.serializedArtifact,
-    handlers: basicPropagatorHandlers,
-    bindRuntimeHost: bindCompiledFlowRuntimeHost,
   });
 
   const installedStartup = await installedHost.start();
 
   installedHost.enqueueTriggerFrames("manual-request", [
-    createTestFrame(new Uint8Array([1, 2, 3]), {
+    createLinkedTestFrame(new Uint8Array([1, 2, 3]), {
       traceId: "installed-trace",
     }),
   ]);
   const installedDrain = await installedHost.drain();
 
   assert.equal(installedStartup.programId, workspace.program.programId);
-  assert.equal(outputs.length, 1);
-  assert.equal(outputs[0].frame.portId, "state");
   assert.equal(installedDrain.idle, true);
   assert.equal(installedDrain.executions.length, 1);
-  assert.equal(installedDrain.executions[0].outputs[0].portId, "state");
+  assert.deepEqual(installedDrain.executions[0].outputs, []);
   assert.equal(runtimeHost.target.hostKind, "standalone-wasi");
   assert.deepEqual(runtimeHost.runtimeTargets, ["wasi"]);
   assert.equal(runtimeHost.runtimeCompatibility?.ok, true);

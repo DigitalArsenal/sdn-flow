@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "Fetches CSV OMMs from CelesTrak, stores them in FlatSQL, and serves authenticated HTTP query responses over the stored catalog.",
   "runtimeTargets": [
-    "wasmedge"
+    "server"
   ],
   "nodes": [
     {
