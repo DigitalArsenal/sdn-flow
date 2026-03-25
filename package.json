@@ -1,6 +1,6 @@
 {
   "name": "sdn-flow",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Isomorphic flow authoring, runtime, authorization, and deployment tooling for schema-driven WASM systems.",
   "type": "module",
   "bin": {
@@ -66,7 +66,7 @@
   },
   "dependencies": {
     "hd-wallet-wasm": "^2.0.1",
-    "space-data-module-sdk": "git+https://github.com/DigitalArsenal/space-data-module-sdk.git#9bdcc12bb6aede0a6e7d7fd813ec3edbc56c1738"
+    "space-data-module-sdk": "git+https://github.com/DigitalArsenal/space-data-module-sdk.git#e2c6d300279b416d9964a719cca16636651f31d3"
   },
   "devDependencies": {
     "@node-red/editor-client": "^4.1.7",
