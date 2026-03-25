@@ -29,15 +29,20 @@ jobs:
           ./emsdk install "$EMSDK_VERSION"
           ./emsdk activate "$EMSDK_VERSION"
           source ./emsdk_env.sh > /dev/null
+          export EM_CONFIG="$RUNNER_TEMP/.emscripten"
+          emcc --generate-config
           {
             echo "EMSDK=$EMSDK"
             echo "EM_CONFIG=$EM_CONFIG"
+            echo "BINARYEN_ROOT=$EMSDK/upstream/bin"
           } >> "$GITHUB_ENV"
           {
             echo "$EMSDK"
             echo "$EMSDK/upstream/emscripten"
+            echo "$EMSDK/upstream/bin"
           } >> "$GITHUB_PATH"
           command -v em++
+          command -v wasm-opt
           em++ --version | head -n 1
       - uses: actions/setup-node@v6
         with:
