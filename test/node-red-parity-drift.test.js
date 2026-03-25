@@ -45,6 +45,20 @@ const RUNTIME_HANDLER_KEYS = new Map([
   ["link call", "com.digitalarsenal.editor.link-call:invoke"],
 ]);
 
+const DELEGATED_WRAPPER_FAMILIES = new Set([
+  "file",
+  "file in",
+  "debug",
+  "http request",
+  "http response",
+  "delay",
+  "trigger",
+  "exec",
+  "link in",
+  "link out",
+  "link call",
+]);
+
 function parseMatrixRows(text) {
   return text
     .split(/\r?\n/)
@@ -117,14 +131,9 @@ test("parity matrix current-state claims match the runtime support we ship", asy
   for (const [family, handlerKey] of RUNTIME_HANDLER_KEYS.entries()) {
     const row = rowsByFamily.get(family);
     assert.ok(row, `Matrix is missing a row for shipped family "${family}".`);
-    const expectedCurrentState =
-      family === "file" ||
-      family === "file in" ||
-      family === "debug" ||
-      family === "http request" ||
-      family === "http response"
-        ? "delegated/wrapper"
-        : "JS runtime";
+    const expectedCurrentState = DELEGATED_WRAPPER_FAMILIES.has(family)
+      ? "delegated/wrapper"
+      : "JS runtime";
     assert.equal(
       row.currentState,
       expectedCurrentState,

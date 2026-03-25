@@ -47,9 +47,9 @@ Status: active
 
 - [ ] `watch`
 - [ ] cron-style `inject`
-- [ ] wall-clock `delay`
-- [ ] wall-clock `trigger`
-- [ ] `exec`
+- [x] wall-clock `delay`
+- [x] wall-clock `trigger`
+- [x] `exec`
 - [x] `http request`
 - [x] `debug`
 - [ ] `catch`
@@ -76,8 +76,9 @@ Status: active
          Editor-only live-runtime families are now rejected through
          `src/editor/liveRuntimeSupport.js` instead of falling through generic
          live artifact lowering.
-         File reader/writer nodes now route through the delegated host-adapter
-         boundary instead of the generic JS bucket.
+         File reader/writer, timer/process wrapper, and HTTP request/debug
+         families now route through the delegated host-adapter boundary instead
+         of the generic JS bucket.
 
 3. Tests
    - [x] Add parity drift enforcement that checks the matrix against the
