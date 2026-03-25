@@ -1,6 +1,12 @@
 import { decodePluginManifest } from "space-data-module-sdk";
 
 import { InvokeSurface } from "../runtime/constants.js";
+import {
+  assertSupportedFlowWasmImportContract,
+  describeFlowWasmImportContract,
+  filterImportObjectToWasmModules,
+  mergeWasmImportObjects,
+} from "../runtime/wasmCompatibility.js";
 import { bindCompiledInvocationAbi } from "./invocationAbi.js";
 import { bindCompiledDescriptorAbi } from "./descriptorAbi.js";
 import { instantiateEmbeddedDependencies } from "./dependencyRuntime.js";
@@ -23,63 +29,47 @@ function getInstantiatedExports(target = null) {
   return null;
 }
 
-function mergeImportObjects(base = {}, extra = {}) {
-  const merged = { ...(base ?? {}) };
-  for (const [moduleName, moduleValue] of Object.entries(extra ?? {})) {
-    const existing = merged[moduleName];
-    if (
-      existing &&
-      typeof existing === "object" &&
-      !Array.isArray(existing) &&
-      moduleValue &&
-      typeof moduleValue === "object" &&
-      !Array.isArray(moduleValue)
-    ) {
-      merged[moduleName] = {
-        ...existing,
-        ...moduleValue,
-      };
-      continue;
-    }
-    merged[moduleName] = moduleValue;
-  }
-  return merged;
-}
-
 function resolveArtifactImportObject(
   imports,
   artifact,
   additionalImports = {},
 ) {
+  const importContract = describeFlowWasmImportContract(artifact?.wasm);
+  const mergeAndFilter = (resolvedImports = {}) => {
+    const merged = mergeWasmImportObjects(resolvedImports, additionalImports);
+    if (!importContract.valid) {
+      return merged;
+    }
+    return filterImportObjectToWasmModules(merged, importContract.modules);
+  };
   if (typeof imports === "function") {
-    return mergeImportObjects(imports(artifact) ?? {}, additionalImports);
+    return mergeAndFilter(imports(artifact) ?? {});
   }
   if (imports instanceof Map) {
-    return mergeImportObjects(
+    return mergeAndFilter(
       imports.get(artifact?.programId) ??
         imports.get(artifact?.artifactId) ??
         imports.get("default") ??
         {},
-      additionalImports,
     );
   }
   if (imports && typeof imports === "object") {
     if (
       "env" in imports ||
       "wasi_snapshot_preview1" in imports ||
+      "sdn_flow_host" in imports ||
       "default" in imports
     ) {
-      return mergeImportObjects(imports, additionalImports);
+      return mergeAndFilter(imports);
     }
-    return mergeImportObjects(
+    return mergeAndFilter(
       imports[artifact?.programId] ??
         imports[artifact?.artifactId] ??
         imports.default ??
         {},
-      additionalImports,
     );
   }
-  return mergeImportObjects({}, additionalImports);
+  return mergeAndFilter({});
 }
 
 function resolveNamedExport(exports, symbol) {
@@ -180,6 +170,11 @@ async function resolveCompiledArtifactRuntime({
       "bindCompiledFlowRuntimeHost requires instantiateArtifact to be a function when instantiating the root artifact.",
     );
   }
+  assertSupportedFlowWasmImportContract(artifact.wasm, {
+    sourceName: artifact?.programId
+      ? `Compiled flow artifact ${artifact.programId}`
+      : "Compiled flow artifact",
+  });
   const instantiated = await instantiateArtifact(
     artifact.wasm,
     resolveArtifactImportObject(artifactImports, artifact, internalImports),
@@ -535,6 +530,7 @@ export async function bindCompiledFlowRuntimeHost({
       artifact,
       internalImports,
     ),
+    guestImportContract: describeFlowWasmImportContract(artifact?.wasm),
     instantiateArtifact,
     dependencyInvoker,
     dependencyStreamBridge,
