@@ -67,6 +67,12 @@ const delegatedRuntimeFamilies = Object.freeze([
     methodId: "fetch",
     handlerKey: "com.digitalarsenal.flow.http-fetcher:fetch",
   }),
+  Object.freeze({
+    family: "http response",
+    pluginId: "com.digitalarsenal.flow.http-response",
+    methodId: "send",
+    handlerKey: "com.digitalarsenal.flow.http-response:send",
+  }),
 ]);
 
 const delegatedRuntimeFamiliesByFamily = new Map(

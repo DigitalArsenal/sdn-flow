@@ -742,7 +742,7 @@ test("runtime manager dispatches HTTP requests through http in triggers and retu
   }
 });
 
-test("runtime manager classifies http request as delegated while keeping http response on js-shim", async () => {
+test("runtime manager classifies http request and http response as delegated support", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "sdn-flow-editor-runtime-http-classification-"));
 
   try {
@@ -826,11 +826,17 @@ test("runtime manager classifies http request as delegated while keeping http re
     );
     assert.equal(
       runtimeClassification.nodeFamilies.find((entry) => entry.family === "http response")?.classification,
-      "js-shim",
+      "delegated",
     );
     assert.equal(
       runtimeClassification.handlers.find(
         (entry) => entry.key === "com.digitalarsenal.flow.http-fetcher:fetch",
+      )?.classification,
+      "delegated",
+    );
+    assert.equal(
+      runtimeClassification.handlers.find(
+        (entry) => entry.key === "com.digitalarsenal.flow.http-response:send",
       )?.classification,
       "delegated",
     );

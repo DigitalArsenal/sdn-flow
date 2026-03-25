@@ -6485,7 +6485,7 @@ export function createSdnFlowEditorRuntimeManager(options = {}) {
         };
       },
     );
-    runtimeHandlers.set(
+    delegatedRuntimeHandlers.set(
       "com.digitalarsenal.flow.http-response:send",
       async ({ dispatchDescriptor, inputs }) => {
         const nodeConfig = getActiveFlowNode(dispatchDescriptor?.nodeId);

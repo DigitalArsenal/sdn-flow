@@ -35,7 +35,7 @@ Status: active
 ## `wasmedge` Bucket
 
 - [ ] `http in`
-- [ ] `http response`
+- [x] `http response`
 - [ ] TCP request/listener nodes
 - [ ] UDP in/out nodes
 - [ ] TLS-backed client/server nodes
