@@ -1,13 +1,46 @@
-import fs from "node:fs/promises";
-import path from "node:path";
-import { Buffer } from "node:buffer";
-import { randomBytes as nodeRandomBytes } from "node:crypto";
-import { fileURLToPath } from "node:url";
+const NODE_BUILTIN_LOADER =
+  typeof process === "object" &&
+  process &&
+  typeof process.getBuiltinModule === "function"
+    ? process.getBuiltinModule.bind(process)
+    : null;
+
+const IS_NODE_RUNTIME =
+  typeof process === "object" &&
+  process &&
+  typeof process.versions === "object" &&
+  typeof process.versions.node === "string";
 
 let hdWalletModulePromise = null;
 let hdWalletPromise = null;
 
+function getNodeBuiltin(name) {
+  if (NODE_BUILTIN_LOADER) {
+    return NODE_BUILTIN_LOADER(name);
+  }
+  if (typeof require === "function") {
+    return require(name);
+  }
+  return null;
+}
+
+function getGlobalBuffer() {
+  if (typeof Buffer !== "undefined") {
+    return Buffer;
+  }
+  if (typeof globalThis !== "undefined" && typeof globalThis.Buffer !== "undefined") {
+    return globalThis.Buffer;
+  }
+  const nodeBuffer = getNodeBuiltin("buffer");
+  return nodeBuffer?.Buffer ?? null;
+}
+
 async function pathExists(targetPath) {
+  const fs = getNodeBuiltin("fs/promises");
+  if (!fs) {
+    return false;
+  }
+
   try {
     await fs.access(targetPath);
     return true;
@@ -18,12 +51,13 @@ async function pathExists(targetPath) {
 
 function buildSdnPluginShimSource() {
   return [
-    "import { Buffer } from 'node:buffer';",
     "import { manifestBase64 } from './generated/sdn_plugin_manifest.mjs';",
     "",
     "function decodeManifestBytes() {",
-    "  if (typeof Buffer !== 'undefined') {",
-    "    return Uint8Array.from(Buffer.from(manifestBase64, 'base64'));",
+    "  const globalBuffer =",
+    "    typeof Buffer !== 'undefined' ? Buffer : globalThis.Buffer;",
+    "  if (globalBuffer) {",
+    "    return Uint8Array.from(globalBuffer.from(manifestBase64, 'base64'));",
     "  }",
     "  if (typeof atob === 'function') {",
     "    const decoded = atob(manifestBase64);",
@@ -92,9 +126,20 @@ function buildSdnPluginManifestSourceShim() {
 }
 
 async function ensureHdWalletCompatFiles() {
+  if (!IS_NODE_RUNTIME || typeof import.meta.resolve !== "function") {
+    return;
+  }
+
+  const fs = getNodeBuiltin("fs/promises");
+  const path = getNodeBuiltin("path");
+  const nodeUrl = getNodeBuiltin("url");
+  if (!fs || !path || !nodeUrl || typeof nodeUrl.fileURLToPath !== "function") {
+    return;
+  }
+
   const exportedModuleUrl = await import.meta.resolve("hd-wallet-wasm");
   const packageRoot = path.dirname(
-    path.dirname(fileURLToPath(exportedModuleUrl)),
+    path.dirname(nodeUrl.fileURLToPath(exportedModuleUrl)),
   );
   const sourceDirectory = path.join(packageRoot, "src");
   const sdnPluginPath = path.join(sourceDirectory, "sdn-plugin.mjs");
@@ -122,7 +167,13 @@ function getEntropyBytes(length = 32) {
   ) {
     return globalThis.crypto.getRandomValues(new Uint8Array(length));
   }
-  return Uint8Array.from(nodeRandomBytes(length));
+
+  const nodeCrypto = getNodeBuiltin("crypto");
+  if (nodeCrypto && typeof nodeCrypto.randomBytes === "function") {
+    return Uint8Array.from(nodeCrypto.randomBytes(length));
+  }
+
+  throw new Error("No secure random source available for hd-wallet-wasm runtime.");
 }
 
 export async function importHdWalletRuntimeModule() {
