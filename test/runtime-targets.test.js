@@ -695,6 +695,45 @@ test("startStandaloneFlowRuntime executes fully linked wasi and wasmedge artifac
   }
 });
 
+test("startStandaloneFlowRuntime prefers direct instantiation for host-compatible artifacts even when a loader module is present", async () => {
+  const { artifact } = await compileLinkedFlowArtifact({
+    runtimeTargets: [RuntimeTarget.WASMEDGE],
+    workingDirectory: `/working/runtime-targets-direct-preferred-${randomUUID()}`,
+  });
+  artifact.loaderModule = "export default 1;";
+
+  const runtime = await startStandaloneFlowRuntime({
+    artifact,
+    target: {
+      runtimeId: "linked-direct-preferred-runtime",
+      hostKind: "wasmedge",
+      adapter: HostedRuntimeAdapter.HOST_INTERNAL,
+      engine: HostedRuntimeEngine.WASI,
+    },
+  });
+
+  assert.deepEqual(runtime.guestImportContract?.modules, [
+    "wasi_snapshot_preview1",
+  ]);
+  assert.equal(runtime.target.hostKind, "wasmedge");
+  assert.equal(
+    runtime.enqueueTriggerFrame(0, {
+      typeDescriptorIndex: 0,
+      alignment: 8,
+      bytes: new Uint8Array([9, 8, 7, 6]),
+      streamId: 1,
+      sequence: 1,
+      traceToken: 5,
+    }),
+    1,
+  );
+  const execution = await runtime.dispatchNextReadyNodeWithHost({
+    frameBudget: 1,
+    outputStreamCap: 16,
+  });
+  assert.equal(execution.executed, true);
+});
+
 test("WasmEdge can start a fully linked standalone flow artifact directly when the CLI is available", async (t) => {
   try {
     await execFile("wasmedge", ["--version"]);

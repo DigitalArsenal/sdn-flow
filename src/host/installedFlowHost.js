@@ -19,6 +19,7 @@ import {
   ExternalInterfaceKind,
   MethodRegistry,
   TriggerKind,
+  canUseDirectFlowWasmInstantiation,
   normalizeFrame,
   normalizeManifest,
   normalizeProgram,
@@ -1127,15 +1128,22 @@ async function bindInstalledCompiledRuntimeHost({
   handlers,
   runtimeOptions = {},
 } = {}) {
+  const prefersDirectInstantiation = canUseDirectFlowWasmInstantiation(
+    artifact?.wasm,
+  );
   const instantiateArtifact =
-    typeof artifact?.loaderModule === "string" && artifact.loaderModule.length > 0
+    typeof runtimeOptions.instantiateArtifact === "function"
+      ? runtimeOptions.instantiateArtifact
+      : !prefersDirectInstantiation &&
+          typeof artifact?.loaderModule === "string" &&
+          artifact.loaderModule.length > 0
       ? (moduleBytes, imports) =>
           instantiateArtifactWithLoaderModule(
             artifact.loaderModule,
             moduleBytes,
             imports,
           )
-      : runtimeOptions.instantiateArtifact ?? WebAssembly.instantiate;
+      : WebAssembly.instantiate;
   const createCompiledHost =
     runtimeOptions.createCompiledHost ?? bindCompiledFlowRuntimeHost;
 

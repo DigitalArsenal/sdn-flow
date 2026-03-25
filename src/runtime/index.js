@@ -22,6 +22,7 @@ export {
   FLOW_WASM_HOST_COMPAT_IMPORT_MODULES,
   FLOW_WASM_WASMEDGE_IMPORT_MODULES,
   assertSupportedFlowWasmImportContract,
+  canUseDirectFlowWasmInstantiation,
   createDefaultFlowWasmCompatImports,
   createDefaultWasiPreview1CompatImports,
   describeFlowWasmImportContract,

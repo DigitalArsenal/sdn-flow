@@ -21,7 +21,10 @@ import {
   normalizeManagedSecuritySettings,
   normalizeStartupProtocol,
 } from "../host/managedSecurity.js";
-import { instantiateArtifactWithLoaderModule } from "../runtime/wasmCompatibility.js";
+import {
+  canUseDirectFlowWasmInstantiation,
+  instantiateArtifactWithLoaderModule,
+} from "../runtime/wasmCompatibility.js";
 import { compileNodeRedFlowsToSdnArtifactInSubprocess } from "./compileArtifactSubprocess.js";
 import {
   createSdnFlowEditorDelegatedRuntimeUnavailableError,
@@ -6520,7 +6523,11 @@ export function createSdnFlowEditorRuntimeManager(options = {}) {
     options.loadCompiledRuntimeHost ??
     (async (buildRecord) => {
       const artifact = await deserializeCompiledArtifact(buildRecord.serializedArtifact);
+      const prefersDirectInstantiation = canUseDirectFlowWasmInstantiation(
+        artifact?.wasm,
+      );
       const instantiateArtifact =
+        !prefersDirectInstantiation &&
         typeof buildRecord?.loaderModule === "string" && buildRecord.loaderModule.length > 0
           ? (moduleBytes, imports) =>
               instantiateArtifactWithLoaderModule(buildRecord.loaderModule, moduleBytes, imports)

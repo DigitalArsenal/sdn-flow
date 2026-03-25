@@ -179,6 +179,11 @@ export function describeFlowWasmImportContract(value) {
   }
 }
 
+export function canUseDirectFlowWasmInstantiation(value) {
+  const contract = describeFlowWasmImportContract(value);
+  return contract.valid && contract.isHostCompatible;
+}
+
 export function assertSupportedFlowWasmImportContract(
   value,
   {
@@ -278,6 +283,7 @@ export default {
   FLOW_WASM_HOST_COMPAT_IMPORT_MODULES,
   FLOW_WASM_WASMEDGE_IMPORT_MODULES,
   assertSupportedFlowWasmImportContract,
+  canUseDirectFlowWasmInstantiation,
   createDefaultFlowWasmCompatImports,
   createDefaultWasiPreview1CompatImports,
   describeFlowWasmImportContract,

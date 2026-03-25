@@ -1,4 +1,8 @@
 import {
+  canUseDirectFlowWasmInstantiation,
+  describeFlowWasmImportContract,
+} from "../runtime/index.js";
+import {
   listCompiledArtifactRuntimeTargets,
   resolveCompiledArtifactEnvelope,
   resolveCompiledArtifactInput,
@@ -222,17 +226,23 @@ export async function startStandaloneFlowRuntime(options = {}) {
     target: options.target ?? resolvedInput.deploymentTarget,
     deploymentTarget: resolvedInput.deploymentTarget,
   });
+  const prefersDirectInstantiation = canUseDirectFlowWasmInstantiation(
+    resolvedInput.artifact?.wasm,
+  );
 
   const instantiateArtifact =
-    typeof resolvedInput.artifact?.loaderModule === "string" &&
-    resolvedInput.artifact.loaderModule.length > 0
+    typeof options.instantiateArtifact === "function"
+      ? options.instantiateArtifact
+      : !prefersDirectInstantiation &&
+          typeof resolvedInput.artifact?.loaderModule === "string" &&
+          resolvedInput.artifact.loaderModule.length > 0
       ? (moduleBytes, imports) =>
           instantiateArtifactWithLoaderModule(
             resolvedInput.artifact.loaderModule,
             moduleBytes,
             imports,
           )
-      : options.instantiateArtifact ?? WebAssembly.instantiate;
+      : WebAssembly.instantiate;
   const bindRuntimeHost =
     options.bindRuntimeHost ?? bindCompiledFlowRuntimeHost;
 
@@ -258,6 +268,9 @@ export async function startStandaloneFlowRuntime(options = {}) {
     target: compatibilityState.target,
     runtimeTargets: compatibilityState.runtimeTargets,
     runtimeCompatibility: compatibilityState.compatibility,
+    guestImportContract: describeFlowWasmImportContract(
+      resolvedInput.artifact?.wasm,
+    ),
     close() {
       return disposeStandaloneRuntime(runtimeHost);
     },
