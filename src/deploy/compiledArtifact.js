@@ -1,4 +1,13 @@
-import { decodePluginManifest } from "space-data-module-sdk";
+import {
+  appendPublicationRecordCollection,
+  createEncryptedEnvelopePayload,
+  createPublicationNotice,
+  decodePluginManifest,
+  decryptBytesFromEnvelope,
+  encodePublicationRecordCollection,
+  encryptBytesForRecipient,
+  extractPublicationRecordCollection,
+} from "space-data-module-sdk";
 
 import { normalizeManifest } from "../runtime/index.js";
 import { DefaultManifestExports } from "../runtime/constants.js";
@@ -295,7 +304,120 @@ export function serializeCompiledArtifact(artifact) {
   };
 }
 
-export async function deserializeCompiledArtifact(serializedArtifact = {}) {
+export async function serializeCompiledArtifactForDeployment(
+  artifact,
+  options = {},
+) {
+  const serialized = serializeCompiledArtifact(artifact);
+  const recipientPublicKey = options.recipientPublicKey ?? null;
+  const publicationSigner = options.publicationSigner ?? null;
+  if (!recipientPublicKey && !publicationSigner) {
+    return serialized;
+  }
+
+  let payloadBytes = artifact.wasm;
+  let enc = null;
+  if (recipientPublicKey) {
+    const encrypted = await encryptBytesForRecipient({
+      plaintext: payloadBytes,
+      recipientPublicKey,
+      context:
+        options.publicationContext ??
+        `sdn-flow/compiled-artifact:${artifact.programId}`,
+      rootType: "WASM",
+    });
+    const parsedEncrypted = extractPublicationRecordCollection(
+      base64ToBytes(encrypted.protectedBlobBase64),
+    );
+    payloadBytes = parsedEncrypted.payloadBytes;
+    enc = parsedEncrypted.enc;
+  }
+
+  const pnm = publicationSigner
+    ? await createPublicationNotice({
+        payloadBytes,
+        artifactId: artifact.artifactId,
+        programId: artifact.programId,
+        fileName: `${artifact.artifactId}.wasm`,
+        fileId: artifact.programId,
+        signer: publicationSigner,
+      })
+    : null;
+  const recordCollectionBytes = encodePublicationRecordCollection({
+    ...(enc ? { enc } : {}),
+    ...(pnm ? { pnm } : {}),
+  });
+  const protectedWasmBytes = appendPublicationRecordCollection(
+    payloadBytes,
+    recordCollectionBytes,
+  );
+  const { wasmBase64, ...rest } = serialized;
+  return {
+    ...rest,
+    wasmEncoding: "sds-rec",
+    wasmProtectedEnvelope: createEncryptedEnvelopePayload({
+      protectedBlobBytes: protectedWasmBytes,
+      parsedProtectedBlob: {
+        payloadBytes,
+        recordCollectionBytes,
+        enc,
+        pnm,
+      },
+      enc,
+      context: enc?.context ?? null,
+    }),
+  };
+}
+
+export async function deserializeCompiledArtifact(
+  serializedArtifact = {},
+  options = {},
+) {
+  if (serializedArtifact.wasmProtectedEnvelope) {
+    const protectedEnvelope = serializedArtifact.wasmProtectedEnvelope;
+    const protectedBlobBase64 = protectedEnvelope?.protectedBlobBase64;
+    if (typeof protectedBlobBase64 !== "string" || protectedBlobBase64.length === 0) {
+      throw new Error("Protected compiled artifact is missing protectedBlobBase64.");
+    }
+    const protectedBytes = base64ToBytes(protectedBlobBase64);
+    const publication = extractPublicationRecordCollection(protectedBytes);
+    if (!publication) {
+      throw new Error("Protected compiled artifact is missing a valid REC trailer.");
+    }
+    let wasmBytes = publication.payloadBytes;
+    if (publication.enc) {
+      if (typeof options.decryptWasm === "function") {
+        const decrypted = await options.decryptWasm(
+          protectedEnvelope,
+          serializedArtifact,
+        );
+        wasmBytes =
+          decrypted && typeof decrypted === "object" && decrypted.data
+            ? toUint8Array(decrypted.data)
+            : toUint8Array(decrypted);
+      } else if (options.recipientPrivateKey) {
+        wasmBytes = await decryptBytesFromEnvelope({
+          envelope: protectedEnvelope,
+          recipientPrivateKey: options.recipientPrivateKey,
+        });
+      } else {
+        throw new Error(
+          "Protected compiled flow wasm must be decrypted before host startup.",
+        );
+      }
+    }
+
+    return normalizeCompiledArtifact({
+      ...serializedArtifact,
+      wasm: wasmBytes,
+      manifestBuffer: base64ToBytes(serializedArtifact.manifestBase64),
+      manifestExports:
+        serializedArtifact.manifestExports ??
+        serializedArtifact.manifest_exports,
+      runtimeExports:
+        serializedArtifact.runtimeExports ?? serializedArtifact.runtime_exports,
+    });
+  }
   if (
     serializedArtifact.wasmBase64 !== undefined ||
     serializedArtifact.manifestBase64 !== undefined
@@ -384,13 +506,13 @@ export async function resolveCompiledArtifactInput(input = {}, options = {}) {
     typeof resolved === "object" &&
     resolved.kind === "compiled-flow-wasm-deployment"
   ) {
-    return deserializeCompiledArtifact(resolved.artifact);
+    return deserializeCompiledArtifact(resolved.artifact, options);
   }
   if (resolved && typeof resolved === "object" && resolved.artifact) {
-    return deserializeCompiledArtifact(resolved.artifact);
+    return deserializeCompiledArtifact(resolved.artifact, options);
   }
 
-  return deserializeCompiledArtifact(resolved);
+  return deserializeCompiledArtifact(resolved, options);
 }
 
 export default {
@@ -401,4 +523,5 @@ export default {
   resolveCompiledArtifactEnvelope,
   resolveCompiledArtifactInput,
   serializeCompiledArtifact,
+  serializeCompiledArtifactForDeployment,
 };

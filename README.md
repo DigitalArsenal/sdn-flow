@@ -83,7 +83,7 @@ native interop against the WasmEdge C API. See
 - manifest schema and embedded manifest exports
 - module capability vocabulary
 - compliance rules
-- module signing and transport envelopes
+- module signing and appended SDS publication records (`REC`, `PNM`, `ENC`)
 - `sds.bundle` single-file packaging
 - module hostcall/import ABI
 

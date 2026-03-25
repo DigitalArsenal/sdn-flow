@@ -5,10 +5,12 @@ import {
   createFlowDeploymentPlan,
   deserializeCompiledArtifact,
   FlowDeploymentClient,
+  generateX25519Keypair,
   normalizeCompiledArtifact,
   resolveCompiledArtifactEnvelope,
   resolveCompiledArtifactInput,
   serializeCompiledArtifact,
+  serializeCompiledArtifactForDeployment,
 } from "../src/index.js";
 
 test("compiled artifacts require an embedded manifest and default manifest exports", async () => {
@@ -182,6 +184,41 @@ test("serialized compiled artifacts can be decoded back into runtime artifacts",
   );
 });
 
+test("serialized compiled artifacts can carry protected wasm blobs with REC trailers", async () => {
+  const normalized = await normalizeCompiledArtifact({
+    programId: "flow.artifact.protected",
+    wasm: new Uint8Array([0x00, 0x61, 0x73, 0x6d]),
+    manifestBuffer: new Uint8Array([0x46, 0x4c, 0x4f, 0x57]),
+  });
+  const recipient = await generateX25519Keypair();
+  const serialized = await serializeCompiledArtifactForDeployment(normalized, {
+    recipientPublicKey: recipient.publicKey,
+    publicationSigner: {
+      algorithm: "test-signature",
+      curve: "test",
+      publicKeyHex: "abc123",
+      derivationPath: null,
+      keyId: "test-key",
+      async sign(bytes) {
+        return bytes.subarray(0, Math.min(bytes.length, 8));
+      },
+    },
+  });
+
+  assert.equal(serialized.wasmBase64, undefined);
+  assert.equal(serialized.wasmEncoding, "sds-rec");
+  assert.ok(serialized.wasmProtectedEnvelope?.protectedBlobBase64.length > 0);
+  await assert.rejects(
+    deserializeCompiledArtifact(serialized),
+    /must be decrypted before host startup/i,
+  );
+
+  const decoded = await deserializeCompiledArtifact(serialized, {
+    recipientPrivateKey: recipient.privateKey,
+  });
+  assert.deepEqual(Array.from(decoded.wasm), Array.from(normalized.wasm));
+});
+
 test("deployment payloads can be resolved into compiled runtime artifacts", async () => {
   const client = new FlowDeploymentClient();
   const artifact = await normalizeCompiledArtifact({
@@ -248,6 +285,33 @@ test("serialized deployment json can be resolved into compiled runtime artifacts
   );
 
   assert.equal(resolved.programId, artifact.programId);
+  assert.deepEqual(Array.from(resolved.wasm), Array.from(artifact.wasm));
+});
+
+test("deployment payloads can protect wasm blobs and resolve after trailer scan + decrypt", async () => {
+  const client = new FlowDeploymentClient();
+  const recipient = await generateX25519Keypair();
+  const artifact = await normalizeCompiledArtifact({
+    programId: "flow.artifact.protected.deployment",
+    wasm: new Uint8Array([0x00, 0x61, 0x73, 0x6d]),
+    manifestBuffer: new Uint8Array([0x46, 0x4c, 0x4f, 0x57]),
+  });
+  const deployment = await client.prepareDeployment({
+    artifact,
+    recipientPublicKey: recipient.publicKey,
+    target: {
+      kind: "local",
+      runtimeId: "runtime-protected-deployment",
+    },
+  });
+
+  assert.equal(deployment.encrypted, true);
+  assert.equal(deployment.artifactProtected, true);
+  assert.ok(deployment.payload.artifact.wasmProtectedEnvelope);
+
+  const resolved = await resolveCompiledArtifactInput(deployment, {
+    recipientPrivateKey: recipient.privateKey,
+  });
   assert.deepEqual(Array.from(resolved.wasm), Array.from(artifact.wasm));
 });
 

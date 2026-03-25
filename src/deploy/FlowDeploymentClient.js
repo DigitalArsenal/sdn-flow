@@ -5,11 +5,10 @@ import {
 } from "../auth/index.js";
 import { normalizeDeploymentPlan } from "space-data-module-sdk";
 import { evaluateHostedRuntimeTargetSupport } from "../host/profile.js";
-import { encryptJsonForRecipient } from "../transport/index.js";
 import {
   listCompiledArtifactRuntimeTargets,
   normalizeCompiledArtifact,
-  serializeCompiledArtifact,
+  serializeCompiledArtifactForDeployment,
 } from "./compiledArtifact.js";
 
 function normalizeString(value, fallback = null) {
@@ -143,6 +142,7 @@ export class FlowDeploymentClient {
     deploymentPlan = null,
     target,
     signer = null,
+    publicationSigner = null,
     requiredCapabilities = null,
     recipientPublicKey = null,
     authorization = null,
@@ -186,10 +186,26 @@ export class FlowDeploymentClient {
       });
     }
 
+    const resolvedRecipientPublicKey =
+      recipientPublicKey ?? target?.recipientPublicKey ?? null;
+    const protectArtifactWasm =
+      encrypt ?? Boolean(resolvedRecipientPublicKey);
+    if (protectArtifactWasm && !resolvedRecipientPublicKey) {
+      throw new Error(
+        "Artifact wasm protection requires recipientPublicKey or target.recipientPublicKey.",
+      );
+    }
+
     const payload = {
       version: 1,
       kind: "compiled-flow-wasm-deployment",
-      artifact: serializeCompiledArtifact(normalizedArtifact),
+      artifact: await serializeCompiledArtifactForDeployment(normalizedArtifact, {
+        recipientPublicKey: protectArtifactWasm
+          ? resolvedRecipientPublicKey
+          : null,
+        publicationSigner: publicationSigner ?? null,
+        publicationContext: `sdn-flow/deploy:${normalizedArtifact.programId}`,
+      }),
       deploymentPlan: requestedDeploymentPlan
         ? normalizeDeploymentPlan(requestedDeploymentPlan)
         : null,
@@ -197,23 +213,10 @@ export class FlowDeploymentClient {
       target: targetDescriptor,
     };
 
-    const shouldEncrypt =
-      encrypt ?? Boolean(recipientPublicKey ?? target?.recipientPublicKey);
-    if (shouldEncrypt) {
-      return {
-        version: 1,
-        encrypted: true,
-        envelope: await encryptJsonForRecipient({
-          payload,
-          recipientPublicKey: recipientPublicKey ?? target?.recipientPublicKey,
-          context: `sdn-flow/deploy:${normalizedArtifact.programId}`,
-        }),
-      };
-    }
-
     return {
       version: 1,
-      encrypted: false,
+      encrypted: protectArtifactWasm,
+      artifactProtected: Boolean(payload.artifact?.wasmProtectedEnvelope),
       payload,
     };
   }
