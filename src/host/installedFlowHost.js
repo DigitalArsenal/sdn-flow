@@ -115,6 +115,26 @@ function shouldAllowLiveProgramCompilation(options = {}) {
   return options.allowLiveProgramCompilation === true;
 }
 
+const forbiddenLiveCompilationSeamKeys = Object.freeze([
+  "compileArtifact",
+  "compiler",
+  "emception",
+  "emceptionSessionFactory",
+  "sourceGenerator",
+]);
+
+function validateCanonicalLiveCompilationPath(artifactOptions = {}) {
+  const forbiddenKeys = forbiddenLiveCompilationSeamKeys.filter((key) =>
+    hasOwn(artifactOptions, key),
+  );
+  if (forbiddenKeys.length === 0) {
+    return;
+  }
+  throw new Error(
+    `Installed flow live compilation only supports the canonical SDK emception path. Remove alternate seams: ${forbiddenKeys.join(", ")}.`,
+  );
+}
+
 async function fileExists(filePath) {
   try {
     await access(filePath);
@@ -1027,6 +1047,7 @@ async function compileInstalledFlowArtifact({
   registry = null,
   artifactOptions = {},
 } = {}) {
+  validateCanonicalLiveCompilationPath(artifactOptions);
   const explicitArtifact =
     artifactOptions.artifact ??
     artifactOptions.compiledArtifact ??
@@ -1036,57 +1057,39 @@ async function compileInstalledFlowArtifact({
     return resolveCompiledArtifactInput(explicitArtifact);
   }
 
-  if (typeof artifactOptions.compileArtifact === "function") {
-    return normalizeCompiledArtifact(
-      await artifactOptions.compileArtifact({
-        program,
-        manifests,
-        registry,
-        metadata: artifactOptions.metadata ?? null,
-      }),
-    );
-  }
-
-  let compiler = artifactOptions.compiler ?? null;
-  let emception = artifactOptions.emception ?? null;
+  let emception = null;
   let ownsSession = false;
   let workingDirectory = normalizeString(
     artifactOptions.workingDirectory,
     null,
   );
 
-  if (!compiler) {
-    if (!emception) {
-      workingDirectory =
-        workingDirectory ?? `/working/sdn-flow-installed-${randomUUID()}`;
-      const sessionFactory =
-        artifactOptions.emceptionSessionFactory ?? createSdkEmceptionSession;
-      emception = await sessionFactory({
-        workingDirectory,
-      });
-      ownsSession = true;
-    }
-    compiler = new EmceptionCompilerAdapter({
-      emception,
-      artifactCatalog: artifactOptions.artifactCatalog,
-      manifestBuilder:
-        artifactOptions.manifestBuilder ??
-        (({ program: manifestProgram, metadata, dependencies }) =>
-          buildDefaultFlowManifestBuffer({
-            program: manifestProgram,
-            manifests,
-            registry,
-            dependencies,
-            deploymentPlan: metadata?.deploymentPlan ?? null,
-            hostPlan: metadata?.hostPlan ?? null,
-            runtimeTargets: metadata?.runtimeTargets ?? null,
-            pluginId: metadata?.pluginId ?? null,
-            version: metadata?.version ?? null,
-          })),
-      outputName: artifactOptions.outputName ?? "installed-flow-runtime",
-      sourceGenerator: artifactOptions.sourceGenerator,
-    });
-  }
+  workingDirectory =
+    workingDirectory ?? `/working/sdn-flow-installed-${randomUUID()}`;
+  emception = await createSdkEmceptionSession({
+    workingDirectory,
+  });
+  ownsSession = true;
+
+  const compiler = new EmceptionCompilerAdapter({
+    emception,
+    artifactCatalog: artifactOptions.artifactCatalog,
+    manifestBuilder:
+      artifactOptions.manifestBuilder ??
+      (({ program: manifestProgram, metadata, dependencies }) =>
+        buildDefaultFlowManifestBuffer({
+          program: manifestProgram,
+          manifests,
+          registry,
+          dependencies,
+          deploymentPlan: metadata?.deploymentPlan ?? null,
+          hostPlan: metadata?.hostPlan ?? null,
+          runtimeTargets: metadata?.runtimeTargets ?? null,
+          pluginId: metadata?.pluginId ?? null,
+          version: metadata?.version ?? null,
+        })),
+    outputName: artifactOptions.outputName ?? "installed-flow-runtime",
+  });
 
   try {
     return normalizeCompiledArtifact(

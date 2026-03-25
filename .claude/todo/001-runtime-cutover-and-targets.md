@@ -27,6 +27,9 @@ This directory is the only active TODO set for `sdn-flow`.
    - [x] Compile that C++ through the SDK emception API only.
    - [ ] Remove any remaining fake, filesystem-backed, or alternate emception
          paths.
+         Installed live compilation now rejects `compileArtifact`,
+         `compiler`, `emception`, `emceptionSessionFactory`, and
+         `sourceGenerator` seams; remaining alternate paths are elsewhere.
    - [x] Make the compiled artifact and deployment plan the only runtime inputs
          for installed execution.
 
