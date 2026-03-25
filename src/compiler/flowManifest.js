@@ -261,6 +261,76 @@ export function inferFlowRuntimeTargets(options = {}) {
   return [RuntimeTarget.WASI];
 }
 
+export function inferFlowRuntimeTargetProfile(options = {}) {
+  const normalizedProgram = normalizeProgram(options.program ?? {});
+  const runtimeTargets = normalizeStringArray(
+    options.runtimeTargets ??
+      options.runtime_targets ??
+      options.manifest?.runtimeTargets ??
+      normalizedProgram.runtimeTargets,
+  );
+  const explicitClass = normalizeString(
+    options.runtimeTargetClass ??
+      options.runtime_target_class ??
+      normalizedProgram.runtimeTargetClass,
+    null,
+  );
+  const explicitStandardTarget = normalizeString(
+    options.standardRuntimeTarget ??
+      options.standard_runtime_target ??
+      normalizedProgram.standardRuntimeTarget,
+    null,
+  );
+  const inferredTarget = runtimeTargets[0] ?? null;
+
+  if (explicitClass || explicitStandardTarget) {
+    return {
+      runtimeTargetClass:
+        explicitClass ??
+        (explicitStandardTarget === RuntimeTarget.BROWSER
+          ? "delegated"
+          : explicitStandardTarget === RuntimeTarget.WASI
+            ? "standalone"
+            : "server-side"),
+      standardRuntimeTarget:
+        explicitStandardTarget ??
+        (runtimeTargets.includes(RuntimeTarget.WASMEDGE)
+          ? RuntimeTarget.WASMEDGE
+          : inferredTarget),
+    };
+  }
+
+  if (runtimeTargets.includes(RuntimeTarget.WASMEDGE)) {
+    return {
+      runtimeTargetClass: "server-side",
+      standardRuntimeTarget: RuntimeTarget.WASMEDGE,
+    };
+  }
+  if (runtimeTargets.includes(RuntimeTarget.SERVER)) {
+    return {
+      runtimeTargetClass: "server-side",
+      standardRuntimeTarget: RuntimeTarget.SERVER,
+    };
+  }
+  if (runtimeTargets.includes(RuntimeTarget.WASI)) {
+    return {
+      runtimeTargetClass: "standalone",
+      standardRuntimeTarget: RuntimeTarget.WASI,
+    };
+  }
+  if (runtimeTargets.includes(RuntimeTarget.BROWSER)) {
+    return {
+      runtimeTargetClass: "delegated",
+      standardRuntimeTarget: RuntimeTarget.BROWSER,
+    };
+  }
+
+  return {
+    runtimeTargetClass: null,
+    standardRuntimeTarget: inferredTarget,
+  };
+}
+
 export function buildDefaultFlowManifest(options = {}) {
   const normalizedProgram = normalizeProgram(options.program ?? {});
   const requirements =
@@ -305,4 +375,5 @@ export default {
   buildDefaultFlowManifest,
   buildDefaultFlowManifestBuffer,
   inferFlowRuntimeTargets,
+  inferFlowRuntimeTargetProfile,
 };

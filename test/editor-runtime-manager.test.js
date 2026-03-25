@@ -742,6 +742,103 @@ test("runtime manager dispatches HTTP requests through http in triggers and retu
   }
 });
 
+test("runtime manager classifies http request as delegated while keeping http response on js-shim", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "sdn-flow-editor-runtime-http-classification-"));
+
+  try {
+    const runtimePaths = getSdnFlowEditorRuntimePaths({ projectRoot: tempDir });
+    await writeSdnFlowEditorBuildFile(runtimePaths.currentBuildFilePath, {
+      kind: "sdn-flow-editor-flow-build",
+      version: 1,
+      compileId: "compile-http-classification",
+      createdAt: "2026-03-18T12:00:00.000Z",
+      outputName: "flow-runtime",
+      runtimeModel: "compiled-cpp-wasm",
+      flows: [
+        {
+          id: "tab-1",
+          type: "tab",
+          label: "HTTP Classification",
+        },
+        {
+          id: "http-request-1",
+          z: "tab-1",
+          type: "http request",
+          method: "get",
+          url: "https://example.test/widgets",
+        },
+        {
+          id: "http-response-1",
+          z: "tab-1",
+          type: "http response",
+          statusCode: "201",
+        },
+      ],
+      serializedArtifact: {
+        artifactId: "flow-http:deadbeef",
+        programId: "flow-http",
+      },
+      artifactSummary: {
+        artifactId: "flow-http:deadbeef",
+        programId: "flow-http",
+      },
+      program: {
+        programId: "flow-http",
+        triggers: [],
+        nodes: [
+          {
+            nodeId: "http-request-1",
+            pluginId: "com.digitalarsenal.flow.http-fetcher",
+            methodId: "fetch",
+          },
+          {
+            nodeId: "http-response-1",
+            pluginId: "com.digitalarsenal.flow.http-response",
+            methodId: "send",
+          },
+        ],
+      },
+    });
+
+    const manager = createSdnFlowEditorRuntimeManager({
+      projectRoot: tempDir,
+      async loadCompiledRuntimeHost(buildRecord) {
+        return {
+          artifact: {
+            programId: buildRecord.serializedArtifact.programId,
+            wasm: new Uint8Array([0x00, 0x61, 0x73, 0x6d]),
+          },
+          host: {
+            resetRuntimeState() {},
+            async destroyDependencies() {},
+          },
+        };
+      },
+      logError() {},
+    });
+
+    await manager.initialize();
+
+    const runtimeClassification = manager.getRuntimeStatus().runtimeClassification;
+    assert.equal(
+      runtimeClassification.nodeFamilies.find((entry) => entry.family === "http request")?.classification,
+      "delegated",
+    );
+    assert.equal(
+      runtimeClassification.nodeFamilies.find((entry) => entry.family === "http response")?.classification,
+      "js-shim",
+    );
+    assert.equal(
+      runtimeClassification.handlers.find(
+        (entry) => entry.key === "com.digitalarsenal.flow.http-fetcher:fetch",
+      )?.classification,
+      "delegated",
+    );
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("runtime manager preserves Uint8Array payloads across the compiled editor runtime transport", async () => {
   const tempDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "sdn-flow-editor-runtime-binary-payload-"),
@@ -1687,6 +1784,130 @@ test("runtime manager classifies delay, trigger, link, and exec families behind 
   }
 });
 
+test("runtime manager classifies debug as delegated support", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "sdn-flow-editor-runtime-debug-delegated-"));
+
+  try {
+    const runtimePaths = getSdnFlowEditorRuntimePaths({ projectRoot: tempDir });
+    await writeSdnFlowEditorBuildFile(runtimePaths.currentBuildFilePath, {
+      kind: "sdn-flow-editor-flow-build",
+      version: 1,
+      compileId: "compile-debug-delegated",
+      createdAt: "2026-03-18T12:00:00.000Z",
+      outputName: "flow-runtime",
+      runtimeModel: "compiled-cpp-wasm",
+      flows: [
+        {
+          id: "tab-1",
+          type: "tab",
+          label: "Debug Delegation",
+        },
+        {
+          id: "inject-1",
+          z: "tab-1",
+          type: "inject",
+          wires: [["debug-1"]],
+        },
+        {
+          id: "debug-1",
+          z: "tab-1",
+          type: "debug",
+          wires: [],
+        },
+      ],
+      serializedArtifact: {
+        artifactId: "flow-debug:deadbeef",
+        programId: "flow-debug",
+      },
+      artifactSummary: {
+        artifactId: "flow-debug:deadbeef",
+        programId: "flow-debug",
+      },
+      program: {
+        programId: "flow-debug",
+        triggers: [
+          {
+            triggerId: "trigger-inject-1",
+          },
+        ],
+        nodes: [
+          {
+            nodeId: "debug-1",
+            pluginId: "com.digitalarsenal.editor.debug",
+            methodId: "write_debug",
+          },
+        ],
+      },
+    });
+
+    const manager = createSdnFlowEditorRuntimeManager({
+      projectRoot: tempDir,
+      async loadCompiledRuntimeHost(buildRecord) {
+        return {
+          artifact: {
+            programId: buildRecord.serializedArtifact.programId,
+            wasm: new Uint8Array([0x00, 0x61, 0x73, 0x6d]),
+          },
+          host: {
+            resetRuntimeState() {},
+            async destroyDependencies() {},
+          },
+        };
+      },
+      logError() {},
+    });
+
+    await manager.initialize();
+
+    const runtimeClassification = manager.getRuntimeStatus().runtimeClassification;
+    assert.deepEqual(runtimeClassification.summary, {
+      totalNodes: 2,
+      families: 2,
+      handlers: 1,
+      byClassification: {
+        compiled: 1,
+        delegated: 1,
+        "js-shim": 0,
+      },
+    });
+    assert.deepEqual(runtimeClassification.nodeFamilies, [
+      {
+        family: "debug",
+        classification: "delegated",
+        count: 1,
+        nodeIds: ["debug-1"],
+        triggerIds: [],
+        pluginIds: ["com.digitalarsenal.editor.debug"],
+        methodIds: ["write_debug"],
+        handlerKeys: ["com.digitalarsenal.editor.debug:write_debug"],
+      },
+      {
+        family: "inject",
+        classification: "compiled",
+        count: 1,
+        nodeIds: ["inject-1"],
+        triggerIds: ["trigger-inject-1"],
+        pluginIds: [],
+        methodIds: [],
+        handlerKeys: [],
+      },
+    ]);
+    assert.deepEqual(runtimeClassification.handlers, [
+      {
+        key: "com.digitalarsenal.editor.debug:write_debug",
+        classification: "delegated",
+        count: 1,
+        nodeIds: ["debug-1"],
+        families: ["debug"],
+        pluginIds: ["com.digitalarsenal.editor.debug"],
+        methodIds: ["write_debug"],
+      },
+    ]);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("runtime manager fails fast when delegated-only families are unavailable for the runtime target", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "sdn-flow-editor-runtime-delegated-unavailable-"));
   let loadCalls = 0;
@@ -1771,6 +1992,96 @@ test("runtime manager fails fast when delegated-only families are unavailable fo
     assert.match(
       status.lastArtifactLoadError,
       /Delegated editor runtime support for exec node "exec-1" is unavailable\. Enable delegated support for this editor runtime target\./,
+    );
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("runtime manager fails fast when delegated debug support is unavailable for the runtime target", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "sdn-flow-editor-runtime-delegated-debug-unavailable-"));
+  let loadCalls = 0;
+
+  try {
+    const runtimePaths = getSdnFlowEditorRuntimePaths({ projectRoot: tempDir });
+    await writeSdnFlowEditorBuildFile(runtimePaths.currentBuildFilePath, {
+      kind: "sdn-flow-editor-flow-build",
+      version: 1,
+      compileId: "compile-debug-unavailable",
+      createdAt: "2026-03-18T12:00:00.000Z",
+      outputName: "flow-runtime",
+      runtimeModel: "compiled-cpp-wasm",
+      flows: [
+        {
+          id: "tab-1",
+          type: "tab",
+          label: "Unsupported Delegated Debug",
+        },
+        {
+          id: "inject-1",
+          z: "tab-1",
+          type: "inject",
+          wires: [["debug-1"]],
+        },
+        {
+          id: "debug-1",
+          z: "tab-1",
+          type: "debug",
+          wires: [],
+        },
+      ],
+      serializedArtifact: {
+        artifactId: "flow-debug-unavailable:deadbeef",
+        programId: "flow-debug-unavailable",
+      },
+      artifactSummary: {
+        artifactId: "flow-debug-unavailable:deadbeef",
+        programId: "flow-debug-unavailable",
+      },
+      program: {
+        programId: "flow-debug-unavailable",
+        triggers: [
+          {
+            triggerId: "trigger-inject-1",
+          },
+        ],
+        nodes: [
+          {
+            nodeId: "debug-1",
+            pluginId: "com.digitalarsenal.editor.debug",
+            methodId: "write_debug",
+          },
+        ],
+      },
+    });
+
+    const manager = createSdnFlowEditorRuntimeManager({
+      projectRoot: tempDir,
+      delegatedRuntimeSupport: false,
+      async loadCompiledRuntimeHost() {
+        loadCalls += 1;
+        return {
+          artifact: {
+            programId: "flow-debug-unavailable",
+            wasm: new Uint8Array([0x00, 0x61, 0x73, 0x6d]),
+          },
+          host: {
+            resetRuntimeState() {},
+            async destroyDependencies() {},
+          },
+        };
+      },
+      logError() {},
+    });
+
+    await manager.initialize();
+
+    const status = manager.getRuntimeStatus();
+    assert.equal(loadCalls, 0);
+    assert.equal(status.compiledRuntimeLoaded, false);
+    assert.match(
+      status.lastArtifactLoadError,
+      /Delegated editor runtime support for debug node "debug-1" is unavailable\. Enable delegated support for this editor runtime target\./,
     );
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });

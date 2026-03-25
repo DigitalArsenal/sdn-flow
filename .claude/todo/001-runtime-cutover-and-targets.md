@@ -34,6 +34,9 @@ This directory is the only active TODO set for `sdn-flow`.
    - [ ] Replace editor/runtime JSON `msg` plumbing with typed frame transport.
    - [ ] Keep invoke surfaces aligned with the SDK manifest contract:
          `direct` where supported, `command` everywhere else.
+         Dependency metadata and emitted manifests now preserve/derive
+         `invokeSurface` / `invokeSurfaces`; remaining work is the broader live
+         runtime path.
    - [ ] Preserve regular FlatBuffer and aligned-binary negotiation end to end.
 
 4. Target enforcement

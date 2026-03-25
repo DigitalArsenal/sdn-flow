@@ -13,6 +13,7 @@ import {
   listCompiledArtifactRuntimeTargets,
   normalizeCompiledArtifact,
   InvokeSurface,
+  inferFlowRuntimeTargetProfile,
   RuntimeTarget,
   startStandaloneFlowRuntime,
   summarizeHostedRuntimePlan,
@@ -92,6 +93,18 @@ test("buildDefaultFlowManifestBuffer infers hosted server targets and honors exp
     }),
   });
   assert.deepEqual(wasmedgeManifest?.runtimeTargets, [RuntimeTarget.WASMEDGE]);
+});
+
+test("inferFlowRuntimeTargetProfile labels WasmEdge guest-network flows as server-side", () => {
+  assert.deepEqual(
+    inferFlowRuntimeTargetProfile({
+      runtimeTargets: [RuntimeTarget.WASMEDGE],
+    }),
+    {
+      runtimeTargetClass: "server-side",
+      standardRuntimeTarget: RuntimeTarget.WASMEDGE,
+    },
+  );
 });
 
 test("evaluateHostedRuntimeTargetSupport classifies browser, server, wasi, and wasmedge hosts", () => {
@@ -201,6 +214,8 @@ test("summarizeHostedRuntimePlan exposes runtime target compatibility from host 
       hostKind: "wasmedge",
       adapter: HostedRuntimeAdapter.HOST_INTERNAL,
       engine: HostedRuntimeEngine.WASI,
+      runtimeTargetClass: "delegated",
+      standardRuntimeTarget: RuntimeTarget.BROWSER,
       runtimeTargets: [RuntimeTarget.BROWSER],
       supportedTargets: [
         RuntimeTarget.EDGE,
@@ -216,6 +231,8 @@ test("summarizeHostedRuntimePlan exposes runtime target compatibility from host 
       hostKind: "wasmedge",
       adapter: HostedRuntimeAdapter.HOST_INTERNAL,
       engine: HostedRuntimeEngine.WASI,
+      runtimeTargetClass: "server-side",
+      standardRuntimeTarget: RuntimeTarget.WASMEDGE,
       runtimeTargets: [RuntimeTarget.WASMEDGE],
       supportedTargets: [
         RuntimeTarget.EDGE,

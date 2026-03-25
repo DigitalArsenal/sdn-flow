@@ -9,6 +9,7 @@ import {
   buildDefaultFlowManifestBuffer,
   createSdkEmceptionSession,
   inferFlowRuntimeTargets,
+  inferFlowRuntimeTargetProfile,
 } from "../compiler/index.js";
 import { summarizeProgramRequirements } from "../designer/requirements.js";
 import { findManifestFiles } from "../compliance/index.js";
@@ -1696,6 +1697,21 @@ export function createInstalledFlowHostedRuntimePlan(options = {}) {
       ...options,
       deploymentPlan: options.deploymentPlan ?? null,
     });
+  const runtimeTargets =
+    options.runtimeTargets ??
+    inferFlowRuntimeTargets({
+      program,
+      requirements,
+      hostPlan: options.hostPlan ?? null,
+      deploymentPlan,
+    });
+  const runtimeTargetProfile = inferFlowRuntimeTargetProfile({
+    program,
+    requirements,
+    hostPlan: options.hostPlan ?? null,
+    deploymentPlan,
+    runtimeTargets,
+  });
 
   return normalizeHostedRuntimePlan({
     hostId: options.hostId ?? "sdn-js-local",
@@ -1719,14 +1735,8 @@ export function createInstalledFlowHostedRuntimePlan(options = {}) {
         dependsOn: options.dependsOn ?? [],
         requiredCapabilities:
           options.requiredCapabilities ?? requirements.capabilities,
-        runtimeTargets:
-          options.runtimeTargets ??
-          inferFlowRuntimeTargets({
-            program,
-            requirements,
-            hostPlan: options.hostPlan ?? null,
-            deploymentPlan,
-          }),
+        runtimeTargets,
+        ...runtimeTargetProfile,
         bindings:
           options.bindings ??
           deriveHostedRuntimeBindings({
@@ -1871,6 +1881,12 @@ export function createInstalledFlowHost(options = {}) {
   }
 
   function buildStartupSummary() {
+    const runtimeTargetProfile = inferFlowRuntimeTargetProfile({
+      program: runtimeState?.program ?? program ?? null,
+      runtimeTargets: runtimeState?.artifact
+        ? listCompiledArtifactRuntimeTargets(runtimeState.artifact)
+        : runtimeState?.program?.runtimeTargets ?? [],
+    });
     return {
       started,
       programId: runtime.getProgram()?.programId ?? program?.programId ?? null,
@@ -1879,6 +1895,7 @@ export function createInstalledFlowHost(options = {}) {
       runtimeTargets: runtimeState?.artifact
         ? listCompiledArtifactRuntimeTargets(runtimeState.artifact)
         : [],
+      ...runtimeTargetProfile,
     };
   }
 

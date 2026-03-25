@@ -3,6 +3,8 @@
   "name": "WasmEdge UDP Spooler",
   "version": "0.1.0",
   "description": "Extension-backed WASI demo that receives UDP datagrams through a host profile and writes normalized payloads to a spool directory.",
+  "runtimeTargetClass": "server-side",
+  "standardRuntimeTarget": "wasmedge",
   "nodes": [
     {
       "nodeId": "udp-spool",

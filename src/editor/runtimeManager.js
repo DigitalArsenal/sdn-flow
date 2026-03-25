@@ -5447,7 +5447,7 @@ export function createSdnFlowEditorRuntimeManager(options = {}) {
   }
 
   function installBuiltInRuntimeHandlers() {
-    runtimeHandlers.set(
+    delegatedRuntimeHandlers.set(
       "com.digitalarsenal.editor.debug:write_debug",
       async ({ dispatchDescriptor, inputs }) => {
         const nodeConfig = getActiveFlowNode(dispatchDescriptor?.nodeId);
@@ -6380,7 +6380,7 @@ export function createSdnFlowEditorRuntimeManager(options = {}) {
         });
       },
     );
-    runtimeHandlers.set(
+    delegatedRuntimeHandlers.set(
       "com.digitalarsenal.flow.http-fetcher:fetch",
       async ({ dispatchDescriptor, inputs }) => {
         const nodeConfig = getActiveFlowNode(dispatchDescriptor?.nodeId);

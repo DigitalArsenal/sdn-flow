@@ -334,6 +334,14 @@ export function normalizeManifest(manifest = {}) {
     )
       .map((target) => normalizeString(target, null))
       .filter(Boolean),
+    runtimeTargetClass: normalizeString(
+      manifest.runtimeTargetClass ?? manifest.runtime_target_class,
+      null,
+    ),
+    standardRuntimeTarget: normalizeString(
+      manifest.standardRuntimeTarget ?? manifest.standard_runtime_target,
+      null,
+    ),
     manifestBuffer: manifest.manifestBuffer ?? manifest.manifest_buffer ?? null,
     manifestExports: {
       bytesSymbol:
@@ -438,6 +446,14 @@ export function normalizeProgram(program = {}) {
     )
       .map((target) => normalizeString(target, null))
       .filter(Boolean),
+    runtimeTargetClass: normalizeString(
+      program.runtimeTargetClass ?? program.runtime_target_class,
+      null,
+    ),
+    standardRuntimeTarget: normalizeString(
+      program.standardRuntimeTarget ?? program.standard_runtime_target,
+      null,
+    ),
     nodes: normalizeArray(program.nodes).map(normalizeNode),
     edges: normalizeArray(program.edges).map(normalizeEdge),
     triggers: normalizeArray(program.triggers).map(normalizeTrigger),

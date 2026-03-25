@@ -30,12 +30,10 @@ Status: active
 - [ ] `link in`
 - [ ] `link out`
 - [ ] `link call`
-- [ ] `debug`
 - [ ] immediate/manual `inject`
 
 ## `wasmedge` Bucket
 
-- [ ] `http request`
 - [ ] `http in`
 - [ ] `http response`
 - [ ] TCP request/listener nodes
@@ -52,6 +50,8 @@ Status: active
 - [ ] wall-clock `delay`
 - [ ] wall-clock `trigger`
 - [ ] `exec`
+- [x] `http request`
+- [x] `debug`
 - [ ] `catch`
 - [ ] `status`
 - [ ] `complete`
@@ -87,6 +87,6 @@ Status: active
          standalone `wasi`, `wasmedge`, and delegated/browser profiles where
          applicable.
          A bounded harness now exists in `test/profile-parity.test.js` for
-         standalone/runtime-host/delegated reuse; `wasmedge` coverage is still
-         open.
+         standalone/runtime-host/delegated reuse, including `wasmedge`
+         server-style and guest-network host-plan checks.
    - [ ] Keep parity regressions in CI before expanding the default node set.

@@ -8,6 +8,7 @@ import {
   serializeCompiledArtifact,
   startInstalledFlowBrowserFetchHost,
   startStandaloneFlowRuntime,
+  normalizeProgram,
 } from "../src/index.js";
 import {
   handlers as basicPropagatorHandlers,
@@ -372,6 +373,7 @@ test("wasmedge server example reuses compiled artifacts on a WasmEdge host plan"
   const workspace = await compileWorkspace(
     await buildWasmedgeServerWorkspace(),
   );
+  const normalizedProgram = normalizeProgram(workspace.program);
   const host = createInstalledFlowHost({
     program: workspace.program,
     serializedArtifact: workspace.serializedArtifact,
@@ -386,7 +388,10 @@ test("wasmedge server example reuses compiled artifacts on a WasmEdge host plan"
 
   assert.equal(startup.started, true);
   assert.equal(startup.programId, workspace.program.programId);
+  assert.equal(normalizedProgram.runtimeTargetClass, null);
   assert.deepEqual(startup.runtimeTargets, ["wasmedge"]);
+  assert.equal(startup.runtimeTargetClass, "server-side");
+  assert.equal(startup.standardRuntimeTarget, "wasmedge");
   assert.deepEqual(
     deploymentPlan.inputBindings.map(
       (binding) => binding.bindingId,
@@ -397,6 +402,7 @@ test("wasmedge server example reuses compiled artifacts on a WasmEdge host plan"
 
 test("wasmedge guest-network example reuses compiled artifacts on a WasmEdge host plan", async () => {
   const workspace = await compileWorkspace(await buildWasmedgeUdpWorkspace());
+  const normalizedProgram = normalizeProgram(workspace.program);
   const host = createInstalledFlowHost({
     program: workspace.program,
     serializedArtifact: workspace.serializedArtifact,
@@ -411,7 +417,11 @@ test("wasmedge guest-network example reuses compiled artifacts on a WasmEdge hos
 
   assert.equal(startup.started, true);
   assert.equal(startup.programId, workspace.program.programId);
+  assert.equal(normalizedProgram.runtimeTargetClass, "server-side");
+  assert.equal(normalizedProgram.standardRuntimeTarget, "wasmedge");
   assert.deepEqual(startup.runtimeTargets, ["wasmedge"]);
+  assert.equal(startup.runtimeTargetClass, "server-side");
+  assert.equal(startup.standardRuntimeTarget, "wasmedge");
   assert.deepEqual(
     deploymentPlan.inputBindings.map(
       (binding) => binding.bindingId,

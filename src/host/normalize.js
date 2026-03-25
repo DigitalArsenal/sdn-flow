@@ -9,6 +9,7 @@ import {
 } from "./constants.js";
 import {
   evaluateHostedCapabilitySupport,
+  describeHostedRuntimeTargetProfile,
   evaluateHostedRuntimeTargetSupport,
   normalizeHostedRuntimeEngine,
 } from "./profile.js";
@@ -206,6 +207,14 @@ export function normalizeHostedRuntime(runtime = {}) {
       runtime.authority,
       HostedRuntimeAuthority,
       HostedRuntimeAuthority.LOCAL,
+    ),
+    runtimeTargetClass: normalizeString(
+      runtime.runtimeTargetClass ?? runtime.runtime_target_class,
+      null,
+    ),
+    standardRuntimeTarget: normalizeString(
+      runtime.standardRuntimeTarget ?? runtime.standard_runtime_target,
+      null,
     ),
     adapter: normalizeEnum(
       runtime.adapter ?? runtime.hostAdapter ?? runtime.host_adapter,
@@ -424,6 +433,12 @@ export function summarizeHostedRuntimePlan(planInput = {}) {
       engine: runtime.engine ?? plan.engine,
       dependsOn: runtime.dependsOn,
       runtimeTargets: runtime.runtimeTargets,
+      ...describeHostedRuntimeTargetProfile({
+        hostKind: plan.hostKind,
+        runtimeTargets: runtime.runtimeTargets,
+      }),
+      runtimeTargetClass: runtime.runtimeTargetClass ?? null,
+      standardRuntimeTarget: runtime.standardRuntimeTarget ?? null,
     })),
     earlyStartRuntimes: startupOrder
       .filter(
@@ -459,6 +474,10 @@ export function summarizeHostedRuntimePlan(planInput = {}) {
     runtimeTargetCompatibility: startupOrder.map((runtime) =>
       ({
         runtimeId: runtime.runtimeId,
+        ...describeHostedRuntimeTargetProfile({
+          hostKind: plan.hostKind,
+          runtimeTargets: runtime.runtimeTargets,
+        }),
         ...evaluateHostedRuntimeTargetSupport({
           hostKind: plan.hostKind,
           adapter: runtime.adapter ?? plan.adapter,

@@ -235,9 +235,52 @@ export function evaluateHostedRuntimeTargetSupport({
   };
 }
 
+export function describeHostedRuntimeTargetProfile({
+  hostKind = null,
+  runtimeTargets = [],
+} = {}) {
+  const normalizedHostKind = normalizeString(hostKind, null);
+  const normalizedTargets = normalizeRuntimeTargetArray(runtimeTargets);
+  if (normalizedTargets.includes(RuntimeTarget.WASMEDGE)) {
+    return {
+      runtimeTargetClass: "server-side",
+      standardRuntimeTarget: RuntimeTarget.WASMEDGE,
+    };
+  }
+  if (normalizedTargets.includes(RuntimeTarget.SERVER)) {
+    return {
+      runtimeTargetClass: "server-side",
+      standardRuntimeTarget: RuntimeTarget.SERVER,
+    };
+  }
+  if (normalizedTargets.includes(RuntimeTarget.WASI)) {
+    return {
+      runtimeTargetClass: "standalone",
+      standardRuntimeTarget: RuntimeTarget.WASI,
+    };
+  }
+  if (normalizedTargets.includes(RuntimeTarget.BROWSER)) {
+    return {
+      runtimeTargetClass: "delegated",
+      standardRuntimeTarget: RuntimeTarget.BROWSER,
+    };
+  }
+  if (normalizedHostKind === "wasmedge") {
+    return {
+      runtimeTargetClass: "server-side",
+      standardRuntimeTarget: RuntimeTarget.WASMEDGE,
+    };
+  }
+  return {
+    runtimeTargetClass: null,
+    standardRuntimeTarget: null,
+  };
+}
+
 export default {
   evaluateHostedCapabilitySupport,
   evaluateHostedRuntimeTargetSupport,
+  describeHostedRuntimeTargetProfile,
   listHostedRuntimeCapabilities,
   listHostedRuntimeTargets,
   normalizeHostedRuntimeEngine,

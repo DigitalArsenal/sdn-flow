@@ -118,7 +118,7 @@ test("parity matrix current-state claims match the runtime support we ship", asy
     const row = rowsByFamily.get(family);
     assert.ok(row, `Matrix is missing a row for shipped family "${family}".`);
     const expectedCurrentState =
-      family === "file" || family === "file in"
+      family === "file" || family === "file in" || family === "debug" || family === "http request"
         ? "delegated/wrapper"
         : "JS runtime";
     assert.equal(

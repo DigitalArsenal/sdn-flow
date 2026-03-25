@@ -18,6 +18,9 @@
       "autoStart": true,
       "dependsOn": [],
       "requiredCapabilities": ["network", "filesystem"],
+      "runtimeTargets": ["wasmedge"],
+      "runtimeTargetClass": "server-side",
+      "standardRuntimeTarget": "wasmedge",
       "bindings": [
         {
           "bindingId": "udp-ingest-direct",

@@ -289,6 +289,11 @@ test("environment host plans summarize the intended host adapters and bindings",
   );
   assert.equal(wasmedgeSummary.adapter, "host-internal");
   assert.equal(wasmedgeSummary.engine, "wasi");
+  assert.equal(wasmedgeSummary.startupOrder[0].runtimeTargetClass, "server-side");
+  assert.equal(
+    wasmedgeSummary.startupOrder[0].standardRuntimeTarget,
+    "wasmedge",
+  );
   assert.equal(wasmedgeSummary.transports.includes("direct"), true);
   assert.equal(
     wasmedgeSummary.bindings.some(

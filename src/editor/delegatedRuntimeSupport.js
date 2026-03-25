@@ -20,6 +20,12 @@ const delegatedRuntimeFamilies = Object.freeze([
     handlerKey: "com.digitalarsenal.editor.file-in:invoke",
   }),
   Object.freeze({
+    family: "debug",
+    pluginId: "com.digitalarsenal.editor.debug",
+    methodId: "write_debug",
+    handlerKey: "com.digitalarsenal.editor.debug:write_debug",
+  }),
+  Object.freeze({
     family: "delay",
     pluginId: "com.digitalarsenal.editor.delay",
     methodId: "invoke",
@@ -54,6 +60,12 @@ const delegatedRuntimeFamilies = Object.freeze([
     pluginId: "com.digitalarsenal.editor.exec",
     methodId: "invoke",
     handlerKey: "com.digitalarsenal.editor.exec:invoke",
+  }),
+  Object.freeze({
+    family: "http request",
+    pluginId: "com.digitalarsenal.flow.http-fetcher",
+    methodId: "fetch",
+    handlerKey: "com.digitalarsenal.flow.http-fetcher:fetch",
   }),
 ]);
 
