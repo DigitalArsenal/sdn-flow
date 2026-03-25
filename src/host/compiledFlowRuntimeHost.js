@@ -388,11 +388,33 @@ async function executeCurrentInvocationInternal(
     dependencyInvoker,
     dependencyStreamBridge,
   });
+  const canDispatchLinkedInvocationInModule =
+    host.handlers?.size === 0 &&
+    dispatchDescriptor?.dispatchModel === "linked-direct" &&
+    typeof host.dispatchCurrentInvocationDirect === "function";
 
   if (
     typeof handler !== "function" &&
     typeof dependencyDispatcher !== "function"
   ) {
+    if (canDispatchLinkedInvocationInModule) {
+      const routedOutputs = Number(
+        host.dispatchCurrentInvocationDirect({ outputStreamCap }),
+      );
+      return {
+        executed: true,
+        idle: false,
+        nodeIndex,
+        pluginId: invocation?.pluginId,
+        methodId: invocation?.methodId,
+        dispatchDescriptor,
+        dependencyDescriptor,
+        instantiatedDependency,
+        consumed,
+        routedOutputs,
+        outputs: [],
+      };
+    }
     throw new Error(
       `No compiled flow host handler is registered for ${invocation?.pluginId}:${invocation?.methodId}.`,
     );
@@ -736,6 +758,16 @@ export async function bindCompiledFlowRuntimeHost({
           outputs: result?.outputs ?? [],
         }),
       );
+    },
+    dispatchCurrentInvocationDirect({ outputStreamCap = 16 } = {}) {
+      const directDispatchExport = this.resolveEntrypoint(
+        artifact?.runtimeExports?.dispatchCurrentInvocationSymbol ??
+          "sdn_flow_dispatch_current_invocation_direct",
+      );
+      if (!directDispatchExport) {
+        return null;
+      }
+      return Number(directDispatchExport.value(outputStreamCap) ?? 0) >>> 0;
     },
     async executeNextReadyNode({ frameBudget = 1, outputStreamCap = 16 } = {}) {
       const nodeIndex = Number(bound.resolvedByRole.readyNodeSymbol()) >>> 0;

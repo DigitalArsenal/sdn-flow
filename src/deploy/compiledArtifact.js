@@ -190,6 +190,10 @@ function normalizeRuntimeExports(exports = {}) {
       exports.applyInvocationResultSymbol ??
       exports.apply_invocation_result_symbol ??
       null,
+    dispatchCurrentInvocationSymbol:
+      exports.dispatchCurrentInvocationSymbol ??
+      exports.dispatch_current_invocation_symbol ??
+      null,
     dispatchHostInvocationSymbol:
       exports.dispatchHostInvocationSymbol ??
       exports.dispatch_host_invocation_symbol ??

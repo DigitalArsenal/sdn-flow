@@ -641,7 +641,6 @@ std::string generateSource(const Request& request) {
   std::vector<std::string> linked_node_records;
   std::vector<std::string> node_dispatch_records;
   bool has_linked_direct_nodes = false;
-  bool needs_host_dispatch_import = false;
   linked_node_records.reserve(request.nodes.size());
   node_dispatch_records.reserve(request.nodes.size());
   for (std::size_t node_index = 0; node_index < request.nodes.size(); ++node_index) {
@@ -690,7 +689,6 @@ std::string generateSource(const Request& request) {
             : (!dependency->stream_invoke_symbol.empty() ? "stream-invoke"
                                                         : "unresolved"));
     has_linked_direct_nodes = has_linked_direct_nodes || linked_direct;
-    needs_host_dispatch_import = needs_host_dispatch_import || !linked_direct;
 
     std::ostringstream record;
     record << "  {\n"
@@ -1868,10 +1866,6 @@ std::string generateSource(const Request& request) {
   out << "extern \"C\" std::size_t flow_get_manifest_flatbuffer_size() {\n"
       << "  return sizeof(" << namespace_name << "::kFlowManifest);\n"
       << "}\n\n";
-  if (needs_host_dispatch_import) {
-    out << "extern \"C\" __attribute__((import_module(\"sdn_flow_host\"), import_name(\"dispatch_current_invocation\")))\n"
-        << "std::uint32_t sdn_flow_host_dispatch_current_invocation(std::uint32_t output_stream_cap);\n\n";
-  }
   out << "extern \"C\" const char * sdn_flow_get_program_id() {\n"
       << "  return " << namespace_name << "::kProgramId;\n"
       << "}\n\n";
@@ -2234,23 +2228,23 @@ std::string generateSource(const Request& request) {
       << "  " << namespace_name
       << "::recompute_node_runtime_state(node_index);\n"
       << "}\n\n";
+  out << "extern \"C\" std::uint32_t sdn_flow_dispatch_current_invocation_direct(\n"
+      << "  std::uint32_t output_stream_cap\n"
+      << ") {\n"
+      << "  const std::uint32_t node_index = " << namespace_name
+      << "::kCurrentInvocationDescriptor.node_index;\n"
+      << "  if (node_index == " << namespace_name << "::kInvalidIndex ||\n"
+      << "      node_index >= " << namespace_name << "::kRuntimeDescriptor.node_count) {\n"
+      << "    return 0u;\n"
+      << "  }\n"
+      << "  const " << namespace_name
+      << "::FlowLinkedNodeHandlerDescriptor & handler_descriptor =\n"
+      << "    " << namespace_name << "::kLinkedNodeHandlers[node_index];\n"
+      << "  if (handler_descriptor.handler == nullptr) {\n"
+      << "    return 0u;\n"
+      << "  }\n";
   if (has_linked_direct_nodes) {
-    out << "static std::uint32_t sdn_flow_dispatch_current_invocation_direct(\n"
-        << "  std::uint32_t output_stream_cap\n"
-        << ") {\n"
-        << "  const std::uint32_t node_index = " << namespace_name
-        << "::kCurrentInvocationDescriptor.node_index;\n"
-        << "  if (node_index == " << namespace_name << "::kInvalidIndex ||\n"
-        << "      node_index >= " << namespace_name << "::kRuntimeDescriptor.node_count) {\n"
-        << "    return 0u;\n"
-        << "  }\n"
-        << "  const " << namespace_name
-        << "::FlowLinkedNodeHandlerDescriptor & handler_descriptor =\n"
-        << "    " << namespace_name << "::kLinkedNodeHandlers[node_index];\n"
-        << "  if (handler_descriptor.handler == nullptr) {\n"
-        << "    return 0u;\n"
-        << "  }\n"
-        << "  " << namespace_name
+    out << "  " << namespace_name
         << "::prepare_direct_input_frames(output_stream_cap);\n"
         << "  const std::int32_t status_code = static_cast<std::int32_t>(handler_descriptor.handler());\n"
         << "  std::uint32_t routed = 0u;\n"
@@ -2270,9 +2264,13 @@ std::string generateSource(const Request& request) {
         << "    " << namespace_name << "::kDirectYielded\n"
         << "  );\n"
         << "  " << namespace_name << "::reset_direct_dispatch_state();\n"
-        << "  return routed;\n"
-        << "}\n\n";
+        << "  return routed;\n";
+  } else {
+    out << "  (void)output_stream_cap;\n"
+        << "  sdn_flow_complete_node_invocation(node_index, 1u, 0u, false);\n"
+        << "  return 0u;\n";
   }
+  out << "}\n\n";
   out << "extern \"C\" std::uint32_t sdn_flow_apply_node_invocation_result(\n"
       << "  std::uint32_t node_index,\n"
       << "  std::uint32_t status_code,\n"
@@ -2300,43 +2298,32 @@ std::string generateSource(const Request& request) {
       << "  );\n"
       << "  return routed;\n"
       << "}\n\n";
-  out << "extern \"C\" std::uint32_t sdn_flow_dispatch_next_ready_node_with_host(\n"
-      << "  std::uint32_t frame_budget,\n"
-      << "  std::uint32_t output_stream_cap\n"
-      << ") {\n"
-      << "  const std::uint32_t node_index = sdn_flow_get_ready_node_index();\n"
-      << "  if (node_index == " << namespace_name << "::kInvalidIndex) {\n"
-      << "    return " << namespace_name << "::kInvalidIndex;\n"
-      << "  }\n"
-      << "  sdn_flow_begin_node_invocation(node_index, frame_budget);\n";
-  if (has_linked_direct_nodes) {
-    out << "  if (" << namespace_name << "::kLinkedNodeHandlers[node_index].handler != nullptr) {\n"
-        << "    sdn_flow_dispatch_current_invocation_direct(output_stream_cap);\n"
-        << "    return node_index;\n"
-        << "  }\n";
-  }
-  if (needs_host_dispatch_import) {
-    out << "  sdn_flow_host_dispatch_current_invocation(output_stream_cap);\n";
-  } else {
-    out << "  sdn_flow_complete_node_invocation(node_index, 1u, 0u, false);\n";
-  }
-  out
-      << "  return node_index;\n"
-      << "}\n\n";
-  out << "extern \"C\" std::uint32_t sdn_flow_drain_with_host_dispatch(\n"
+  out << "static std::uint32_t sdn_flow_drain_standalone(\n"
       << "  std::uint32_t frame_budget,\n"
       << "  std::uint32_t output_stream_cap,\n"
-      << "  std::uint32_t max_iterations\n"
+      << "  std::uint32_t max_iterations,\n"
+      << "  bool * encountered_host_bound_node\n"
       << ") {\n"
       << "  const std::uint32_t iteration_limit = max_iterations == 0 ? 1024u : max_iterations;\n"
-      << "  std::uint32_t executed = 0;\n"
+      << "  std::uint32_t executed = 0u;\n"
+      << "  if (encountered_host_bound_node != nullptr) {\n"
+      << "    *encountered_host_bound_node = false;\n"
+      << "  }\n"
       << "  while (executed < iteration_limit) {\n"
-      << "    const std::uint32_t node_index =\n"
-      << "      sdn_flow_dispatch_next_ready_node_with_host(frame_budget, output_stream_cap);\n"
+      << "    const std::uint32_t node_index = sdn_flow_get_ready_node_index();\n"
       << "    if (node_index == " << namespace_name << "::kInvalidIndex) {\n"
       << "      break;\n"
       << "    }\n"
-      << "    executed += 1;\n"
+      << "    sdn_flow_begin_node_invocation(node_index, frame_budget);\n"
+      << "    if (" << namespace_name << "::kLinkedNodeHandlers[node_index].handler == nullptr) {\n"
+      << "      sdn_flow_complete_node_invocation(node_index, 1u, 0u, false);\n"
+      << "      if (encountered_host_bound_node != nullptr) {\n"
+      << "        *encountered_host_bound_node = true;\n"
+      << "      }\n"
+      << "      break;\n"
+      << "    }\n"
+      << "    sdn_flow_dispatch_current_invocation_direct(output_stream_cap);\n"
+      << "    executed += 1u;\n"
       << "  }\n"
       << "  return executed;\n"
       << "}\n\n";
@@ -2400,12 +2387,14 @@ std::string generateSource(const Request& request) {
       << "      continue;\n"
       << "    }\n"
       << "  }\n"
-      << "  sdn_flow_drain_with_host_dispatch(\n"
+      << "  bool encountered_host_bound_node = false;\n"
+      << "  sdn_flow_drain_standalone(\n"
       << "    frame_budget,\n"
       << "    output_stream_cap,\n"
-      << "    max_iterations\n"
+      << "    max_iterations,\n"
+      << "    &encountered_host_bound_node\n"
       << "  );\n"
-      << "  return 0;\n"
+      << "  return encountered_host_bound_node ? 1 : 0;\n"
       << "}\n";
   return out.str();
 }

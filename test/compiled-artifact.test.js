@@ -29,6 +29,9 @@ test("compiled artifacts require an embedded manifest and default manifest expor
     "flow_get_manifest_flatbuffer_size",
   );
   assert.equal(artifact.runtimeExports.descriptorSymbol, null);
+  assert.equal(artifact.runtimeExports.dispatchCurrentInvocationSymbol, null);
+  assert.equal(artifact.runtimeExports.dispatchHostInvocationSymbol, null);
+  assert.equal(artifact.runtimeExports.drainWithHostDispatchSymbol, null);
 });
 
 test("compiled artifacts reject missing embedded manifest bytes", async () => {
@@ -62,6 +65,8 @@ test("compiled artifacts normalize extended runtime descriptor exports", async (
       prepare_invocation_descriptor_symbol:
         "sdn_flow_prepare_node_invocation_descriptor",
       apply_invocation_result_symbol: "sdn_flow_apply_node_invocation_result",
+      dispatch_current_invocation_symbol:
+        "sdn_flow_dispatch_current_invocation_direct",
       dispatch_host_invocation_symbol:
         "sdn_flow_dispatch_next_ready_node_with_host",
       drain_with_host_dispatch_symbol: "sdn_flow_drain_with_host_dispatch",
@@ -113,6 +118,10 @@ test("compiled artifacts normalize extended runtime descriptor exports", async (
   assert.equal(
     artifact.runtimeExports.applyInvocationResultSymbol,
     "sdn_flow_apply_node_invocation_result",
+  );
+  assert.equal(
+    artifact.runtimeExports.dispatchCurrentInvocationSymbol,
+    "sdn_flow_dispatch_current_invocation_direct",
   );
   assert.equal(
     artifact.runtimeExports.dispatchHostInvocationSymbol,

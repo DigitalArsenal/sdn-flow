@@ -82,8 +82,7 @@ function createStubFlowRuntimeSource() {
     "sdn_flow_get_ready_node_index",
     "sdn_flow_begin_node_invocation",
     "sdn_flow_apply_node_invocation_result",
-    "sdn_flow_dispatch_next_ready_node_with_host",
-    "sdn_flow_drain_with_host_dispatch",
+    "sdn_flow_dispatch_current_invocation_direct",
   ];
   const stringFunctions = [
     ["sdn_flow_get_program_id", "com.digitalarsenal.tests.flow"],
@@ -372,12 +371,16 @@ test("emception compiler adapter compiles standalone flow wasm with a stub sourc
       "sdn_flow_apply_node_invocation_result",
     );
     assert.equal(
+      artifact.runtimeExports.dispatchCurrentInvocationSymbol,
+      "sdn_flow_dispatch_current_invocation_direct",
+    );
+    assert.equal(
       artifact.runtimeExports.dispatchHostInvocationSymbol,
-      "sdn_flow_dispatch_next_ready_node_with_host",
+      undefined,
     );
     assert.equal(
       artifact.runtimeExports.drainWithHostDispatchSymbol,
-      "sdn_flow_drain_with_host_dispatch",
+      undefined,
     );
     assert.equal(
       artifact.runtimeExports.editorMetadataJsonSymbol,
@@ -421,8 +424,12 @@ test("emception compiler adapter compiles fully linked standalone flow wasm with
   assert.deepEqual(importModules, ["wasi_snapshot_preview1"]);
   assert.equal(exportNames.includes("_start"), true);
   assert.equal(
-    exportNames.includes("sdn_flow_dispatch_next_ready_node_with_host"),
+    exportNames.includes("sdn_flow_dispatch_current_invocation_direct"),
     true,
+  );
+  assert.equal(
+    exportNames.includes("sdn_flow_dispatch_next_ready_node_with_host"),
+    false,
   );
   assert.equal(artifact.loaderModule, null);
   const wasi = new WASI({
@@ -434,6 +441,80 @@ test("emception compiler adapter compiles fully linked standalone flow wasm with
     wasi.getImportObject(),
   );
   assert.equal(wasi.start(instance), 0);
+});
+
+test("emception compiler adapter compiles hosted server flows without emitting the legacy flow-host import", async () => {
+  const program = {
+    programId: "com.digitalarsenal.tests.hosted-server-artifact",
+    version: "0.1.0",
+    nodes: [
+      {
+        nodeId: "hosted-node",
+        pluginId: "com.digitalarsenal.tests.hosted-handler",
+        methodId: "tick",
+        kind: "method",
+      },
+    ],
+    edges: [],
+    triggers: [
+      {
+        triggerId: "manual-request",
+        kind: "manual",
+      },
+    ],
+    triggerBindings: [
+      {
+        triggerId: "manual-request",
+        targetNodeId: "hosted-node",
+        targetPortId: "request",
+      },
+    ],
+    requiredPlugins: ["com.digitalarsenal.tests.hosted-handler"],
+  };
+  const workingDirectory = `/working/compiler-hosted-${randomUUID()}`;
+  const emception = await createSdkEmceptionSession({ workingDirectory });
+  const compiler = new EmceptionCompilerAdapter({
+    emception,
+    manifestBuilder: async ({ program: flowProgram }) =>
+      buildDefaultFlowManifestBuffer({
+        program: flowProgram,
+        runtimeTargets: [RuntimeTarget.SERVER],
+      }),
+  });
+
+  try {
+    const artifact = await compiler.compile({ program });
+    const module = new WebAssembly.Module(artifact.wasm);
+    const imports = WebAssembly.Module.imports(module);
+
+    assert.equal(
+      imports.some(
+        (entry) =>
+          entry.module === "sdn_flow_host" &&
+          entry.name === "dispatch_current_invocation",
+      ),
+      false,
+    );
+    assert.deepEqual(
+      Array.from(new Set(imports.map((entry) => entry.module))).sort(),
+      ["wasi_snapshot_preview1"],
+    );
+    assert.equal(
+      WebAssembly.Module.exports(module).some(
+        (entry) => entry.name === "sdn_flow_dispatch_current_invocation_direct",
+      ),
+      true,
+    );
+    assert.equal(
+      artifact.runtimeExports.dispatchCurrentInvocationSymbol,
+      "sdn_flow_dispatch_current_invocation_direct",
+    );
+    assert.equal(artifact.runtimeExports.dispatchHostInvocationSymbol, undefined);
+    assert.equal(artifact.runtimeExports.drainWithHostDispatchSymbol, undefined);
+  } finally {
+    await emception.removeDirectory(workingDirectory).catch(() => {});
+    await emception.dispose().catch(() => {});
+  }
 });
 
 test("emception compiler adapter rejects pure guest runtime targets when a node still requires host dispatch", async () => {
