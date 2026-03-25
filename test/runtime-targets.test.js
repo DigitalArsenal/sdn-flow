@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 
 import {
   buildDefaultFlowManifestBuffer,
@@ -18,6 +19,7 @@ import {
   startStandaloneFlowRuntime,
   summarizeHostedRuntimePlan,
 } from "../src/index.js";
+import { compileLinkedFlowArtifact } from "../test-support/linkedFlowArtifact.js";
 
 function createProgram(overrides = {}) {
   return {
@@ -609,6 +611,77 @@ test("startStandaloneFlowRuntime defaults wasmedge artifacts onto the host-inter
     }),
     /Standalone runtime cannot satisfy embedded runtimeTargets wasmedge/i,
   );
+});
+
+test("startStandaloneFlowRuntime executes fully linked wasi and wasmedge artifacts without a host dispatch shim import", async () => {
+  const cases = [
+    {
+      runtimeTarget: RuntimeTarget.WASI,
+      hostKind: "standalone-wasi",
+      runtimeId: "linked-wasi-runtime",
+    },
+    {
+      runtimeTarget: RuntimeTarget.WASMEDGE,
+      hostKind: "wasmedge",
+      runtimeId: "linked-wasmedge-runtime",
+    },
+  ];
+
+  for (const testCase of cases) {
+    const { artifact } = await compileLinkedFlowArtifact({
+      runtimeTargets: [testCase.runtimeTarget],
+      workingDirectory: `/working/runtime-targets-linked-${testCase.runtimeTarget}-${randomUUID()}`,
+    });
+    const imports = WebAssembly.Module.imports(
+      new WebAssembly.Module(artifact.wasm),
+    );
+
+    assert.equal(
+      imports.some(
+        (entry) =>
+          entry.module === "sdn_flow_host" &&
+          entry.name === "dispatch_current_invocation",
+      ),
+      false,
+    );
+
+    const runtime = await startStandaloneFlowRuntime({
+      artifact,
+      target: {
+        runtimeId: testCase.runtimeId,
+        hostKind: testCase.hostKind,
+        adapter: HostedRuntimeAdapter.HOST_INTERNAL,
+        engine: HostedRuntimeEngine.WASI,
+      },
+    });
+
+    assert.equal(runtime.target.hostKind, testCase.hostKind);
+    assert.deepEqual(runtime.runtimeTargets, [testCase.runtimeTarget]);
+    assert.equal(
+      runtime.enqueueTriggerFrame(0, {
+        typeDescriptorIndex: 0,
+        alignment: 8,
+        bytes: new Uint8Array([1, 2, 3, 4]),
+        streamId: 1,
+        sequence: 1,
+        traceToken: 7,
+      }),
+      1,
+    );
+
+    const execution = await runtime.dispatchNextReadyNodeWithHost({
+      frameBudget: 1,
+      outputStreamCap: 16,
+    });
+    assert.equal(execution.executed, true);
+    assert.equal(execution.nodeIndex, 0);
+
+    const idleExecution = await runtime.dispatchNextReadyNodeWithHost({
+      frameBudget: 1,
+      outputStreamCap: 16,
+    });
+    assert.equal(idleExecution.idle, true);
+  }
 });
 
 test("startStandaloneFlowRuntime enforces deployment runtime-target metadata when embedded targets are unavailable", async () => {

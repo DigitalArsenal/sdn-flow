@@ -12,9 +12,9 @@ const DEFAULT_FLAGS = Object.freeze([
   "-std=c++20",
   "-O2",
   "-sWASM=1",
+  "-sSTANDALONE_WASM=1",
   "-sALLOW_MEMORY_GROWTH=1",
   "-sERROR_ON_UNDEFINED_SYMBOLS=0",
-  "-Wl,--no-entry",
   "-sEXPORTED_FUNCTIONS=['_malloc','_free','_flow_get_manifest_flatbuffer','_flow_get_manifest_flatbuffer_size','_sdn_flow_get_program_id','_sdn_flow_get_program_name','_sdn_flow_get_program_version','_sdn_flow_get_editor_metadata_json','_sdn_flow_get_editor_metadata_size','_sdn_flow_get_type_descriptors','_sdn_flow_get_type_descriptor_count','_sdn_flow_get_accepted_type_indices','_sdn_flow_get_accepted_type_index_count','_sdn_flow_get_trigger_descriptors','_sdn_flow_get_trigger_descriptor_count','_sdn_flow_get_node_descriptors','_sdn_flow_get_node_descriptor_count','_sdn_flow_get_node_dispatch_descriptors','_sdn_flow_get_node_dispatch_descriptor_count','_sdn_flow_get_edge_descriptors','_sdn_flow_get_edge_descriptor_count','_sdn_flow_get_trigger_binding_descriptors','_sdn_flow_get_trigger_binding_descriptor_count','_sdn_flow_get_dependency_descriptors','_sdn_flow_get_dependency_count','_sdn_flow_get_ingress_descriptors','_sdn_flow_get_ingress_descriptor_count','_sdn_flow_get_ingress_frame_descriptors','_sdn_flow_get_ingress_frame_descriptor_count','_sdn_flow_get_node_ingress_indices','_sdn_flow_get_node_ingress_index_count','_sdn_flow_get_external_interface_descriptors','_sdn_flow_get_external_interface_descriptor_count','_sdn_flow_get_ingress_runtime_states','_sdn_flow_get_ingress_runtime_state_count','_sdn_flow_get_node_runtime_states','_sdn_flow_get_node_runtime_state_count','_sdn_flow_get_current_invocation_descriptor','_sdn_flow_prepare_node_invocation_descriptor','_sdn_flow_reset_runtime_state','_sdn_flow_enqueue_trigger_frames','_sdn_flow_enqueue_trigger_frame','_sdn_flow_enqueue_edge_frames','_sdn_flow_enqueue_edge_frame','_sdn_flow_get_ready_node_index','_sdn_flow_begin_node_invocation','_sdn_flow_complete_node_invocation','_sdn_flow_apply_node_invocation_result','_sdn_flow_dispatch_next_ready_node_with_host','_sdn_flow_drain_with_host_dispatch','_sdn_flow_get_runtime_descriptor']",
 ]);
 
@@ -92,6 +92,41 @@ function normalizeWorkingDirectory(value) {
     : path.posix.join(DEFAULT_WORKING_DIRECTORY, normalized);
 }
 
+function normalizeObjectFileStem(value, fallback) {
+  const normalized = String(value ?? "").trim().replaceAll("\\", "/");
+  const basename = normalized.split("/").pop() ?? "";
+  const stem = basename.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+  return stem.length > 0 ? stem : fallback;
+}
+
+function createLinkedDependencySourceFiles(dependencies = [], workingDirectory) {
+  return dependencies.flatMap((dependency, index) => {
+    const objectBytes = toUint8Array(dependency?.guestLink?.objectBytes ?? []);
+    if (objectBytes.length === 0) {
+      return [];
+    }
+    const stem = normalizeObjectFileStem(
+      dependency?.dependencyId ?? dependency?.pluginId,
+      `dependency-${index}`,
+    );
+    return [
+      {
+        path: path.posix.join(
+          workingDirectory,
+          "linked-dependencies",
+          `${index}-${stem}.o`,
+        ),
+        content: objectBytes,
+        dependencyId: dependency?.dependencyId ?? "",
+        pluginId: dependency?.pluginId ?? "",
+        linkedMethodSymbols: {
+          ...(dependency?.guestLink?.methodSymbols ?? {}),
+        },
+      },
+    ];
+  });
+}
+
 function createPortableLoaderModuleSource() {
   return [
     "export default async function createSdnFlowRuntimeLoader(module = {}) {",
@@ -107,6 +142,23 @@ function createPortableLoaderModuleSource() {
     "    }",
     '    throw new Error("Loader module requires wasmBinary bytes.");',
     "  };",
+    "  let activeInstance = null;",
+    "  const getMemory = () =>",
+    "    activeInstance?.exports?.memory ?? module.wasmMemory ?? module.memory ?? null;",
+    "  const writeU32 = (pointer, value) => {",
+    "    const memory = getMemory();",
+    "    if (!memory || !(memory.buffer instanceof ArrayBuffer) || !pointer) {",
+    "      return;",
+    "    }",
+    "    new DataView(memory.buffer).setUint32(Number(pointer) >>> 0, Number(value) >>> 0, true);",
+    "  };",
+    "  const writeU64 = (pointer, value) => {",
+    "    const memory = getMemory();",
+    "    if (!memory || !(memory.buffer instanceof ArrayBuffer) || !pointer) {",
+    "      return;",
+    "    }",
+    "    new DataView(memory.buffer).setBigUint64(Number(pointer) >>> 0, BigInt(value), true);",
+    "  };",
     "  const incomingImports = module.imports ?? {};",
     "  const baseImports = {",
     "    ...incomingImports,",
@@ -118,6 +170,26 @@ function createPortableLoaderModuleSource() {
     "      args_sizes_get() { return 0; },",
     "      args_get() { return 0; },",
     "      proc_exit() { return 0; },",
+    "      fd_close() { return 0; },",
+    "      fd_seek(_fd, _offsetLow, _offsetHigh, _whence, newOffsetPtr) {",
+    "        writeU64(newOffsetPtr, 0n);",
+    "        return 0;",
+    "      },",
+    "      fd_write(_fd, iovs, iovsLen, bytesWrittenPtr) {",
+    "        const memory = getMemory();",
+    "        if (!memory || !(memory.buffer instanceof ArrayBuffer)) {",
+    "          writeU32(bytesWrittenPtr, 0);",
+    "          return 0;",
+    "        }",
+    "        const view = new DataView(memory.buffer);",
+    "        let written = 0;",
+    "        for (let index = 0; index < Number(iovsLen ?? 0); index += 1) {",
+    "          const base = (Number(iovs) >>> 0) + index * 8;",
+    "          written += view.getUint32(base + 4, true);",
+    "        }",
+    "        writeU32(bytesWrittenPtr, written);",
+    "        return 0;",
+    "      },",
     "      ...(incomingImports.wasi_snapshot_preview1 ?? {}),",
     "    },",
     "  };",
@@ -126,6 +198,7 @@ function createPortableLoaderModuleSource() {
     "    let wasmModule = null;",
     "    const result = await module.instantiateWasm(baseImports, (nextInstance, nextModule) => {",
     "      instance = nextInstance;",
+    "      activeInstance = nextInstance;",
     "      wasmModule = nextModule;",
     "    });",
     "    const exports = instance?.exports ?? result ?? {};",
@@ -141,6 +214,7 @@ function createPortableLoaderModuleSource() {
     "    toBytes(module.wasmBinary),",
     "    baseImports,",
     "  );",
+    "  activeInstance = instantiated.instance;",
     "  return {",
     "    ...instantiated.instance.exports,",
     "    memory: instantiated.instance.exports.memory ?? null,",
@@ -230,6 +304,12 @@ export class EmceptionCompilerAdapter {
       metadata?.workingDirectory,
     );
     const flags = Array.isArray(metadata?.flags) ? metadata.flags : this.#flags;
+    const linkedDependencySourceFiles = createLinkedDependencySourceFiles(
+      dependencies,
+      workingDirectory,
+    );
+    const mainSourcePath = path.posix.join(workingDirectory, "main.cpp");
+    const outputPath = path.posix.join(workingDirectory, `${outputName}.wasm`);
     return {
       program: normalizedProgram,
       manifestBuffer,
@@ -241,13 +321,17 @@ export class EmceptionCompilerAdapter {
       workingDirectory,
       flags,
       source,
+      linkedDependencySourceFiles,
       sourceFiles: [
         {
-          path: path.posix.join(workingDirectory, "main.cpp"),
+          path: mainSourcePath,
           content: source,
         },
+        ...linkedDependencySourceFiles,
       ],
-      command: `em++ ${flags.join(" ")} ${path.posix.join(workingDirectory, "main.cpp")} -o ${path.posix.join(workingDirectory, `${outputName}.wasm`)}`,
+      command: `em++ ${flags.join(" ")} ${mainSourcePath} ${linkedDependencySourceFiles
+        .map((file) => file.path)
+        .join(" ")} -o ${outputPath}`.replace(/\s+/g, " ").trim(),
     };
   }
 

@@ -2,21 +2,119 @@ import {
   normalizeArtifactDependency,
   normalizeProgram,
 } from "../runtime/index.js";
+import {
+  parseSingleFileBundle,
+  SDS_GUEST_LINK_METADATA_ENTRY_ID,
+  SDS_GUEST_LINK_OBJECT_ENTRY_ID,
+  SDS_GUEST_LINK_SECTION_NAME,
+} from "space-data-module-sdk";
 import { sha256Bytes } from "../utils/crypto.js";
 import { bytesToHex, toUint8Array } from "../utils/encoding.js";
 
+function normalizeBytes(value) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  return toUint8Array(value);
+}
+
+function normalizeGuestLinkMethodSymbols(methodSymbols) {
+  if (!methodSymbols || typeof methodSymbols !== "object") {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(methodSymbols)
+      .map(([methodId, symbol]) => [
+        String(methodId ?? "").trim(),
+        String(symbol ?? "").trim(),
+      ])
+      .filter(([methodId, symbol]) => methodId.length > 0 && symbol.length > 0),
+  );
+}
+
+function normalizeGuestLink(guestLink = {}) {
+  const objectBytes = normalizeBytes(
+    guestLink.objectBytes ?? guestLink.object_bytes,
+  );
+  const methodSymbols = normalizeGuestLinkMethodSymbols(
+    guestLink.methodSymbols ?? guestLink.method_symbols,
+  );
+  const symbolPrefix = preferNonEmptyString(
+    guestLink.symbolPrefix ?? guestLink.symbol_prefix,
+    null,
+  );
+  const language = preferNonEmptyString(guestLink.language, null);
+  if (
+    !objectBytes &&
+    !symbolPrefix &&
+    !language &&
+    Object.keys(methodSymbols).length === 0
+  ) {
+    return null;
+  }
+  return {
+    format: preferNonEmptyString(guestLink.format, "wasm-object"),
+    language,
+    symbolPrefix,
+    methodSymbols,
+    objectBytes,
+  };
+}
+
+function extractGuestLinkFromBundle(bundle = {}) {
+  const entries = Array.isArray(bundle?.entries) ? bundle.entries : [];
+  const objectEntry =
+    entries.find(
+      (entry) =>
+        entry?.entryId === SDS_GUEST_LINK_OBJECT_ENTRY_ID ||
+        (entry?.sectionName === SDS_GUEST_LINK_SECTION_NAME &&
+          entry?.payloadEncodingName === "raw-bytes"),
+    ) ?? null;
+  const metadataEntry =
+    entries.find(
+      (entry) =>
+        entry?.entryId === SDS_GUEST_LINK_METADATA_ENTRY_ID ||
+        (entry?.sectionName === SDS_GUEST_LINK_SECTION_NAME &&
+          entry?.payloadEncodingName === "json-utf8"),
+    ) ?? null;
+  const normalized = normalizeGuestLink({
+    ...(metadataEntry?.decodedPayload ?? {}),
+    objectBytes: objectEntry?.payloadBytes ?? null,
+  });
+  return normalized;
+}
+
+async function parseBundledArtifact(bytes) {
+  const normalizedBytes = normalizeBytes(bytes);
+  if (!normalizedBytes || normalizedBytes.length === 0) {
+    return null;
+  }
+  try {
+    const parsed = await parseSingleFileBundle(normalizedBytes);
+    const manifestEntry =
+      parsed.entries?.find((entry) => entry?.roleName === "manifest") ?? null;
+    return {
+      manifestBuffer: manifestEntry?.payloadBytes ?? null,
+      guestLink: extractGuestLinkFromBundle(parsed),
+    };
+  } catch {
+    return null;
+  }
+}
+
 function normalizeSignedArtifact(artifact = {}) {
   const normalized = normalizeArtifactDependency(artifact);
+  const bundledWasmBytes =
+    normalizeBytes(artifact.bundledWasmBytes ?? artifact.bundled_wasm_bytes) ??
+    normalizeBytes(artifact.singleFileBundle?.wasmBytes);
   return {
     ...normalized,
     wasm:
-      artifact.wasm === undefined || artifact.wasm === null
-        ? null
-        : toUint8Array(artifact.wasm),
+      normalizeBytes(artifact.wasm) ?? bundledWasmBytes,
+    bundledWasmBytes,
     manifestBuffer:
-      artifact.manifestBuffer === undefined || artifact.manifestBuffer === null
-        ? null
-        : toUint8Array(artifact.manifestBuffer),
+      normalizeBytes(artifact.manifestBuffer ?? artifact.manifest_buffer),
+    guestLink: normalizeGuestLink(artifact.guestLink ?? artifact.guest_link),
   };
 }
 
@@ -98,6 +196,12 @@ export class SignedArtifactCatalog {
       const dependency = normalizedProgram.artifactDependencies[index];
       const rawDependency = rawArtifactDependencies[index] ?? {};
       const artifact = this.getArtifact(dependency);
+      const bundledArtifact =
+        artifact.guestLink && artifact.manifestBuffer
+          ? null
+          : await parseBundledArtifact(
+              artifact.bundledWasmBytes ?? artifact.wasm,
+            );
       if (!artifact.signature || !artifact.signerPublicKey) {
         throw new Error(
           `Signed artifact "${dependency.dependencyId || dependency.pluginId}" is missing signature metadata.`,
@@ -118,8 +222,10 @@ export class SignedArtifactCatalog {
         ...artifact,
         ...dependency,
         wasm: artifact.wasm,
-        manifestBuffer: artifact.manifestBuffer,
+        manifestBuffer:
+          artifact.manifestBuffer ?? bundledArtifact?.manifestBuffer ?? null,
         sha256: artifact.sha256 ?? computedSha256,
+        guestLink: artifact.guestLink ?? bundledArtifact?.guestLink ?? null,
         manifestExports: {
           bytesSymbol: preferNonEmptyString(
             rawDependency.manifestExports?.bytesSymbol ??

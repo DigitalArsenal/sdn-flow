@@ -210,6 +210,16 @@ function createGeneratorRequest({
     nodeIndexById,
     triggerIndexById,
   );
+  const dependencyIndexByPluginId = new Map();
+  dependencies.forEach((dependency, index) => {
+    if (
+      typeof dependency?.pluginId === "string" &&
+      dependency.pluginId.length > 0 &&
+      !dependencyIndexByPluginId.has(dependency.pluginId)
+    ) {
+      dependencyIndexByPluginId.set(dependency.pluginId, index);
+    }
+  });
 
   return {
     namespace,
@@ -238,10 +248,18 @@ function createGeneratorRequest({
     }),
     nodes: normalizedProgram.nodes.map((node, nodeIndex) => {
       const ingressRange = ingressTopology.nodeIngressRanges[nodeIndex];
+      const dependencyIndex =
+        dependencyIndexByPluginId.get(node.pluginId) ?? INVALID_INDEX;
+      const dependency =
+        dependencyIndex === INVALID_INDEX ? null : dependencies[dependencyIndex];
       return {
         nodeId: node.nodeId,
         pluginId: node.pluginId,
         methodId: node.methodId,
+        dependencyId: dependency?.dependencyId ?? "",
+        dependencyIndex,
+        linkedMethodSymbol:
+          dependency?.guestLink?.methodSymbols?.[node.methodId] ?? "",
         kind: node.kind,
         drainPolicy: node.drainPolicy ?? "",
         timeSliceMicros: node.timeSliceMicros,
@@ -375,6 +393,9 @@ function encodeGeneratorRequest(request) {
     writer.pushString(node.nodeId);
     writer.pushString(node.pluginId);
     writer.pushString(node.methodId);
+    writer.pushString(node.dependencyId);
+    writer.pushU32(node.dependencyIndex);
+    writer.pushString(node.linkedMethodSymbol);
     writer.pushString(node.kind);
     writer.pushString(node.drainPolicy);
     writer.pushU32(node.timeSliceMicros);
@@ -474,4 +495,5 @@ export async function generateCppFlowRuntimeSource(options = {}) {
   return result.source;
 }
 
+export { createGeneratorRequest, encodeGeneratorRequest, INVALID_INDEX };
 export default generateCppFlowRuntimeSource;
