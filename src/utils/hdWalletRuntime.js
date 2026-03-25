@@ -6,15 +6,21 @@ const NODE_BUILTIN_LOADER =
     : null;
 
 const IS_NODE_RUNTIME =
-  typeof process === "object" &&
-  process &&
-  typeof process.versions === "object" &&
-  typeof process.versions.node === "string";
+  NODE_BUILTIN_LOADER !== null ||
+  (typeof process === "object" &&
+    process &&
+    typeof process.release === "object" &&
+    process.release?.name === "node" &&
+    typeof process.versions === "object" &&
+    typeof process.versions.node === "string");
 
 let hdWalletModulePromise = null;
 let hdWalletPromise = null;
 
 function getNodeBuiltin(name) {
+  if (!IS_NODE_RUNTIME) {
+    return null;
+  }
   if (NODE_BUILTIN_LOADER) {
     return NODE_BUILTIN_LOADER(name);
   }
