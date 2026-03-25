@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFile as execFileCallback } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { promisify } from "node:util";
 
 import {
   buildDefaultFlowManifestBuffer,
@@ -20,6 +25,8 @@ import {
   summarizeHostedRuntimePlan,
 } from "../src/index.js";
 import { compileLinkedFlowArtifact } from "../test-support/linkedFlowArtifact.js";
+
+const execFile = promisify(execFileCallback);
 
 function createProgram(overrides = {}) {
   return {
@@ -644,6 +651,10 @@ test("startStandaloneFlowRuntime executes fully linked wasi and wasmedge artifac
       ),
       false,
     );
+    assert.deepEqual(
+      Array.from(new Set(imports.map((entry) => entry.module))).sort(),
+      ["wasi_snapshot_preview1"],
+    );
 
     const runtime = await startStandaloneFlowRuntime({
       artifact,
@@ -681,6 +692,36 @@ test("startStandaloneFlowRuntime executes fully linked wasi and wasmedge artifac
       outputStreamCap: 16,
     });
     assert.equal(idleExecution.idle, true);
+  }
+});
+
+test("WasmEdge can start a fully linked standalone flow artifact directly when the CLI is available", async (t) => {
+  try {
+    await execFile("wasmedge", ["--version"]);
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      t.skip("wasmedge CLI is not installed");
+      return;
+    }
+    throw error;
+  }
+
+  const tempDirectory = await mkdtemp(
+    path.join(tmpdir(), "sdn-flow-wasmedge-"),
+  );
+  try {
+    const { artifact } = await compileLinkedFlowArtifact({
+      runtimeTargets: [RuntimeTarget.WASMEDGE],
+      workingDirectory: `/working/runtime-targets-wasmedge-cli-${randomUUID()}`,
+    });
+    const wasmPath = path.join(tempDirectory, "flow-runtime.wasm");
+    await writeFile(wasmPath, artifact.wasm);
+
+    const { stdout, stderr } = await execFile("wasmedge", [wasmPath]);
+    assert.equal(stdout.trim(), "");
+    assert.equal(stderr.trim(), "");
+  } finally {
+    await rm(tempDirectory, { recursive: true, force: true });
   }
 });
 

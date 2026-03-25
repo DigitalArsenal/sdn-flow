@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
+import { WASI } from "node:wasi";
 
 import {
   createSingleFileBundle,
@@ -394,7 +395,7 @@ test("emception compiler adapter compiles standalone flow wasm with a stub sourc
   }
 });
 
-test("emception compiler adapter compiles fully linked standalone flow wasm without the sdn_flow_host dispatch import", async () => {
+test("emception compiler adapter compiles fully linked standalone flow wasm with only WASI imports and no flow-host shim", async () => {
   const { artifact } = await compileLinkedFlowArtifact({
     runtimeTargets: [RuntimeTarget.WASMEDGE],
     workingDirectory: `/working/compiler-linked-${randomUUID()}`,
@@ -405,6 +406,9 @@ test("emception compiler adapter compiles fully linked standalone flow wasm with
   const exportNames = WebAssembly.Module.exports(module).map(
     (entry) => entry.name,
   );
+  const importModules = Array.from(
+    new Set(imports.map((entry) => entry.module)),
+  ).sort();
 
   assert.equal(
     imports.some(
@@ -414,11 +418,21 @@ test("emception compiler adapter compiles fully linked standalone flow wasm with
     ),
     false,
   );
+  assert.deepEqual(importModules, ["wasi_snapshot_preview1"]);
   assert.equal(exportNames.includes("_start"), true);
   assert.equal(
     exportNames.includes("sdn_flow_dispatch_next_ready_node_with_host"),
     true,
   );
+  const wasi = new WASI({
+    version: "preview1",
+    args: ["flow-runtime"],
+  });
+  const { instance } = await WebAssembly.instantiate(
+    artifact.wasm,
+    wasi.getImportObject(),
+  );
+  assert.equal(wasi.start(instance), 0);
 });
 
 test("emception compiler adapter carries dependency invoke-surface metadata into the manifest buffer", async () => {
