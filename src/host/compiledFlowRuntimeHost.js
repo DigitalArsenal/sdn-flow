@@ -1,3 +1,6 @@
+import { decodePluginManifest } from "space-data-module-sdk";
+
+import { InvokeSurface } from "../runtime/constants.js";
 import { bindCompiledInvocationAbi } from "./invocationAbi.js";
 import { bindCompiledDescriptorAbi } from "./descriptorAbi.js";
 import { instantiateEmbeddedDependencies } from "./dependencyRuntime.js";
@@ -236,6 +239,103 @@ function isPromiseLike(value) {
   );
 }
 
+function normalizeInvokeSurfaces(values = []) {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  return Array.from(
+    new Set(
+      values
+        .map((value) => String(value ?? "").trim().toLowerCase())
+        .filter(
+          (value) =>
+            value === InvokeSurface.DIRECT || value === InvokeSurface.COMMAND,
+        ),
+    ),
+  );
+}
+
+function decodeDependencyInvokeSurfaces(dependencyDescriptor = null) {
+  const manifestBytes = dependencyDescriptor?.manifestBytes;
+  if (!(manifestBytes instanceof Uint8Array) || manifestBytes.length === 0) {
+    return [];
+  }
+  try {
+    return normalizeInvokeSurfaces(
+      decodePluginManifest(manifestBytes)?.invokeSurfaces ?? [],
+    );
+  } catch {
+    return [];
+  }
+}
+
+function resolveDependencyInvokeSurfaces({
+  dispatchDescriptor = null,
+  dependencyDescriptor = null,
+  instantiatedDependency = null,
+} = {}) {
+  const instantiatedSurfaces = normalizeInvokeSurfaces(
+    instantiatedDependency?.invokeSurfaces,
+  );
+  if (instantiatedSurfaces.length > 0) {
+    return instantiatedSurfaces;
+  }
+
+  const decodedSurfaces = decodeDependencyInvokeSurfaces(dependencyDescriptor);
+  if (decodedSurfaces.length > 0) {
+    if (
+      instantiatedDependency &&
+      !Array.isArray(instantiatedDependency.invokeSurfaces)
+    ) {
+      instantiatedDependency.invokeSurfaces = [...decodedSurfaces];
+    }
+    return decodedSurfaces;
+  }
+
+  const directAvailable =
+    typeof instantiatedDependency?.resolvedExports?.streamInvoke === "function" ||
+    Boolean(
+      dispatchDescriptor?.streamInvokeSymbol ??
+        dependencyDescriptor?.streamInvokeSymbol,
+    );
+  return [
+    directAvailable ? InvokeSurface.DIRECT : InvokeSurface.COMMAND,
+  ];
+}
+
+function resolveDependencyDispatcher({
+  dispatchDescriptor = null,
+  dependencyDescriptor = null,
+  instantiatedDependency = null,
+  dependencyInvoker = null,
+  dependencyStreamBridge = null,
+} = {}) {
+  const invokeSurfaces = resolveDependencyInvokeSurfaces({
+    dispatchDescriptor,
+    dependencyDescriptor,
+    instantiatedDependency,
+  });
+  if (
+    invokeSurfaces.includes(InvokeSurface.DIRECT) &&
+    typeof dependencyInvoker === "function"
+  ) {
+    return dependencyInvoker;
+  }
+  if (
+    invokeSurfaces.includes(InvokeSurface.COMMAND) &&
+    typeof dependencyStreamBridge === "function"
+  ) {
+    return dependencyStreamBridge;
+  }
+  if (typeof dependencyInvoker === "function") {
+    return dependencyInvoker;
+  }
+  if (typeof dependencyStreamBridge === "function") {
+    return dependencyStreamBridge;
+  }
+  return null;
+}
+
 function resolveInvocationBinding(host, invocation = null) {
   const dispatchDescriptor =
     invocation?.dispatchDescriptorIndex === INVALID_INDEX
@@ -285,11 +385,17 @@ async function executeCurrentInvocationInternal(
             dependencyDescriptor?.dependencyIndex,
         })
       : null;
+  const dependencyDispatcher = resolveDependencyDispatcher({
+    dispatchDescriptor,
+    dependencyDescriptor,
+    instantiatedDependency,
+    dependencyInvoker,
+    dependencyStreamBridge,
+  });
 
   if (
     typeof handler !== "function" &&
-    typeof dependencyInvoker !== "function" &&
-    typeof dependencyStreamBridge !== "function"
+    typeof dependencyDispatcher !== "function"
   ) {
     throw new Error(
       `No compiled flow host handler is registered for ${invocation?.pluginId}:${invocation?.methodId}.`,
@@ -314,9 +420,7 @@ async function executeCurrentInvocationInternal(
   const result =
     typeof handler === "function"
       ? await handler(invocationArgs)
-      : typeof dependencyInvoker === "function"
-        ? await dependencyInvoker(invocationArgs)
-        : await dependencyStreamBridge(invocationArgs);
+      : await dependencyDispatcher(invocationArgs);
   const routedOutputs = Number(
     host.applyNodeInvocationResult(nodeIndex, {
       statusCode:
@@ -570,11 +674,17 @@ export async function bindCompiledFlowRuntimeHost({
                 dependencyDescriptor?.dependencyIndex,
             })
           : null;
+      const dependencyDispatcher = resolveDependencyDispatcher({
+        dispatchDescriptor,
+        dependencyDescriptor,
+        instantiatedDependency,
+        dependencyInvoker,
+        dependencyStreamBridge,
+      });
 
       if (
         typeof handler !== "function" &&
-        typeof dependencyInvoker !== "function" &&
-        typeof dependencyStreamBridge !== "function"
+        typeof dependencyDispatcher !== "function"
       ) {
         throw new Error(
           `No compiled flow host handler is registered for ${invocation?.pluginId}:${invocation?.methodId}.`,
@@ -609,9 +719,7 @@ export async function bindCompiledFlowRuntimeHost({
       const result =
         typeof handler === "function"
           ? handler(invocationArgs)
-          : typeof dependencyInvoker === "function"
-            ? dependencyInvoker(invocationArgs)
-            : dependencyStreamBridge(invocationArgs);
+          : dependencyDispatcher(invocationArgs);
       if (isPromiseLike(result)) {
         throw new Error(
           "Compiled flow host in-module dispatch currently requires synchronous handlers/dependency bridges.",

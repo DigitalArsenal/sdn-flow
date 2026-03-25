@@ -87,17 +87,7 @@ function decodeRuntimePayload(value) {
   if (!bytes || bytes.length === 0) {
     return null;
   }
-  try {
-    return deserializeStructuredValue(bytes);
-  } catch {
-    // Fall back for legacy JSON/text frames that may still be in flight.
-  }
-  const text = textDecoder.decode(bytes);
-  try {
-    return JSON.parse(text);
-  } catch {
-    return new Uint8Array(bytes);
-  }
+  return deserializeStructuredValue(bytes);
 }
 
 function getObjectPathSegments(pathValue) {

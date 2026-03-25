@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { encodePluginManifest } from "space-data-module-sdk";
 
 import {
   bindCompiledDescriptorAbi,
@@ -18,6 +19,7 @@ import {
   HostedRuntimeKind,
   HostedRuntimeStartupPhase,
   HostedRuntimeTransport,
+  InvokeSurface,
   instantiateEmbeddedDependencies,
   normalizeHostedRuntimePlan,
   SignedArtifactDependencyDescriptorLayout,
@@ -1743,6 +1745,270 @@ test("embedded dependency instantiation falls back to SDK direct invoke exports 
   );
   assert.equal(dependency?.resolvedExports.init, null);
   assert.equal(dependency?.resolvedExports.destroy, null);
+});
+
+test("compiled flow host prefers the command bridge for command-only embedded dependencies", async () => {
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  const bytes = new Uint8Array(memory.buffer);
+  const view = new DataView(memory.buffer);
+  const pluginIdPointer = 512;
+  const methodIdPointer = 576;
+  const inputPortPointer = 640;
+  const nodeIdPointer = 704;
+  const dependencyIdPointer = 768;
+  const versionPointer = 832;
+  const invocationFramePointer = 1152;
+  const invocationPointer = 1280;
+  const nodeDispatchPointer = 1408;
+  const dependencyPointer = 1536;
+  const dependencyWasmPointer = 1664;
+  const dependencyManifestPointer = 1792;
+  let allocPointer = 2048;
+  let ready = true;
+  let directCalls = 0;
+  let commandCalls = 0;
+  const inputPayload = new Uint8Array([7, 8, 9]);
+  const dependencyManifestBytes = encodePluginManifest({
+    pluginId: "com.digitalarsenal.runtime.command-only",
+    name: "Command Only Runtime",
+    version: "1.0.0",
+    invokeSurfaces: [InvokeSurface.COMMAND],
+    methods: [],
+  });
+
+  const writeCString = (pointer, value) => {
+    bytes.set(new TextEncoder().encode(`${value}\0`), pointer);
+  };
+  writeCString(pluginIdPointer, "com.digitalarsenal.runtime.command-only");
+  writeCString(methodIdPointer, "invoke");
+  writeCString(inputPortPointer, "in");
+  writeCString(nodeIdPointer, "node-command");
+  writeCString(dependencyIdPointer, "dep-command");
+  writeCString(versionPointer, "1.0.0");
+  bytes.set(inputPayload, 1234);
+  bytes.set([0x00, 0x61, 0x73, 0x6d], dependencyWasmPointer);
+  bytes.set(dependencyManifestBytes, dependencyManifestPointer);
+
+  view.setUint32(
+    nodeDispatchPointer +
+      FlowNodeDispatchDescriptorLayout.fields.nodeIdPointer.offset,
+    nodeIdPointer,
+    true,
+  );
+  view.setUint32(
+    nodeDispatchPointer +
+      FlowNodeDispatchDescriptorLayout.fields.nodeIndex.offset,
+    0,
+    true,
+  );
+  view.setUint32(
+    nodeDispatchPointer +
+      FlowNodeDispatchDescriptorLayout.fields.dependencyIdPointer.offset,
+    dependencyIdPointer,
+    true,
+  );
+  view.setUint32(
+    nodeDispatchPointer +
+      FlowNodeDispatchDescriptorLayout.fields.dependencyIndex.offset,
+    0,
+    true,
+  );
+  view.setUint32(
+    nodeDispatchPointer +
+      FlowNodeDispatchDescriptorLayout.fields.pluginIdPointer.offset,
+    pluginIdPointer,
+    true,
+  );
+  view.setUint32(
+    nodeDispatchPointer +
+      FlowNodeDispatchDescriptorLayout.fields.methodIdPointer.offset,
+    methodIdPointer,
+    true,
+  );
+
+  view.setUint32(
+    dependencyPointer +
+      SignedArtifactDependencyDescriptorLayout.fields.dependencyIdPointer.offset,
+    dependencyIdPointer,
+    true,
+  );
+  view.setUint32(
+    dependencyPointer +
+      SignedArtifactDependencyDescriptorLayout.fields.pluginIdPointer.offset,
+    pluginIdPointer,
+    true,
+  );
+  view.setUint32(
+    dependencyPointer +
+      SignedArtifactDependencyDescriptorLayout.fields.versionPointer.offset,
+    versionPointer,
+    true,
+  );
+  view.setUint32(
+    dependencyPointer +
+      SignedArtifactDependencyDescriptorLayout.fields.wasmBytesPointer.offset,
+    dependencyWasmPointer,
+    true,
+  );
+  view.setUint32(
+    dependencyPointer +
+      SignedArtifactDependencyDescriptorLayout.fields.wasmSize.offset,
+    4,
+    true,
+  );
+  view.setUint32(
+    dependencyPointer +
+      SignedArtifactDependencyDescriptorLayout.fields.manifestBytesPointer.offset,
+    dependencyManifestPointer,
+    true,
+  );
+  view.setUint32(
+    dependencyPointer +
+      SignedArtifactDependencyDescriptorLayout.fields.manifestSize.offset,
+    dependencyManifestBytes.length,
+    true,
+  );
+
+  const artifact = {
+    ...compiledArtifactStub(),
+    runtimeExports: {
+      mallocSymbol: "malloc",
+      freeSymbol: "free",
+      descriptorSymbol: "sdn_flow_get_runtime_descriptor",
+      resetStateSymbol: "sdn_flow_reset_runtime_state",
+      enqueueTriggerSymbol: "sdn_flow_enqueue_trigger_frames",
+      enqueueTriggerFrameSymbol: "sdn_flow_enqueue_trigger_frame",
+      enqueueEdgeSymbol: "sdn_flow_enqueue_edge_frames",
+      enqueueEdgeFrameSymbol: "sdn_flow_enqueue_edge_frame",
+      readyNodeSymbol: "sdn_flow_get_ready_node_index",
+      beginInvocationSymbol: "sdn_flow_begin_node_invocation",
+      completeInvocationSymbol: "sdn_flow_complete_node_invocation",
+      ingressFrameDescriptorsSymbol: "sdn_flow_get_ingress_frame_descriptors",
+      ingressFrameDescriptorCountSymbol:
+        "sdn_flow_get_ingress_frame_descriptor_count",
+      currentInvocationDescriptorSymbol:
+        "sdn_flow_get_current_invocation_descriptor",
+      prepareInvocationDescriptorSymbol:
+        "sdn_flow_prepare_node_invocation_descriptor",
+      applyInvocationResultSymbol: "sdn_flow_apply_node_invocation_result",
+      nodeDispatchDescriptorsSymbol: "sdn_flow_get_node_dispatch_descriptors",
+      nodeDispatchDescriptorCountSymbol:
+        "sdn_flow_get_node_dispatch_descriptor_count",
+      dependencyDescriptorsSymbol: "sdn_flow_get_dependency_descriptors",
+      dependencyCountSymbol: "sdn_flow_get_dependency_count",
+    },
+  };
+
+  const wasmExports = {
+    memory,
+    _malloc(size) {
+      const pointer = allocPointer;
+      allocPointer += Number(size);
+      return pointer;
+    },
+    _free() {},
+    _sdn_flow_get_runtime_descriptor() {
+      return 64;
+    },
+    _sdn_flow_reset_runtime_state() {},
+    _sdn_flow_enqueue_trigger_frames() {},
+    _sdn_flow_enqueue_trigger_frame() {
+      return 1;
+    },
+    _sdn_flow_enqueue_edge_frames() {},
+    _sdn_flow_enqueue_edge_frame() {
+      return 1;
+    },
+    _sdn_flow_get_ready_node_index() {
+      return ready ? 0 : INVALID_INDEX;
+    },
+    _sdn_flow_begin_node_invocation(nodeIndex) {
+      view.setUint32(invocationFramePointer + 0, 0, true);
+      view.setUint32(invocationFramePointer + 4, 2, true);
+      view.setUint32(invocationFramePointer + 8, inputPortPointer, true);
+      view.setUint32(invocationFramePointer + 12, 8, true);
+      view.setUint32(invocationFramePointer + 16, 1234, true);
+      view.setUint32(invocationFramePointer + 20, 3, true);
+      view.setUint32(invocationFramePointer + 24, 9, true);
+      view.setUint32(invocationFramePointer + 28, 7, true);
+      view.setBigUint64(invocationFramePointer + 32, BigInt(77), true);
+      view.setUint8(invocationFramePointer + 40, 0);
+      view.setUint8(invocationFramePointer + 41, 1);
+
+      view.setUint32(invocationPointer + 0, nodeIndex, true);
+      view.setUint32(invocationPointer + 4, 0, true);
+      view.setUint32(invocationPointer + 8, pluginIdPointer, true);
+      view.setUint32(invocationPointer + 12, methodIdPointer, true);
+      view.setUint32(invocationPointer + 16, invocationFramePointer, true);
+      view.setUint32(invocationPointer + 20, 1, true);
+      return 1;
+    },
+    _sdn_flow_complete_node_invocation() {},
+    _sdn_flow_get_ingress_frame_descriptors() {
+      return invocationFramePointer;
+    },
+    _sdn_flow_get_ingress_frame_descriptor_count() {
+      return 1;
+    },
+    _sdn_flow_get_current_invocation_descriptor() {
+      return invocationPointer;
+    },
+    _sdn_flow_prepare_node_invocation_descriptor() {
+      return 1;
+    },
+    _sdn_flow_get_node_dispatch_descriptors() {
+      return nodeDispatchPointer;
+    },
+    _sdn_flow_get_node_dispatch_descriptor_count() {
+      return 1;
+    },
+    _sdn_flow_get_dependency_descriptors() {
+      return dependencyPointer;
+    },
+    _sdn_flow_get_dependency_count() {
+      return 1;
+    },
+    _sdn_flow_apply_node_invocation_result() {
+      ready = false;
+      return 0;
+    },
+  };
+
+  const host = await bindCompiledFlowRuntimeHost({
+    artifact,
+    wasmExports,
+    instantiateDependency: async () => ({
+      instance: {
+        exports: {},
+      },
+    }),
+    dependencyInvoker() {
+      directCalls += 1;
+      throw new Error("direct dependency bridge should not be used for command-only dependencies");
+    },
+    dependencyStreamBridge: ({ instantiatedDependency, inputs }) => {
+      commandCalls += 1;
+      assert.deepEqual(instantiatedDependency.invokeSurfaces, [
+        InvokeSurface.COMMAND,
+      ]);
+      assert.equal(instantiatedDependency.dependencyId, "dep-command");
+      assert.deepEqual(Array.from(inputs[0].bytes), [7, 8, 9]);
+      return {
+        statusCode: 0,
+        backlogRemaining: 0,
+        yielded: false,
+        outputs: [],
+      };
+    },
+  });
+
+  const execution = await host.executeNextReadyNode();
+  assert.equal(execution.executed, true);
+  assert.equal(directCalls, 0);
+  assert.equal(commandCalls, 1);
+  assert.deepEqual(execution.instantiatedDependency?.invokeSurfaces, [
+    InvokeSurface.COMMAND,
+  ]);
 });
 
 test("host runtime abi binder fails closed when a required export is missing", async () => {
