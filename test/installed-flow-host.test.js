@@ -299,67 +299,61 @@ test("installed flow host rejects raw-program startup without an explicit runtim
 
 test("installed flow host rejects alternate live compilation seams on the canonical path", async () => {
   const flow = await readJson("../examples/flows/single-plugin-flow.json");
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "sdn-flow-installed-live-seam-"));
-
-  try {
-    const cases = [
-      {
-        optionKey: "compileArtifact",
-        optionValue: async () => ({
-          artifactId: "not-used",
-          programId: flow.programId,
-        }),
-      },
-      {
-        optionKey: "compiler",
-        optionValue: {
-          compile() {
-            throw new Error("compiler seam should not be invoked");
-          },
+  const cases = [
+    {
+      optionKey: "compileArtifact",
+      optionValue: async () => ({
+        artifactId: "not-used",
+        programId: flow.programId,
+      }),
+    },
+    {
+      optionKey: "compiler",
+      optionValue: {
+        compile() {
+          throw new Error("compiler seam should not be invoked");
         },
       },
-      {
-        optionKey: "emception",
-        optionValue: {
-          compile() {
-            throw new Error("emception seam should not be invoked");
-          },
+    },
+    {
+      optionKey: "emception",
+      optionValue: {
+        compile() {
+          throw new Error("emception seam should not be invoked");
         },
       },
-      {
-        optionKey: "emceptionSessionFactory",
-        optionValue: async () => ({
-          compile() {
-            throw new Error("session factory seam should not be invoked");
-          },
-        }),
-      },
-      {
-        optionKey: "sourceGenerator",
-        optionValue: () => {
-          throw new Error("source generator seam should not be invoked");
+    },
+    {
+      optionKey: "emceptionSessionFactory",
+      optionValue: async () => ({
+        compile() {
+          throw new Error("session factory seam should not be invoked");
         },
+      }),
+    },
+    {
+      optionKey: "sourceGenerator",
+      optionValue: () => {
+        throw new Error("source generator seam should not be invoked");
       },
-    ];
+    },
+  ];
 
-    for (const { optionKey, optionValue } of cases) {
-      const host = createProgramCompilingInstalledFlowHost({
-        program: flow,
-        pluginRootDirectories: [
-          new URL("../examples/plugins", import.meta.url).pathname,
-        ],
-        [optionKey]: optionValue,
-      });
+  for (const { optionKey, optionValue } of cases) {
+    const host = createProgramCompilingInstalledFlowHost({
+      program: flow,
+      pluginRootDirectories: [
+        new URL("../examples/plugins", import.meta.url).pathname,
+      ],
+      [optionKey]: optionValue,
+    });
 
-      await assert.rejects(
-        host.start(),
-        new RegExp(
-          `Installed flow live compilation only supports the canonical SDK emception path\\. Remove alternate seams: .*${optionKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}.*`,
-        ),
-      );
-    }
-  } finally {
-    await fs.rm(tempDir, { recursive: true, force: true });
+    await assert.rejects(
+      host.start(),
+      new RegExp(
+        `Installed flow live compilation only supports the canonical SDK emception path\\. Remove alternate seams: .*${optionKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}.*`,
+      ),
+    );
   }
 });
 
