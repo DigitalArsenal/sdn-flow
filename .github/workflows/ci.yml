@@ -29,6 +29,7 @@ jobs:
           ./emsdk install "$EMSDK_VERSION"
           ./emsdk activate "$EMSDK_VERSION"
           source ./emsdk_env.sh > /dev/null
+          export PATH="$EMSDK/upstream/bin:$PATH"
           export EM_CONFIG="$RUNNER_TEMP/.emscripten"
           emcc --generate-config
           {
