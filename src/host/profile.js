@@ -1,6 +1,44 @@
-import { RecommendedCapabilityIds } from "../compliance/index.js";
 import { RuntimeTarget } from "../runtime/index.js";
 import { HostedRuntimeAdapter, HostedRuntimeEngine } from "./constants.js";
+
+const RecommendedCapabilityIds = Object.freeze([
+  "clock",
+  "random",
+  "logging",
+  "timers",
+  "schedule_cron",
+  "http",
+  "tls",
+  "websocket",
+  "mqtt",
+  "tcp",
+  "udp",
+  "network",
+  "filesystem",
+  "pipe",
+  "pubsub",
+  "protocol_handle",
+  "protocol_dial",
+  "database",
+  "storage_adapter",
+  "storage_query",
+  "storage_write",
+  "context_read",
+  "context_write",
+  "process_exec",
+  "crypto_hash",
+  "crypto_sign",
+  "crypto_verify",
+  "crypto_encrypt",
+  "crypto_decrypt",
+  "crypto_key_agreement",
+  "crypto_kdf",
+  "wallet_sign",
+  "ipfs",
+  "scene_access",
+  "entity_access",
+  "render_hooks",
+]);
 
 function normalizeString(value, fallback = null) {
   if (typeof value !== "string") {
