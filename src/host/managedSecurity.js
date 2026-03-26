@@ -3,7 +3,8 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { randomBytes } from "node:crypto";
+import { spawnSync } from "node:child_process";
+import { randomBytes, X509Certificate } from "node:crypto";
 
 import {
   getHdWalletRuntime,
@@ -125,16 +126,10 @@ function escapeDistinguishedNameValue(value) {
   return String(value ?? "").replace(/[\\,+=<>#;"]/g, "\\$&");
 }
 
-function parseWalletAttestationComment(value) {
-  const text = normalizeString(value, null);
-  if (!text) {
-    return null;
-  }
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
+function normalizeOpenSslConfigValue(value) {
+  return String(value ?? "")
+    .replace(/\r?\n/g, " ")
+    .trim();
 }
 
 function normalizeTimestamp(value) {
@@ -152,6 +147,43 @@ function buildKeyFingerprint(hexValue) {
 
 function buildSerialHex(length = 16) {
   return Buffer.from(randomBytes(length)).toString("hex").toUpperCase();
+}
+
+function parseSubjectAltNameEntries(value) {
+  const dnsNames = [];
+  const ipAddresses = [];
+  const entries = String(value ?? "")
+    .split(/,(?=\s*(?:DNS:|IP Address:))/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+  for (const entry of entries) {
+    if (entry.startsWith("DNS:")) {
+      dnsNames.push(entry.slice(4));
+      continue;
+    }
+    if (entry.startsWith("IP Address:")) {
+      ipAddresses.push(entry.slice("IP Address:".length));
+    }
+  }
+
+  return {
+    dnsNames,
+    ipAddresses,
+  };
+}
+
+function parseCertificateRecord(certificatePem) {
+  const certificate = new X509Certificate(certificatePem);
+  const altNames = parseSubjectAltNameEntries(certificate.subjectAltName);
+  return {
+    subjectDn: certificate.subject,
+    dnsNames: altNames.dnsNames,
+    ipAddresses: altNames.ipAddresses,
+    notBefore: certificate.validFrom,
+    notAfter: certificate.validTo,
+    isCa: certificate.ca === true,
+  };
 }
 
 export function normalizeStartupProtocol(value, fallback = "http") {
@@ -309,6 +341,59 @@ function buildSubjectDn(commonName, tlsSettings = {}) {
   return `CN=${cn},O=${organization},C=${country}`;
 }
 
+function buildOpenSslConfig(commonName, desiredNames, tlsSettings = {}) {
+  const organization =
+    normalizeOpenSslConfigValue(
+      normalizeString(tlsSettings.organization, DEFAULT_TLS_ORGANIZATION) ??
+        DEFAULT_TLS_ORGANIZATION,
+    ) || DEFAULT_TLS_ORGANIZATION;
+  const country =
+    normalizeOpenSslConfigValue(
+      normalizeString(tlsSettings.country, DEFAULT_TLS_COUNTRY) ??
+        DEFAULT_TLS_COUNTRY,
+    ) || DEFAULT_TLS_COUNTRY;
+  const normalizedCommonName =
+    normalizeOpenSslConfigValue(commonName) || "localhost";
+  const altNameLines = [];
+  let altIndex = 1;
+
+  for (const dnsName of desiredNames.dnsNames) {
+    altNameLines.push(
+      `DNS.${altIndex} = ${normalizeOpenSslConfigValue(dnsName)}`,
+    );
+    altIndex += 1;
+  }
+  altIndex = 1;
+  for (const ipAddress of desiredNames.ipAddresses) {
+    altNameLines.push(
+      `IP.${altIndex} = ${normalizeOpenSslConfigValue(ipAddress)}`,
+    );
+    altIndex += 1;
+  }
+
+  return [
+    "[req]",
+    "prompt = no",
+    "distinguished_name = dn",
+    "x509_extensions = ext",
+    "",
+    "[dn]",
+    `CN = ${normalizedCommonName}`,
+    `O = ${organization}`,
+    `C = ${country}`,
+    "",
+    "[ext]",
+    "basicConstraints = critical,CA:true",
+    "keyUsage = critical,digitalSignature,keyEncipherment,keyCertSign,cRLSign",
+    "extendedKeyUsage = serverAuth",
+    "subjectAltName = @alt_names",
+    "",
+    "[alt_names]",
+    ...altNameLines,
+    "",
+  ].join("\n");
+}
+
 function certificateCoversNames(parsedCertificate = {}, desiredNames = {}) {
   const availableDns = new Set(
     Array.isArray(parsedCertificate.dnsNames)
@@ -449,7 +534,6 @@ async function ensureManagedWalletState(options = {}) {
 }
 
 async function tryReadExistingTlsState(options = {}) {
-  const wallet = options.wallet;
   const paths = options.paths;
   const desiredNames = options.desiredNames;
   const walletState = options.walletState;
@@ -466,15 +550,11 @@ async function tryReadExistingTlsState(options = {}) {
         ? readJsonFile(paths.tlsMetadataPath).catch(() => null)
         : Promise.resolve(null),
     ]);
-    const parsedCertificate = wallet.x509.parseCertificate(certificatePem);
-    const walletAttestation = parseWalletAttestationComment(
-      parsedCertificate.walletAttestationComment,
-    );
-    const attestedPublicKey = normalizeString(walletAttestation?.public_key_hex, "")
+    const parsedCertificate = parseCertificateRecord(certificatePem);
+    const attestedPublicKey = normalizeString(metadata?.walletPublicKeyHex, "")
       .toUpperCase();
 
     if (
-      !wallet.x509.verifyWalletAttestation(certificatePem) ||
       parsedCertificate.isCa !== true ||
       !certificateIsCurrentlyValid(parsedCertificate) ||
       !certificateCoversNames(parsedCertificate, desiredNames) ||
@@ -497,7 +577,7 @@ async function tryReadExistingTlsState(options = {}) {
         privateKeyPath: paths.privateKeyPath,
         trustCertificatePath: paths.certificatePath,
         metadataPath: paths.tlsMetadataPath,
-        walletAttested: parsedCertificate.walletAttestationValid !== false,
+        walletAttested: metadata?.walletAttested === true,
         reused: true,
       }),
     };
@@ -507,8 +587,6 @@ async function tryReadExistingTlsState(options = {}) {
 }
 
 async function createManagedTlsState(options = {}) {
-  const wallet = options.wallet;
-  const runtimeModule = options.runtimeModule;
   const paths = options.paths;
   const securitySettings = options.securitySettings;
   const startup = options.startup;
@@ -517,7 +595,6 @@ async function createManagedTlsState(options = {}) {
   await ensurePrivateDirectory(paths.tlsDir);
   const desiredNames = buildCertificateNames(startup);
   const existingState = await tryReadExistingTlsState({
-    wallet,
     paths,
     desiredNames,
     walletState,
@@ -526,34 +603,85 @@ async function createManagedTlsState(options = {}) {
     return existingState;
   }
 
-  const certificatePrivateKey = wallet.x509.generatePrivateKey(runtimeModule.Curve.P256);
-  const nowUnix = Math.floor(Date.now() / 1000);
-  const certificatePem = wallet.x509.createSelfSignedCertificate(
-    {
-      subjectDn: buildSubjectDn(desiredNames.commonName, securitySettings.tls),
-      serialHex: buildSerialHex(),
-      notBeforeUnix: nowUnix - 300,
-      notAfterUnix: nowUnix + securitySettings.tls.certificateDays * 24 * 60 * 60,
-      isCa: true,
-      dnsNames: desiredNames.dnsNames,
-      ipAddresses: desiredNames.ipAddresses,
-      keyUsage: ["digitalSignature", "keyEncipherment", "keyCertSign", "cRLSign"],
-      extendedKeyUsage: ["serverAuth"],
-      walletAttestation: {
-        curve: runtimeModule.Curve.SECP256K1,
-        privateKey: walletState.signingPrivateKey,
-        keyLabel: walletState.label ?? "sdn-flow-wallet",
+  const configPath = path.join(paths.tlsDir, "openssl.cnf");
+  const configText = buildOpenSslConfig(
+    desiredNames.commonName,
+    desiredNames,
+    securitySettings.tls,
+  );
+  await writeSecureFile(configPath, configText);
+  try {
+    const generateKey = spawnSync(
+      "openssl",
+      [
+        "ecparam",
+        "-name",
+        "prime256v1",
+        "-genkey",
+        "-noout",
+        "-out",
+        paths.privateKeyPath,
+      ],
+      {
+        cwd: paths.tlsDir,
+        encoding: "utf8",
       },
-    },
-    runtimeModule.Curve.P256,
-    certificatePrivateKey,
-    runtimeModule.X509Encoding.PEM,
-  );
-  const privateKeyPem = wallet.x509.exportPrivateKeyPem(
-    runtimeModule.Curve.P256,
-    certificatePrivateKey,
-  );
-  const parsedCertificate = wallet.x509.parseCertificate(certificatePem);
+    );
+    if (generateKey.error) {
+      throw new Error(
+        `failed to generate TLS private key: ${generateKey.error.message}`,
+      );
+    }
+    if ((generateKey.status ?? 1) !== 0) {
+      throw new Error(
+        `failed to generate TLS private key:\n${generateKey.stdout ?? ""}${generateKey.stderr ?? ""}`.trim(),
+      );
+    }
+
+    const createCertificate = spawnSync(
+      "openssl",
+      [
+        "req",
+        "-x509",
+        "-new",
+        "-sha256",
+        "-days",
+        String(securitySettings.tls.certificateDays),
+        "-key",
+        paths.privateKeyPath,
+        "-out",
+        paths.certificatePath,
+        "-config",
+        configPath,
+        "-extensions",
+        "ext",
+        "-set_serial",
+        `0x${buildSerialHex()}`,
+      ],
+      {
+        cwd: paths.tlsDir,
+        encoding: "utf8",
+      },
+    );
+    if (createCertificate.error) {
+      throw new Error(
+        `failed to generate TLS certificate: ${createCertificate.error.message}`,
+      );
+    }
+    if ((createCertificate.status ?? 1) !== 0) {
+      throw new Error(
+        `failed to generate TLS certificate:\n${createCertificate.stdout ?? ""}${createCertificate.stderr ?? ""}`.trim(),
+      );
+    }
+  } finally {
+    await fs.rm(configPath, { force: true }).catch(() => {});
+  }
+
+  const [certificatePem, privateKeyPem] = await Promise.all([
+    fs.readFile(paths.certificatePath, "utf8"),
+    fs.readFile(paths.privateKeyPath, "utf8"),
+  ]);
+  const parsedCertificate = parseCertificateRecord(certificatePem);
   const metadata = {
     kind: "sdn-flow-managed-tls",
     version: 1,
@@ -568,17 +696,14 @@ async function createManagedTlsState(options = {}) {
     trustCertificatePath: paths.certificatePath,
     walletFingerprint: walletState.signingFingerprint ?? null,
     walletPublicKeyHex: walletState.signingPublicKeyHex ?? null,
+    walletAttested: false,
   };
 
-  try {
-    await Promise.all([
-      writeSecureFile(paths.certificatePath, certificatePem),
-      writeSecureFile(paths.privateKeyPath, privateKeyPem),
-      writeSecureJsonFile(paths.tlsMetadataPath, metadata),
-    ]);
-  } finally {
-    wallet.utils.secureWipe(certificatePrivateKey);
-  }
+  await Promise.all([
+    fs.chmod(paths.certificatePath, 0o600).catch(() => {}),
+    fs.chmod(paths.privateKeyPath, 0o600).catch(() => {}),
+    writeSecureJsonFile(paths.tlsMetadataPath, metadata),
+  ]);
 
   return {
     certificatePem,
@@ -592,7 +717,7 @@ async function createManagedTlsState(options = {}) {
       privateKeyPath: paths.privateKeyPath,
       trustCertificatePath: paths.certificatePath,
       metadataPath: paths.tlsMetadataPath,
-      walletAttested: parsedCertificate.walletAttestationValid !== false,
+      walletAttested: metadata.walletAttested === true,
       reused: false,
     }),
   };
@@ -643,8 +768,6 @@ export async function ensureManagedSecurityState(options = {}) {
         throw new Error("Managed TLS requires a wallet-backed signing key.");
       }
       tlsState = await createManagedTlsState({
-        wallet,
-        runtimeModule,
         paths,
         securitySettings: effectiveSecuritySettings,
         startup: options.startup,
