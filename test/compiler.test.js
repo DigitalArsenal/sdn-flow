@@ -376,7 +376,7 @@ test("emception compiler adapter switches compile plans to system emscripten whe
     assert.equal(prepared.toolchain.threadModel, "emscripten-pthreads");
     assert.equal(
       prepared.toolchain.wasmedgeDirectRuntimeStatus,
-      "unverified-pthread-artifact",
+      "requires-emscripten-host-shim",
     );
     assert.match(prepared.command, /-pthread/);
   } finally {

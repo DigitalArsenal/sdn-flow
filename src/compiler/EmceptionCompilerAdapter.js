@@ -181,7 +181,7 @@ function buildToolchainMetadata({ runtimeTargets, flags, threadModel }) {
     threadModel,
     wasmedgeDirectRuntimeStatus: wasmedgeRequested
       ? threadModel === THREAD_MODEL_EMSCRIPTEN_PTHREADS
-        ? "unverified-pthread-artifact"
+        ? "requires-emscripten-host-shim"
         : "verified-standalone"
       : "not-requested",
   };

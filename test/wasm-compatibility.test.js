@@ -73,6 +73,28 @@ test("describeFlowWasmImportContract classifies fully linked flow artifacts as w
   });
 });
 
+test("describeFlowWasmImportContract marks threaded linked flow artifacts as custom", async () => {
+  const { artifact } = await compileLinkedFlowArtifact({
+    runtimeTargets: [RuntimeTarget.WASMEDGE],
+    workingDirectory: `/working/wasm-compat-threaded-${randomUUID()}`,
+    manifestOverrides: {
+      runtimeTargets: [RuntimeTarget.WASMEDGE],
+    },
+  });
+
+  assert.deepEqual(listWasmImportModules(artifact.wasm), [
+    "env",
+    "wasi_snapshot_preview1",
+  ]);
+  assert.deepEqual(describeFlowWasmImportContract(artifact.wasm), {
+    valid: true,
+    modules: ["env", "wasi_snapshot_preview1"],
+    compatibilityProfile: "custom",
+    isWasmEdgeCompatible: false,
+    isHostCompatible: false,
+  });
+});
+
 test("describeFlowWasmImportContract treats any non-wasi guest imports as custom and unsupported", () => {
   const flowHostContract = describeFlowWasmImportContract(
     buildWasmWithImportedFunction(
