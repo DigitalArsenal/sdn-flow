@@ -265,18 +265,29 @@ export async function compileNodeRedFlows(flows = [], options = {}) {
   );
   metadata.workingDirectory = workingDirectory;
   cleanupWorkingDirectory = workingDirectory;
-  emception = await maybeCall(
-    createSdkEmceptionSession({
-      workingDirectory,
-    }),
-  );
-  ownsSession = true;
-  const compiler = createEditorCompiler({
-    emception,
+  let compiler = createEditorCompiler({
     outputName,
     artifactCatalog: options.artifactCatalog,
     manifestBuilder: options.manifestBuilder,
   });
+  const previewPlan = await compiler.prepareCompile({
+    program,
+    metadata,
+  });
+  if (previewPlan.toolchain?.kind === "sdn-emception") {
+    emception = await maybeCall(
+      createSdkEmceptionSession({
+        workingDirectory,
+      }),
+    );
+    ownsSession = true;
+    compiler = createEditorCompiler({
+      emception,
+      outputName,
+      artifactCatalog: options.artifactCatalog,
+      manifestBuilder: options.manifestBuilder,
+    });
+  }
 
   try {
     const artifact = await compiler.compile({

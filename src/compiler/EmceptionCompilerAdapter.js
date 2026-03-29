@@ -1,4 +1,14 @@
+import os from "node:os";
 import path from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 
 import { decodePluginManifest } from "space-data-module-sdk/manifest";
 
@@ -18,6 +28,8 @@ import {
 import { SignedArtifactCatalog } from "./SignedArtifactCatalog.js";
 import { isSdkEmceptionSession } from "./sdkEmceptionSession.js";
 
+const execFileAsync = promisify(execFile);
+
 const DEFAULT_FLAGS = Object.freeze([
   "-std=c++20",
   "-O2",
@@ -29,6 +41,10 @@ const DEFAULT_FLAGS = Object.freeze([
 
 const DEFAULT_RUNTIME_MODEL = "compiled-cpp-wasm";
 const DEFAULT_WORKING_DIRECTORY = "/working";
+const THREAD_MODEL_SINGLE_THREAD = "single-thread";
+const THREAD_MODEL_EMSCRIPTEN_PTHREADS = "emscripten-pthreads";
+const TOOLCHAIN_EMCEPTION = "sdn-emception";
+const TOOLCHAIN_SYSTEM_EMSCRIPTEN = "system-emscripten";
 const PureGuestRuntimeTargets = new Set([
   RuntimeTarget.EDGE,
   RuntimeTarget.WASI,
@@ -110,6 +126,151 @@ function normalizeObjectFileStem(value, fallback) {
   const basename = normalized.split("/").pop() ?? "";
   const stem = basename.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
   return stem.length > 0 ? stem : fallback;
+}
+
+function normalizeThreadModel(value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === THREAD_MODEL_SINGLE_THREAD) {
+    return THREAD_MODEL_SINGLE_THREAD;
+  }
+  if (normalized === THREAD_MODEL_EMSCRIPTEN_PTHREADS) {
+    return THREAD_MODEL_EMSCRIPTEN_PTHREADS;
+  }
+  return null;
+}
+
+function dependencyRequiresPthreads(dependency) {
+  if (!(dependency?.guestLink?.objectBytes instanceof Uint8Array)) {
+    return false;
+  }
+  if (dependency.guestLink.objectBytes.length === 0) {
+    return false;
+  }
+  return (
+    normalizeThreadModel(dependency?.guestLink?.threadModel) ===
+    THREAD_MODEL_EMSCRIPTEN_PTHREADS
+  );
+}
+
+function linkedDependenciesRequirePthreads(dependencies = []) {
+  return dependencies.some((dependency) => dependencyRequiresPthreads(dependency));
+}
+
+function buildCompileFlags(flags, { requiresPthreads } = {}) {
+  const resolved = Array.isArray(flags) ? [...flags] : [...DEFAULT_FLAGS];
+  if (requiresPthreads && !resolved.includes("-pthread")) {
+    resolved.splice(2, 0, "-pthread");
+  }
+  return resolved;
+}
+
+function buildToolchainMetadata({ runtimeTargets, flags, threadModel }) {
+  const wasmedgeRequested = Array.isArray(runtimeTargets)
+    ? runtimeTargets.includes(RuntimeTarget.WASMEDGE)
+    : false;
+  return {
+    kind:
+      threadModel === THREAD_MODEL_EMSCRIPTEN_PTHREADS
+        ? TOOLCHAIN_SYSTEM_EMSCRIPTEN
+        : TOOLCHAIN_EMCEPTION,
+    command: "em++",
+    flags: [...flags],
+    threadModel,
+    wasmedgeDirectRuntimeStatus: wasmedgeRequested
+      ? threadModel === THREAD_MODEL_EMSCRIPTEN_PTHREADS
+        ? "unverified-pthread-artifact"
+        : "verified-standalone"
+      : "not-requested",
+  };
+}
+
+async function ensureSystemCompilerAvailable(command) {
+  try {
+    await execFileAsync(command, ["--version"]);
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      throw new Error(
+        `System Emscripten toolchain is required for "${THREAD_MODEL_EMSCRIPTEN_PTHREADS}" flow links, but "${command}" was not found on PATH.`,
+      );
+    }
+    throw error;
+  }
+}
+
+async function runSystemCompiler(command, args, options = {}) {
+  try {
+    await execFileAsync(command, args, {
+      cwd: options.cwd,
+      maxBuffer: 32 * 1024 * 1024,
+    });
+  } catch (error) {
+    const stderr = typeof error?.stderr === "string" ? error.stderr.trim() : "";
+    const stdout = typeof error?.stdout === "string" ? error.stdout.trim() : "";
+    const detail = stderr || stdout || error?.message || "unknown error";
+    throw new Error(
+      `System Emscripten flow link failed: ${detail}`,
+    );
+  }
+}
+
+function resolveVirtualCompilePath(compilePlan, tempDir, virtualPath) {
+  const relativePath = path.posix.relative(
+    compilePlan.workingDirectory,
+    virtualPath,
+  );
+  if (relativePath.startsWith("../")) {
+    throw new Error(
+      `Compile plan path "${virtualPath}" escapes working directory "${compilePlan.workingDirectory}".`,
+    );
+  }
+  return path.join(tempDir, relativePath);
+}
+
+async function compileWithSystemToolchain(compilePlan) {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "sdn-flow-compile-"));
+  try {
+    await ensureSystemCompilerAvailable("em++");
+    for (const file of compilePlan.sourceFiles) {
+      const destinationPath = resolveVirtualCompilePath(
+        compilePlan,
+        tempDir,
+        file.path,
+      );
+      await mkdir(path.dirname(destinationPath), { recursive: true });
+      await writeFile(destinationPath, file.content);
+    }
+    const mainSourcePath = resolveVirtualCompilePath(
+      compilePlan,
+      tempDir,
+      compilePlan.mainSourcePath,
+    );
+    const linkedDependencyPaths = compilePlan.linkedDependencySourceFiles.map((file) =>
+      resolveVirtualCompilePath(compilePlan, tempDir, file.path),
+    );
+    const outputPath = resolveVirtualCompilePath(
+      compilePlan,
+      tempDir,
+      compilePlan.outputPath,
+    );
+    await mkdir(path.dirname(outputPath), { recursive: true });
+    await runSystemCompiler("em++", [
+      ...compilePlan.flags,
+      mainSourcePath,
+      ...linkedDependencyPaths,
+      "-o",
+      outputPath,
+    ]);
+    return {
+      wasm: new Uint8Array(await readFile(outputPath)),
+      tempDir,
+    };
+  } catch (error) {
+    await rm(tempDir, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 function createLinkedDependencySourceFiles(dependencies = [], workingDirectory) {
@@ -282,6 +443,7 @@ export class EmceptionCompilerAdapter {
       manifestBuffer,
       dependencies,
     });
+    const runtimeTargets = decodeManifestRuntimeTargets(manifestBuffer);
     const generatedSource = await maybeCall(
       this.#sourceGenerator({
         program: normalizedProgram,
@@ -301,13 +463,26 @@ export class EmceptionCompilerAdapter {
     const workingDirectory = normalizeWorkingDirectory(
       metadata?.workingDirectory,
     );
-    const flags = Array.isArray(metadata?.flags) ? metadata.flags : this.#flags;
+    const threadModel = linkedDependenciesRequirePthreads(dependencies)
+      ? THREAD_MODEL_EMSCRIPTEN_PTHREADS
+      : THREAD_MODEL_SINGLE_THREAD;
+    const flags = buildCompileFlags(
+      Array.isArray(metadata?.flags) ? metadata.flags : this.#flags,
+      {
+        requiresPthreads: threadModel === THREAD_MODEL_EMSCRIPTEN_PTHREADS,
+      },
+    );
     const linkedDependencySourceFiles = createLinkedDependencySourceFiles(
       dependencies,
       workingDirectory,
     );
     const mainSourcePath = path.posix.join(workingDirectory, "main.cpp");
     const outputPath = path.posix.join(workingDirectory, `${outputName}.wasm`);
+    const toolchain = buildToolchainMetadata({
+      runtimeTargets,
+      flags,
+      threadModel,
+    });
     return {
       program: normalizedProgram,
       manifestBuffer,
@@ -317,8 +492,12 @@ export class EmceptionCompilerAdapter {
       sourceGeneratorModel,
       outputName,
       workingDirectory,
+      threadModel,
+      toolchain,
       flags,
       source,
+      mainSourcePath,
+      outputPath,
       linkedDependencySourceFiles,
       sourceFiles: [
         {
@@ -335,6 +514,39 @@ export class EmceptionCompilerAdapter {
 
   async compile({ program, metadata = null } = {}) {
     const compilePlan = await this.prepareCompile({ program, metadata });
+    if (compilePlan.toolchain?.kind === TOOLCHAIN_SYSTEM_EMSCRIPTEN) {
+      const systemResult = await compileWithSystemToolchain(compilePlan);
+      const requirements = summarizeProgramRequirements({
+        program: compilePlan.program,
+      });
+      return {
+        artifactId: `${compilePlan.program.programId}:${bytesToHex(
+          await sha256Bytes(systemResult.wasm),
+        ).slice(0, 16)}`,
+        programId: compilePlan.program.programId,
+        runtimeModel: compilePlan.runtimeModel,
+        sourceGeneratorModel: compilePlan.sourceGeneratorModel,
+        format: "application/wasm",
+        wasm: systemResult.wasm,
+        manifestBuffer: compilePlan.manifestBuffer,
+        runtimeExports: compilePlan.runtimeExports,
+        entrypoint: "main",
+        graphHash: bytesToHex(
+          await sha256Bytes(
+            new TextEncoder().encode(JSON.stringify(compilePlan.program)),
+          ),
+        ),
+        requiredCapabilities: requirements.capabilities,
+        pluginVersions: compilePlan.dependencies.map((dependency) => ({
+          pluginId: dependency.pluginId,
+          version: dependency.version,
+          sha256: dependency.sha256,
+        })),
+        schemaBindings: metadata?.schemaBindings ?? [],
+        abiVersion: 1,
+        compilePlan,
+      };
+    }
     if (!this.#emception) {
       throw new Error(
         "Artifact compilation requires an SDK emception session. Use prepareCompile() for preview-only C++ output.",

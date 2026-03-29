@@ -44,10 +44,15 @@ function normalizeGuestLink(guestLink = {}) {
     null,
   );
   const language = preferNonEmptyString(guestLink.language, null);
+  const threadModel = preferNonEmptyString(
+    guestLink.threadModel ?? guestLink.thread_model,
+    null,
+  );
   if (
     !objectBytes &&
     !symbolPrefix &&
     !language &&
+    !threadModel &&
     Object.keys(methodSymbols).length === 0
   ) {
     return null;
@@ -57,6 +62,7 @@ function normalizeGuestLink(guestLink = {}) {
     language,
     symbolPrefix,
     methodSymbols,
+    threadModel,
     objectBytes,
   };
 }

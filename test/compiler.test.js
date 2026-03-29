@@ -5,7 +5,10 @@ import fs from "node:fs/promises";
 import { WASI } from "node:wasi";
 
 import {
+  cleanupCompilation,
+  compileModuleFromSource,
   createSingleFileBundle,
+  encodePluginManifest,
   SDS_GUEST_LINK_METADATA_ENTRY_ID,
   SDS_GUEST_LINK_OBJECT_ENTRY_ID,
   SDS_GUEST_LINK_SECTION_NAME,
@@ -23,7 +26,11 @@ import {
   INVALID_INDEX,
 } from "../src/compiler/CppFlowSourceGenerator.js";
 import { SDK_EMCEPTION_SESSION_KIND } from "../src/compiler/sdkEmceptionSession.js";
-import { compileLinkedFlowArtifact } from "../test-support/linkedFlowArtifact.js";
+import {
+  compileLinkedFlowArtifact,
+  createLinkedFlowProgram,
+  createLinkedModuleManifest,
+} from "../test-support/linkedFlowArtifact.js";
 
 async function readJson(relativePath) {
   const url = new URL(relativePath, import.meta.url);
@@ -141,6 +148,7 @@ test("signed artifact catalog resolves guest-link metadata from bundled wasm", a
           format: "wasm-object",
           language: "cpp",
           symbolPrefix: "sdsguest_",
+          threadModel: "emscripten-pthreads",
           methodSymbols: {
             handle_frame: "sdsguest_handle_frame",
           },
@@ -181,8 +189,36 @@ test("signed artifact catalog resolves guest-link metadata from bundled wasm", a
     resolved.guestLink?.methodSymbols?.handle_frame,
     "sdsguest_handle_frame",
   );
+  assert.equal(resolved.guestLink?.threadModel, "emscripten-pthreads");
   assert.deepEqual(resolved.guestLink?.objectBytes, guestObjectBytes);
 });
+
+async function createThreadedLinkedDependencyArtifact() {
+  const manifest = createLinkedModuleManifest();
+  const moduleCompilation = await compileModuleFromSource({
+    manifest,
+    sourceCode: "int tick(void) { return 0; }\n",
+    language: "c",
+  });
+
+  return {
+    manifest,
+    moduleCompilation,
+    artifact: {
+      dependencyId: "dep-linked",
+      pluginId: manifest.pluginId,
+      version: manifest.version,
+      signature: "sig",
+      signerPublicKey: "pub",
+      wasm: moduleCompilation.wasmBytes,
+      manifestBuffer: encodePluginManifest(manifest),
+      guestLink: {
+        ...moduleCompilation.guestLink,
+        threadModel: "emscripten-pthreads",
+      },
+    },
+  };
+}
 
 test("cpp flow source generator request carries resolved dependency link symbols", async () => {
   const request = createGeneratorRequest({
@@ -312,6 +348,40 @@ test("emception compiler adapter prepares standalone compile plans with linked g
   assert.match(prepared.command, /_sdn_flow_get_runtime_descriptor/);
   assert.match(prepared.command, /_malloc/);
   assert.match(prepared.command, /_free/);
+});
+
+test("emception compiler adapter switches compile plans to system emscripten when linked dependencies require pthreads", async () => {
+  const { manifest, moduleCompilation, artifact } =
+    await createThreadedLinkedDependencyArtifact();
+  try {
+    const catalog = new SignedArtifactCatalog();
+    catalog.registerArtifact(artifact);
+    const program = createLinkedFlowProgram({
+      pluginId: manifest.pluginId,
+      version: manifest.version,
+    });
+    const compiler = new EmceptionCompilerAdapter({
+      artifactCatalog: catalog,
+      manifestBuilder: async ({ program: flowProgram, dependencies }) =>
+        buildDefaultFlowManifestBuffer({
+          program: flowProgram,
+          dependencies,
+          runtimeTargets: [RuntimeTarget.WASMEDGE],
+        }),
+    });
+
+    const prepared = await compiler.prepareCompile({ program });
+    assert.equal(prepared.threadModel, "emscripten-pthreads");
+    assert.equal(prepared.toolchain.kind, "system-emscripten");
+    assert.equal(prepared.toolchain.threadModel, "emscripten-pthreads");
+    assert.equal(
+      prepared.toolchain.wasmedgeDirectRuntimeStatus,
+      "unverified-pthread-artifact",
+    );
+    assert.match(prepared.command, /-pthread/);
+  } finally {
+    await cleanupCompilation(moduleCompilation);
+  }
 });
 
 test("emception compiler adapter compiles standalone flow wasm with a stub source generator", async () => {
@@ -502,6 +572,36 @@ test("emception compiler adapter compiles hosted server flows without emitting t
   } finally {
     await emception.removeDirectory(workingDirectory).catch(() => {});
     await emception.dispose().catch(() => {});
+  }
+});
+
+test("emception compiler adapter compiles pthread-linked flow artifacts with the system toolchain", async () => {
+  const { manifest, moduleCompilation, artifact: dependencyArtifact } =
+    await createThreadedLinkedDependencyArtifact();
+  try {
+    const catalog = new SignedArtifactCatalog();
+    catalog.registerArtifact(dependencyArtifact);
+    const program = createLinkedFlowProgram({
+      pluginId: manifest.pluginId,
+      version: manifest.version,
+    });
+    const compiler = new EmceptionCompilerAdapter({
+      artifactCatalog: catalog,
+      manifestBuilder: async ({ program: flowProgram, dependencies }) =>
+        buildDefaultFlowManifestBuffer({
+          program: flowProgram,
+          dependencies,
+          runtimeTargets: [RuntimeTarget.WASMEDGE],
+        }),
+    });
+
+    const artifact = await compiler.compile({ program });
+    assert.equal(WebAssembly.validate(artifact.wasm), true);
+    assert.equal(artifact.compilePlan.toolchain.kind, "system-emscripten");
+    assert.equal(artifact.compilePlan.threadModel, "emscripten-pthreads");
+    assert.match(artifact.compilePlan.command, /-pthread/);
+  } finally {
+    await cleanupCompilation(moduleCompilation);
   }
 });
 
