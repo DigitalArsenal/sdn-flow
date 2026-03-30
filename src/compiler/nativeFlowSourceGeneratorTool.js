@@ -1,6 +1,7 @@
-import { mkdirSync, statSync } from "node:fs";
+import { mkdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const PACKAGE_ROOT = fileURLToPath(new URL("../../", import.meta.url));
@@ -10,8 +11,11 @@ const NATIVE_SOURCE_PATH = fileURLToPath(
 const GENERATED_DIR = fileURLToPath(
   new URL("../../generated-tools/", import.meta.url),
 );
+const BUILD_LOCK_DIR = path.join(GENERATED_DIR, ".flow-source-generator.lock");
 const MODULE_PATH = path.join(GENERATED_DIR, "flow-source-generator.mjs");
 const WASM_PATH = path.join(GENERATED_DIR, "flow-source-generator.wasm");
+const BUILD_LOCK_POLL_MS = 50;
+const BUILD_LOCK_STALE_MS = 120_000;
 const EMXX_FLAGS = Object.freeze([
   "-std=c++20",
   "-O2",
@@ -32,11 +36,107 @@ function getMtimeMs(filePath) {
   }
 }
 
+function getSizeBytes(filePath) {
+  try {
+    return statSync(filePath).size;
+  } catch {
+    return 0;
+  }
+}
+
 function toolBuildIsCurrent() {
   const sourceTime = getMtimeMs(NATIVE_SOURCE_PATH);
   const moduleTime = getMtimeMs(MODULE_PATH);
   const wasmTime = getMtimeMs(WASM_PATH);
-  return moduleTime >= sourceTime && wasmTime >= sourceTime;
+  return (
+    moduleTime >= sourceTime &&
+    wasmTime >= sourceTime &&
+    getSizeBytes(MODULE_PATH) > 0 &&
+    getSizeBytes(WASM_PATH) > 0
+  );
+}
+
+function moveFileIntoPlace(sourcePath, targetPath) {
+  try {
+    renameSync(sourcePath, targetPath);
+  } catch (error) {
+    if (error?.code !== "EEXIST" && error?.code !== "EPERM") {
+      throw error;
+    }
+    rmSync(targetPath, { force: true });
+    renameSync(sourcePath, targetPath);
+  }
+}
+
+async function acquireBuildLock() {
+  mkdirSync(GENERATED_DIR, { recursive: true });
+  while (true) {
+    try {
+      mkdirSync(BUILD_LOCK_DIR);
+      return;
+    } catch (error) {
+      if (error?.code !== "EEXIST") {
+        throw error;
+      }
+      const lockAgeMs = Date.now() - getMtimeMs(BUILD_LOCK_DIR);
+      if (lockAgeMs > BUILD_LOCK_STALE_MS) {
+        rmSync(BUILD_LOCK_DIR, { recursive: true, force: true });
+        continue;
+      }
+      await delay(BUILD_LOCK_POLL_MS);
+    }
+  }
+}
+
+function releaseBuildLock() {
+  rmSync(BUILD_LOCK_DIR, { recursive: true, force: true });
+}
+
+function buildToolArtifacts() {
+  const uniqueSuffix = `${process.pid}-${Date.now()}-${Math.random()
+    .toString(16)
+    .slice(2)}`;
+  const tempModulePath = path.join(
+    GENERATED_DIR,
+    `flow-source-generator.${uniqueSuffix}.mjs`,
+  );
+  const tempWasmPath = path.join(
+    GENERATED_DIR,
+    `flow-source-generator.${uniqueSuffix}.wasm`,
+  );
+  try {
+    const result = spawnSync(
+      "em++",
+      [...EMXX_FLAGS, NATIVE_SOURCE_PATH, "-o", tempModulePath],
+      {
+        cwd: PACKAGE_ROOT,
+        encoding: "utf8",
+        maxBuffer: 16 * 1024 * 1024,
+      },
+    );
+    if (result.error) {
+      throw new Error(
+        `failed to run em++ for flow source generator: ${result.error.message}`,
+      );
+    }
+    if ((result.status ?? 1) !== 0) {
+      throw new Error(
+        `failed to build flow source generator wasm tool:\n${result.stdout ?? ""}${result.stderr ?? ""}`,
+      );
+    }
+    if (getSizeBytes(tempModulePath) <= 0 || getSizeBytes(tempWasmPath) <= 0) {
+      throw new Error("flow source generator build produced empty artifacts.");
+    }
+    moveFileIntoPlace(tempModulePath, MODULE_PATH);
+    moveFileIntoPlace(tempWasmPath, WASM_PATH);
+  } finally {
+    rmSync(tempModulePath, { force: true });
+    rmSync(tempWasmPath, { force: true });
+  }
+}
+
+function shouldRetryToolLoad(error) {
+  return /BufferSource argument is empty/i.test(String(error?.message ?? error));
 }
 
 function assertToolExists() {
@@ -61,33 +161,20 @@ export function getNativeFlowSourceGeneratorToolInfo() {
 export async function ensureNativeFlowSourceGeneratorTool({
   force = false,
 } = {}) {
-  mkdirSync(GENERATED_DIR, { recursive: true });
   if (!force && toolBuildIsCurrent()) {
     return getNativeFlowSourceGeneratorToolInfo();
   }
-
-  const result = spawnSync(
-    "em++",
-    [...EMXX_FLAGS, NATIVE_SOURCE_PATH, "-o", MODULE_PATH],
-    {
-      cwd: PACKAGE_ROOT,
-      encoding: "utf8",
-      maxBuffer: 16 * 1024 * 1024,
-    },
-  );
-  if (result.error) {
-    throw new Error(
-      `failed to run em++ for flow source generator: ${result.error.message}`,
-    );
+  await acquireBuildLock();
+  try {
+    if (!force && toolBuildIsCurrent()) {
+      return getNativeFlowSourceGeneratorToolInfo();
+    }
+    buildToolArtifacts();
+    assertToolExists();
+    return getNativeFlowSourceGeneratorToolInfo();
+  } finally {
+    releaseBuildLock();
   }
-  if ((result.status ?? 1) !== 0) {
-    throw new Error(
-      `failed to build flow source generator wasm tool:\n${result.stdout ?? ""}${result.stderr ?? ""}`,
-    );
-  }
-
-  assertToolExists();
-  return getNativeFlowSourceGeneratorToolInfo();
 }
 
 async function importToolModule(modulePath) {
@@ -96,21 +183,36 @@ async function importToolModule(modulePath) {
 }
 
 export async function runNativeFlowSourceGenerator(requestBytes, options = {}) {
-  const tool = await ensureNativeFlowSourceGeneratorTool(options);
-  const toolModule = await importToolModule(tool.modulePath);
   const stdout = [];
   const stderr = [];
-  const generator = await toolModule.default({
-    locateFile(file) {
-      return path.join(tool.generatedDir, file);
-    },
-    print(...args) {
-      stdout.push(args.join(" "));
-    },
-    printErr(...args) {
-      stderr.push(args.join(" "));
-    },
-  });
+  let tool = await ensureNativeFlowSourceGeneratorTool(options);
+  let generator = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const toolModule = await importToolModule(tool.modulePath);
+      generator = await toolModule.default({
+        locateFile(file) {
+          return path.join(tool.generatedDir, file);
+        },
+        print(...args) {
+          stdout.push(args.join(" "));
+        },
+        printErr(...args) {
+          stderr.push(args.join(" "));
+        },
+      });
+      break;
+    } catch (error) {
+      if (attempt > 0 || !shouldRetryToolLoad(error)) {
+        throw error;
+      }
+      stderr.push(String(error?.message ?? error));
+      tool = await ensureNativeFlowSourceGeneratorTool({
+        ...options,
+        force: true,
+      });
+    }
+  }
 
   generator.FS.writeFile("/request.bin", requestBytes);
   let exitError = null;

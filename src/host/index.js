@@ -84,6 +84,7 @@ export {
   resolveStandaloneFlowRuntimeInput,
   startStandaloneFlowRuntime,
 } from "./standaloneRuntime.js";
+export { createStandaloneFlowHarness } from "./standaloneFlowHarness.js";
 export {
   createCommandPackageManager,
   createNodeCommandRunner,
