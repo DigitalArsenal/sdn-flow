@@ -1,4 +1,4 @@
-import { mkdirSync, renameSync, rmSync, statSync } from "node:fs";
+import { mkdirSync, mkdtempSync, renameSync, rmSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -96,14 +96,11 @@ function buildToolArtifacts() {
   const uniqueSuffix = `${process.pid}-${Date.now()}-${Math.random()
     .toString(16)
     .slice(2)}`;
-  const tempModulePath = path.join(
-    GENERATED_DIR,
-    `flow-source-generator.${uniqueSuffix}.mjs`,
+  const tempDir = mkdtempSync(
+    path.join(GENERATED_DIR, `.flow-source-generator.${uniqueSuffix}.`),
   );
-  const tempWasmPath = path.join(
-    GENERATED_DIR,
-    `flow-source-generator.${uniqueSuffix}.wasm`,
-  );
+  const tempModulePath = path.join(tempDir, "flow-source-generator.mjs");
+  const tempWasmPath = path.join(tempDir, "flow-source-generator.wasm");
   try {
     const result = spawnSync(
       "em++",
@@ -130,8 +127,7 @@ function buildToolArtifacts() {
     moveFileIntoPlace(tempModulePath, MODULE_PATH);
     moveFileIntoPlace(tempWasmPath, WASM_PATH);
   } finally {
-    rmSync(tempModulePath, { force: true });
-    rmSync(tempWasmPath, { force: true });
+    rmSync(tempDir, { recursive: true, force: true });
   }
 }
 
